@@ -1,20 +1,32 @@
+// android/app/src/main/java/com/citytransportmanagementsystem/MainActivity.kt
 package com.citytransportmanagementsystem
 
+import android.os.Bundle
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate
-import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.fabricEnabled
+import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint
 import com.facebook.react.defaults.DefaultReactActivityDelegate
-import android.os.Bundle  // <- Required for gesture handler
 
 class MainActivity : ReactActivity() {
 
+    /**
+     * Returns the name of the main component registered from JavaScript.
+     * This is used to schedule rendering of the component.
+     */
     override fun getMainComponentName(): String = "CityTransportManagementSystem"
 
+    /**
+     * Returns the instance of the [ReactActivityDelegate]. We use [DefaultReactActivityDelegate]
+     * which allows you to enable New Architecture with a single boolean flags [fabricEnabled]
+     */
     override fun createReactActivityDelegate(): ReactActivityDelegate =
-        DefaultReactActivityDelegate(this, mainComponentName, fabricEnabled)
+        DefaultReactActivityDelegate(this, mainComponentName, DefaultNewArchitectureEntryPoint.fabricEnabled)
 
-    // Required for react-native-gesture-handler
+    /**
+     * Required for react-native-gesture-handler
+     * This must be overridden to handle gestures properly
+     */
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(null)
+        super.onCreate(null) // Pass null instead of savedInstanceState
     }
 }
