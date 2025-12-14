@@ -1,0 +1,4 @@
+D:/MyProjects/CityTransportManagementSystem/android/app/.cxx/Debug/1o6v4f5b/armeabi-v7a/CMakeFiles/_CMakeLTOTest-CXX/bin/CMakeFiles/foo.dir
+D:/MyProjects/CityTransportManagementSystem/android/app/.cxx/Debug/1o6v4f5b/armeabi-v7a/CMakeFiles/_CMakeLTOTest-CXX/bin/CMakeFiles/boo.dir
+D:/MyProjects/CityTransportManagementSystem/android/app/.cxx/Debug/1o6v4f5b/armeabi-v7a/CMakeFiles/_CMakeLTOTest-CXX/bin/CMakeFiles/edit_cache.dir
+D:/MyProjects/CityTransportManagementSystem/android/app/.cxx/Debug/1o6v4f5b/armeabi-v7a/CMakeFiles/_CMakeLTOTest-CXX/bin/CMakeFiles/rebuild_cache.dir
