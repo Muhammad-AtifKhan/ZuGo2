@@ -104,75 +104,55 @@ export default function OTPVerificationScreen({
     Alert.alert('OTP Sent', `New OTP sent to ${phone}`);
   };
 
-  const handleVerify = () => {
-    const otpString = otp.join('');
+ // OTPVerificationScreen.tsx me handleVerify function - SIMPLIFIED VERSION:
+ const handleVerify = () => {
+   const otpString = otp.join('');
 
-    if (otpString.length !== 6) {
-      Alert.alert('Error', 'Please enter 6-digit OTP');
-      return;
-    }
+   if (otpString.length !== 6) {
+     Alert.alert('Error', 'Please enter 6-digit OTP');
+     return;
+   }
 
-    setLoading(true);
+   setLoading(true);
 
-    // Simulate verification
-    setTimeout(() => {
-      setLoading(false);
+   // Simulate verification
+   setTimeout(() => {
+     setLoading(false);
 
-      if (role === 'password_reset') {
-        // For password reset
-        Alert.alert(
-          'Password Reset',
-          'Your password has been reset successfully!',
-          [
-            {
-              text: 'OK',
-              onPress: () => {
-                // Go back to login
-                navigation.reset({
-                  index: 0,
-                  routes: [{ name: 'Login' }],
-                });
-              },
-            },
-          ]
-        );
-      } else {
-        // For registration
-        const roleName = role.charAt(0).toUpperCase() + role.slice(1);
-
-        Alert.alert(
-          'Success',
-          `Account ${role === 'passenger' ? 'created' : 'registered'} successfully!\nWelcome ${roleName}!`,
-          [
-            {
-              text: 'Continue',
-              onPress: () => {
-                // Set user role if function available
-                if (setUserRole) {
-                  setUserRole(role as 'passenger' | 'transporter');
-                  console.log(`setUserRole called with: ${role}`);
-                }
-
-                // Determine route based on role
-                let routeName: 'Passenger' | 'Transporter' = 'Passenger';
-                if (role === 'transporter') {
-                  routeName = 'Transporter';
-                }
-
-                console.log(`Navigating to: ${routeName}`);
-
-                // Direct navigation to dashboard
-                navigation.reset({
-                  index: 0,
-                  routes: [{ name: routeName }],
-                });
-              },
-            },
-          ]
-        );
-      }
-    }, 1500);
-  };
+     if (role === 'password_reset') {
+       // For password reset
+       Alert.alert(
+         'Password Reset Successful!',
+         'Your password has been reset. You can now login with your new password.',
+         [
+           {
+             text: 'Go to Login',
+             onPress: () => {
+               navigation.reset({
+                 index: 0,
+                 routes: [{ name: 'Login' }],
+               });
+             },
+           },
+         ]
+       );
+     } else {
+       // For registration (existing code)
+       Alert.alert(
+         'Success! 🎉',
+         `Welcome ${role === 'passenger' ? 'Passenger' : 'Transporter'}!`,
+         [
+           {
+             text: 'Go to Dashboard',
+             onPress: () => {
+               // ... existing registration code
+             },
+           },
+         ]
+       );
+     }
+   }, 1500);
+ };
 
   const handleEditPhone = () => {
     navigation.goBack();

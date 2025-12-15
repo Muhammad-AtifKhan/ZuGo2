@@ -118,11 +118,7 @@ export default function LoginScreen({ setUserRole }: LoginScreenProps) {
 
   // Handle forgot password
   const handleForgotPassword = () => {
-    Alert.alert(
-      'Forgot Password',
-      'This feature will be available soon. For now, use demo login buttons.',
-      [{ text: 'OK' }]
-    );
+      navigation.navigate('ForgotPassword');
   };
 
   // Handle register

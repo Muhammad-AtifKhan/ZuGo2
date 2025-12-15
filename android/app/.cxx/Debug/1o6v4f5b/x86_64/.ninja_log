@@ -1,5 +1,5 @@
 # ninja log v5
-1	22	0	D:/MyProjects/CityTransportManagementSystem/android/app/.cxx/Debug/1o6v4f5b/x86_64/CMakeFiles/cmake.verify_globs	596bc3e6e2ba59fb
+1	28	0	D:/MyProjects/CityTransportManagementSystem/android/app/.cxx/Debug/1o6v4f5b/x86_64/CMakeFiles/cmake.verify_globs	596bc3e6e2ba59fb
 26859	42544	7874446081094863	rnscreens_autolinked_build/CMakeFiles/react_codegen_rnscreens.dir/5f342691a30ea2015c6fcc6d759f51d1/renderer/components/rnscreens/RNSSplitViewScreenShadowNode.cpp.o	8002356a173a40c4
 9235	23590	7874445892817248	safeareacontext_autolinked_build/CMakeFiles/react_codegen_safeareacontext.dir/352e6002fd54f4f5ea7ae1e1a7fbf5fb/react/renderer/components/safeareacontext/Props.cpp.o	78d34220dd70ee93
 8717	25092	7874445909297482	safeareacontext_autolinked_build/CMakeFiles/react_codegen_safeareacontext.dir/3008f75dbe5f6e0f5fae6042ef263b42/components/safeareacontext/ComponentDescriptors.cpp.o	5ba0a5b94444765a
@@ -57,4 +57,4 @@
 30682	50663	7874446164502639	rnscreens_autolinked_build/CMakeFiles/react_codegen_rnscreens.dir/939d7390e0ee1a9a52ef5d3f70b357b9/jni/react/renderer/components/rnscreens/EventEmitters.cpp.o	fed36011989e6f88
 51352	51640	7874446174708852	D:/MyProjects/CityTransportManagementSystem/android/app/build/intermediates/cxx/Debug/1o6v4f5b/obj/x86_64/libreact_codegen_rnscreens.so	4228c1983660f0b6
 44543	52746	7874446186327253	RNVectorIconsSpec_autolinked_build/CMakeFiles/react_codegen_RNVectorIconsSpec.dir/react/renderer/components/RNVectorIconsSpec/ShadowNodes.cpp.o	d21f56a6ddaf1d1a
-1	37	0	D:/MyProjects/CityTransportManagementSystem/android/app/.cxx/Debug/1o6v4f5b/x86_64/CMakeFiles/cmake.verify_globs	596bc3e6e2ba59fb
+4	68	0	D:/MyProjects/CityTransportManagementSystem/android/app/.cxx/Debug/1o6v4f5b/x86_64/CMakeFiles/cmake.verify_globs	596bc3e6e2ba59fb
