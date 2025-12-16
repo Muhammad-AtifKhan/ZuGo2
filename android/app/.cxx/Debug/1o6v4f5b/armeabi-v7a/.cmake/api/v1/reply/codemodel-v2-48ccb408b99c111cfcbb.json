@@ -150,49 +150,49 @@
 				{
 					"directoryIndex" : 0,
 					"id" : "appmodules::@6890427a1f51a3e7e1df",
-					"jsonFile" : "target-appmodules-Debug-2beaf737afb649332b6e.json",
+					"jsonFile" : "target-appmodules-Debug-09420d59c44ced675468.json",
 					"name" : "appmodules",
 					"projectIndex" : 0
 				},
 				{
 					"directoryIndex" : 5,
 					"id" : "react_codegen_RNVectorIconsSpec::@479809fae146501fd34d",
-					"jsonFile" : "target-react_codegen_RNVectorIconsSpec-Debug-634a573ae2076ce492b5.json",
+					"jsonFile" : "target-react_codegen_RNVectorIconsSpec-Debug-29805ff337c74554276d.json",
 					"name" : "react_codegen_RNVectorIconsSpec",
 					"projectIndex" : 0
 				},
 				{
 					"directoryIndex" : 1,
 					"id" : "react_codegen_rngesturehandler_codegen::@39f233abcd2c728bc6ec",
-					"jsonFile" : "target-react_codegen_rngesturehandler_codegen-Debug-238d5700b52701e41faa.json",
+					"jsonFile" : "target-react_codegen_rngesturehandler_codegen-Debug-63aa686221ef5b37ddc1.json",
 					"name" : "react_codegen_rngesturehandler_codegen",
 					"projectIndex" : 0
 				},
 				{
 					"directoryIndex" : 2,
 					"id" : "react_codegen_rnreanimated::@8afabad14bfffa3f8b9a",
-					"jsonFile" : "target-react_codegen_rnreanimated-Debug-d666c602fe20d87e388e.json",
+					"jsonFile" : "target-react_codegen_rnreanimated-Debug-537c69475cb5cb5fc8e9.json",
 					"name" : "react_codegen_rnreanimated",
 					"projectIndex" : 0
 				},
 				{
 					"directoryIndex" : 4,
 					"id" : "react_codegen_rnscreens::@25bcbd507e98d3a854ad",
-					"jsonFile" : "target-react_codegen_rnscreens-Debug-28b2dd69e0d023685441.json",
+					"jsonFile" : "target-react_codegen_rnscreens-Debug-047b8fdef76eea073a37.json",
 					"name" : "react_codegen_rnscreens",
 					"projectIndex" : 0
 				},
 				{
 					"directoryIndex" : 6,
 					"id" : "react_codegen_rnworklets::@68f58d84d4754f193387",
-					"jsonFile" : "target-react_codegen_rnworklets-Debug-6cb6544f7173d6e343d8.json",
+					"jsonFile" : "target-react_codegen_rnworklets-Debug-1b932fc55d89ce3ea6ed.json",
 					"name" : "react_codegen_rnworklets",
 					"projectIndex" : 0
 				},
 				{
 					"directoryIndex" : 3,
 					"id" : "react_codegen_safeareacontext::@7984cd80db47aa7b952a",
-					"jsonFile" : "target-react_codegen_safeareacontext-Debug-9c0d6ceec58a13c4d1e1.json",
+					"jsonFile" : "target-react_codegen_safeareacontext-Debug-5cc27f3a6311825ba264.json",
 					"name" : "react_codegen_safeareacontext",
 					"projectIndex" : 0
 				}
@@ -202,7 +202,7 @@
 	"kind" : "codemodel",
 	"paths" : 
 	{
-		"build" : "D:/MyProjects/CityTransportManagementSystem/android/app/.cxx/Debug/1o6v4f5b/x86_64",
+		"build" : "D:/MyProjects/CityTransportManagementSystem/android/app/.cxx/Debug/1o6v4f5b/armeabi-v7a",
 		"source" : "D:/MyProjects/CityTransportManagementSystem/node_modules/react-native/ReactAndroid/cmake-utils/default-app-setup"
 	},
 	"version" : 
