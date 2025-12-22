@@ -1,15 +1,12 @@
 import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { createNativeStackNavigator } from '@react-navigation/native-stack';
-
+import { createDrawerNavigator } from '@react-navigation/drawer';
 import { StyleSheet, Text, View, TouchableOpacity } from 'react-native';
 
 // Import screens
 import DashboardScreen from '../screens/driver/DashboardScreen';
-import RouteScreen from '../screens/driver/RouteScreen';
-
-// We'll create BoardingScreen below
 import BoardingScreen from '../screens/driver/BoardingScreen';
+import RouteScreen from '../screens/driver/RouteScreen';
 
 // Side Menu screens
 import ScheduleScreen from '../screens/driver/ScheduleScreen';
@@ -20,7 +17,7 @@ import ProfileScreen from '../screens/driver/ProfileScreen';
 import NotificationsScreen from '../screens/driver/NotificationsScreen';
 
 const Tab = createBottomTabNavigator();
-const Stack = createNativeStackNavigator();
+const Drawer = createDrawerNavigator();
 
 // Simple tab bar icon component
 const TabIcon = ({ focused, title }: { focused: boolean; title: string }) => {
@@ -30,7 +27,7 @@ const TabIcon = ({ focused, title }: { focused: boolean; title: string }) => {
         {getIconEmoji(title)}
       </Text>
       <Text style={[styles.tabLabel, focused ? styles.tabLabelActive : styles.tabLabelInactive]}>
-        {title}
+        {getShortName(title)}
       </Text>
     </View>
   );
@@ -45,72 +42,20 @@ const getIconEmoji = (title: string) => {
   }
 };
 
-// Side Menu Navigator
-export const SideMenuStack = () => {
-  return (
-    <Stack.Navigator
-      screenOptions={{
-        headerStyle: styles.header,
-        headerTintColor: '#1A237E',
-        headerTitleStyle: styles.headerTitle,
-      }}
-    >
-      <Stack.Screen
-        name="Schedule"
-        component={ScheduleScreen}
-        options={{ title: '📅 My Schedule' }}
-      />
-      <Stack.Screen
-        name="VehicleCheck"
-        component={VehicleCheckScreen}
-        options={{ title: '🔧 Vehicle Check' }}
-      />
-      <Stack.Screen
-        name="Earnings"
-        component={EarningsScreen}
-        options={{ title: '💰 My Earnings' }}
-      />
-      <Stack.Screen
-        name="Emergency"
-        component={EmergencyScreen}
-        options={{ title: '🆘 Emergency' }}
-      />
-      <Stack.Screen
-        name="Profile"
-        component={ProfileScreen}
-        options={{ title: '👤 My Profile' }}
-      />
-      <Stack.Screen
-        name="Notifications"
-        component={NotificationsScreen}
-        options={{ title: '🔔 Notifications' }}
-      />
-    </Stack.Navigator>
-  );
+const getShortName = (title: string) => {
+  switch (title) {
+    case 'Dashboard': return 'Dashboard';
+    case 'Boarding': return 'Boarding';
+    case 'Route': return 'Route';
+    default: return title;
+  }
 };
 
-// Custom header with hamburger menu
-const CustomHeader = ({ navigation }: any) => {
-  const openSideMenu = () => {
-    // We'll use a simple navigation to Schedule as entry point
-    navigation.navigate('Schedule');
-  };
-
-  return (
-    <View style={styles.headerContainer}>
-      <TouchableOpacity onPress={openSideMenu} style={styles.menuButton}>
-        <Text style={styles.menuIcon}>☰</Text>
-      </TouchableOpacity>
-      <Text style={styles.headerTitleText}>Driver App</Text>
-      <View style={styles.headerRight} />
-    </View>
-  );
-};
-
-const DriverNavigator = () => {
+// Main Tab Navigator
+const DriverTabs = () => {
   return (
     <Tab.Navigator
-      screenOptions={({ route, navigation }) => ({
+      screenOptions={({ route }) => ({
         tabBarIcon: ({ focused }) => {
           return <TabIcon focused={focused} title={route.name} />;
         },
@@ -119,25 +64,155 @@ const DriverNavigator = () => {
         headerTintColor: '#1A237E',
         headerTitleStyle: styles.headerTitle,
         tabBarShowLabel: false,
-        header: () => <CustomHeader navigation={navigation} />,
       })}
     >
       <Tab.Screen
         name="Dashboard"
         component={DashboardScreen}
-        options={{ title: 'Driver Dashboard' }}
+        options={{
+          title: 'Driver Dashboard',
+          headerShown: false, // Custom header دکھائیں گے
+        }}
       />
       <Tab.Screen
         name="Boarding"
         component={BoardingScreen}
-        options={{ title: 'Passenger Boarding' }}
+        options={{
+          title: 'Passenger Boarding',
+          headerShown: false,
+        }}
       />
       <Tab.Screen
         name="Route"
         component={RouteScreen}
-        options={{ title: 'Route Management' }}
+        options={{
+          title: 'Route Management',
+          headerShown: false,
+        }}
       />
     </Tab.Navigator>
+  );
+};
+
+// Custom Drawer Content
+const CustomDrawerContent = (props: any) => {
+  const { navigation } = props;
+
+  const drawerItems = [
+    { name: 'Main', label: '🏠 Main Dashboard', screen: 'Main' },
+    { name: 'Schedule', label: '📅 My Schedule', screen: 'Schedule' },
+    { name: 'VehicleCheck', label: '🔧 Vehicle Check', screen: 'VehicleCheck' },
+    { name: 'Earnings', label: '💰 My Earnings', screen: 'Earnings' },
+    { name: 'Emergency', label: '🆘 Emergency', screen: 'Emergency' },
+    { name: 'Profile', label: '👤 My Profile', screen: 'Profile' },
+    { name: 'Notifications', label: '🔔 Notifications', screen: 'Notifications' },
+  ];
+
+  return (
+    <View style={styles.drawerContainer}>
+      <View style={styles.drawerHeader}>
+        <Text style={styles.drawerTitle}>Driver App</Text>
+        <Text style={styles.drawerSubtitle}>Welcome, Driver Ali!</Text>
+      </View>
+
+      <View style={styles.drawerItems}>
+        {drawerItems.map((item) => (
+          <TouchableOpacity
+            key={item.name}
+            style={styles.drawerItem}
+            onPress={() => {
+              if (item.name === 'Main') {
+                // Main tabs پر واپس جائیں
+                navigation.navigate('Main', { screen: 'Dashboard' });
+              } else {
+                navigation.navigate(item.screen);
+              }
+              navigation.closeDrawer();
+            }}
+          >
+            <Text style={styles.drawerItemText}>{item.label}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      <View style={styles.drawerFooter}>
+        <TouchableOpacity
+          style={styles.logoutButton}
+          onPress={() => {
+            // Logout logic here
+            navigation.closeDrawer();
+          }}
+        >
+          <Text style={styles.logoutText}>🚪 Logout</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+};
+
+// Main Driver Navigator with Drawer
+const DriverNavigator = () => {
+  return (
+    <Drawer.Navigator
+      drawerContent={(props) => <CustomDrawerContent {...props} />}
+      screenOptions={{
+        drawerStyle: {
+          backgroundColor: '#FFFFFF',
+          width: 280,
+        },
+        headerShown: false,
+      }}
+    >
+      <Drawer.Screen
+        name="Main"
+        component={DriverTabs}
+        options={{
+          drawerLabel: '🏠 Main Dashboard',
+        }}
+      />
+      <Drawer.Screen
+        name="Schedule"
+        component={ScheduleScreen}
+        options={{
+          drawerLabel: '📅 My Schedule',
+        }}
+      />
+      <Drawer.Screen
+        name="VehicleCheck"
+        component={VehicleCheckScreen}
+        options={{
+          drawerLabel: '🔧 Vehicle Check',
+        }}
+      />
+      <Drawer.Screen
+        name="Earnings"
+        component={EarningsScreen}
+        options={{
+          drawerLabel: '💰 My Earnings',
+        }}
+      />
+      <Drawer.Screen
+        name="Emergency"
+        component={EmergencyScreen}
+        options={{
+          drawerLabel: '🆘 Emergency',
+        }}
+      />
+      <Drawer.Screen
+        name="Profile"
+        component={ProfileScreen}
+        options={{
+          drawerLabel: '👤 My Profile',
+        }}
+      />
+      <Drawer.Screen
+        name="Notifications"
+        component={NotificationsScreen}
+        options={{
+          drawerLabel: '🔔 Notifications',
+        }}
+      />
+    </Drawer.Navigator>
   );
 };
 
@@ -186,33 +261,58 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 18,
   },
-  headerContainer: {
+  drawerContainer: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+  },
+  drawerHeader: {
     backgroundColor: '#4A90E2',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 15,
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    paddingHorizontal: 20,
+    paddingVertical: 30,
+    marginBottom: 20,
   },
-  menuButton: {
-    padding: 8,
-  },
-  menuIcon: {
+  drawerTitle: {
     fontSize: 24,
-    color: '#FFFFFF',
-  },
-  headerTitleText: {
-    fontSize: 18,
     fontWeight: 'bold',
     color: '#FFFFFF',
+    marginBottom: 5,
   },
-  headerRight: {
-    width: 40,
+  drawerSubtitle: {
+    fontSize: 14,
+    color: '#FFFFFF',
+    opacity: 0.9,
+  },
+  drawerItems: {
+    flex: 1,
+    paddingHorizontal: 15,
+  },
+  drawerItem: {
+    paddingVertical: 15,
+    paddingHorizontal: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  drawerItemText: {
+    fontSize: 16,
+    color: '#333333',
+    fontWeight: '500',
+  },
+  drawerFooter: {
+    padding: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#F0F0F0',
+  },
+  logoutButton: {
+    backgroundColor: '#FF3B30',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  logoutText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
 

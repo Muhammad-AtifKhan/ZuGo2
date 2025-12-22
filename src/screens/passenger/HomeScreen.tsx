@@ -24,11 +24,38 @@ const HomeScreen = () => {
   const [travelDate, setTravelDate] = useState(new Date());
   const [travelTime, setTravelTime] = useState('08:00 AM');
 
-  // Quick bookings - Dummy data
+  // Quick bookings - Now with actual route information
   const quickBookings = [
-    { id: '1', name: 'Home → Office', time: '08:00 AM' },
-    { id: '2', name: 'University → Mall', time: '05:00 PM' },
-    { id: '3', name: 'Airport → City Center', time: 'Any Time' },
+    {
+      id: '1',
+      name: 'Home → Office',
+      time: '08:00 AM',
+      from: 'Home',
+      to: 'Office',
+      routeId: 'RT-001',
+      busNumber: 'B-101',
+      fare: '$5'
+    },
+    {
+      id: '2',
+      name: 'University → Mall',
+      time: '05:00 PM',
+      from: 'University',
+      to: 'Shopping Mall',
+      routeId: 'RT-002',
+      busNumber: 'B-202',
+      fare: '$7'
+    },
+    {
+      id: '3',
+      name: 'Airport → City Center',
+      time: 'Any Time',
+      from: 'International Airport',
+      to: 'City Center',
+      routeId: 'RT-003',
+      busNumber: 'B-303',
+      fare: '$12'
+    },
   ];
 
   // Popular routes - Dummy data
@@ -72,12 +99,38 @@ const HomeScreen = () => {
   };
 
   const handleQuickBook = (route: any) => {
+    // Navigate to booking screen with route details
     navigation.navigate('SearchResults', {
       from: route.from,
       to: route.to,
       date: new Date().toLocaleDateString(),
-      time: route.departureTime || 'Anytime',
-      routeId: route.id,
+      time: route.departureTime || route.time || 'Anytime',
+      routeId: route.id || route.routeId,
+      busNumber: route.busNumber,
+      fare: route.fare
+    });
+  };
+
+  const handleQuickBookingPress = (booking: any) => {
+    // Set the locations for quick booking
+    setFromLocation(booking.from);
+    setToLocation(booking.to);
+
+    // If there's a specific time, set it
+    if (booking.time !== 'Any Time') {
+      setTravelTime(booking.time);
+    }
+
+    // Navigate to search results with booking details
+    navigation.navigate('SearchResults', {
+      from: booking.from,
+      to: booking.to,
+      date: new Date().toLocaleDateString(),
+      time: booking.time !== 'Any Time' ? booking.time : 'Anytime',
+      routeId: booking.routeId,
+      busNumber: booking.busNumber,
+      fare: booking.fare,
+      isQuickBooking: true
     });
   };
 
@@ -175,10 +228,14 @@ const HomeScreen = () => {
               <TouchableOpacity
                 key={item.id}
                 style={styles.quickBookingCard}
-                onPress={() => Alert.alert('Quick Book', `Booking ${item.name}`)}
+                onPress={() => handleQuickBookingPress(item)}
               >
+                <View style={styles.quickBookingIcon}>
+                  <Icon name="directions-bus" size={24} color="#4A90E2" />
+                </View>
                 <Text style={styles.quickBookingName}>{item.name}</Text>
                 <Text style={styles.quickBookingTime}>{item.time}</Text>
+                <Text style={styles.quickBookingFare}>{item.fare}</Text>
               </TouchableOpacity>
             ))}
           </View>
@@ -389,6 +446,15 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 2,
   },
+  quickBookingIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#F0F7FF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
   quickBookingName: {
     fontSize: 14,
     fontWeight: '600',
@@ -400,6 +466,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#4A90E2',
     fontWeight: '500',
+    marginBottom: 4,
+  },
+  quickBookingFare: {
+    fontSize: 14,
+    color: '#2E7D32',
+    fontWeight: 'bold',
   },
   routeCard: {
     backgroundColor: '#FFF',

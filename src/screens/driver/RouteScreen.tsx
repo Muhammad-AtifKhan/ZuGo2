@@ -10,8 +10,26 @@ import {
   Alert,
   Dimensions,
 } from 'react-native';
+import { DrawerNavigationProp } from '@react-navigation/drawer';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
+// Navigation types
+type RootDrawerParamList = {
+  Main: undefined;
+  Schedule: undefined;
+  VehicleCheck: undefined;
+  Earnings: undefined;
+  Emergency: undefined;
+  Profile: undefined;
+  Notifications: undefined;
+  Boarding: undefined;
+  Route: undefined;
+};
+
+interface RouteScreenProps {
+  navigation: DrawerNavigationProp<RootDrawerParamList, 'Route'>;
+}
 
 interface Stop {
   id: string;
@@ -23,7 +41,7 @@ interface Stop {
   passengerCount: number;
 }
 
-const RouteScreen: React.FC = () => {
+const RouteScreen: React.FC<RouteScreenProps> = ({ navigation }) => {
   const [currentStopIndex, setCurrentStopIndex] = useState(2); // Stop 3 is current
 
   // Mock route data
@@ -91,21 +109,9 @@ const RouteScreen: React.FC = () => {
     }
   };
 
-  const handleSOS = () => {
-    Alert.alert(
-      '🚨 EMERGENCY ALERT',
-      'Are you sure you want to send an SOS alert? Your location will be shared with emergency contacts.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'SEND SOS',
-          style: 'destructive',
-          onPress: () => {
-            Alert.alert('SOS Sent', 'Emergency services have been notified. Help is on the way.');
-          }
-        }
-      ]
-    );
+  const handleEmergency = () => {
+    // Direct navigation to Emergency screen
+    navigation.navigate('Emergency');
   };
 
   const renderStopItem = (stop: Stop) => {
@@ -234,11 +240,6 @@ const RouteScreen: React.FC = () => {
               </View>
             </View>
           </View>
-
-          {/* SOS Button (Always visible) */}
-          <TouchableOpacity style={styles.sosButton} onPress={handleSOS}>
-            <Text style={styles.sosButtonText}>🆘 SOS</Text>
-          </TouchableOpacity>
         </View>
 
         {/* Current Stop Section */}
@@ -351,6 +352,18 @@ const RouteScreen: React.FC = () => {
           </View>
         </View>
       </ScrollView>
+
+      {/* Floating Emergency Button (Fixed Position) */}
+      <TouchableOpacity
+        style={styles.floatingEmergencyButton}
+        onPress={handleEmergency}
+        activeOpacity={0.8}
+      >
+        <View style={styles.emergencyButtonInner}>
+          <Text style={styles.emergencyButtonEmoji}>🚨</Text>
+          <Text style={styles.emergencyButtonText}>EMERGENCY</Text>
+        </View>
+      </TouchableOpacity>
     </SafeAreaView>
   );
 };
@@ -390,7 +403,6 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   mapContainer: {
-    position: 'relative',
     margin: 16,
   },
   mapPlaceholder: {
@@ -475,27 +487,6 @@ const styles = StyleSheet.create({
   legendText: {
     fontSize: 12,
     color: '#666666',
-  },
-  sosButton: {
-    position: 'absolute',
-    bottom: -20,
-    right: 20,
-    backgroundColor: '#F44336',
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  sosButtonText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: 'bold',
   },
   currentStopSection: {
     marginHorizontal: 16,
@@ -664,7 +655,7 @@ const styles = StyleSheet.create({
   },
   progressSection: {
     marginHorizontal: 16,
-    marginBottom: 32,
+    marginBottom: 120, // Extra space for floating button
   },
   progressCard: {
     backgroundColor: '#FFFFFF',
@@ -733,6 +724,40 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#666666',
     textAlign: 'center',
+  },
+  // Floating Emergency Button Styles
+  floatingEmergencyButton: {
+    position: 'absolute',
+    bottom: 30,
+    right: 20,
+    backgroundColor: '#F44336',
+    paddingVertical: 15,
+    paddingHorizontal: 25,
+    borderRadius: 30,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 10,
+    zIndex: 1000,
+    flexDirection: 'row',
+    minWidth: 140,
+  },
+  emergencyButtonInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emergencyButtonEmoji: {
+    fontSize: 24,
+    marginRight: 10,
+  },
+  emergencyButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
 });
 

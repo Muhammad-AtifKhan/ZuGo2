@@ -1,4 +1,5 @@
-// src/navigation/RootNavigator.tsx - SIMPLE VERSION
+// src/navigation/RootNavigator.tsx - UPDATED VERSION
+import 'react-native-gesture-handler'; // یہ پہلی لائن میں ہونی چاہیے
 import React, { useState, useEffect } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -18,7 +19,7 @@ export type RootStackParamList = {
   Transporter: undefined;
 };
 
-const Stack = createNativeStackNavigator<RootStackParamList>();
+const Stack = createNativeStackNavigator<RootStackParamList>(); // یہ تبدیل کریں
 
 interface RootNavigatorProps {
   userRole: 'passenger' | 'driver' | 'transporter' | null;

@@ -44,7 +44,9 @@ endif()
 
 if(NOT CMAKE_INSTALL_LOCAL_ONLY)
   # Include the install script for each subdirectory.
+  include("D:/MyProjects/CityTransportManagementSystem/android/app/.cxx/Debug/1o6v4f5b/x86/RNDateTimePickerCGen_autolinked_build/cmake_install.cmake")
   include("D:/MyProjects/CityTransportManagementSystem/android/app/.cxx/Debug/1o6v4f5b/x86/rngesturehandler_codegen_autolinked_build/cmake_install.cmake")
+  include("D:/MyProjects/CityTransportManagementSystem/android/app/.cxx/Debug/1o6v4f5b/x86/RNImagePickerSpec_autolinked_build/cmake_install.cmake")
   include("D:/MyProjects/CityTransportManagementSystem/android/app/.cxx/Debug/1o6v4f5b/x86/rnreanimated_autolinked_build/cmake_install.cmake")
   include("D:/MyProjects/CityTransportManagementSystem/android/app/.cxx/Debug/1o6v4f5b/x86/safeareacontext_autolinked_build/cmake_install.cmake")
   include("D:/MyProjects/CityTransportManagementSystem/android/app/.cxx/Debug/1o6v4f5b/x86/rnscreens_autolinked_build/cmake_install.cmake")

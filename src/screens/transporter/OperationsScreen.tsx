@@ -3,7 +3,6 @@ import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
   TouchableOpacity,
   SafeAreaView,
   Modal,
@@ -11,9 +10,10 @@ import {
   Alert,
   FlatList,
 } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 
-// Mock data for routes
-const mockRoutes = [
+// Initial mock data for routes
+const initialMockRoutes = [
   { id: '1', code: 'RT-001', name: 'Downtown Express', distance: '15km', duration: '45min', stops: 10, fare: 50 },
   { id: '2', code: 'RT-002', name: 'University Shuttle', distance: '12km', duration: '35min', stops: 8, fare: 40 },
   { id: '3', code: 'RT-003', name: 'Mall Route', distance: '20km', duration: '60min', stops: 15, fare: 60 },
@@ -113,8 +113,8 @@ const mockTrips = [
 const daysOfWeek = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 const OperationsScreen = () => {
+  const navigation = useNavigation();
   const [activeTab, setActiveTab] = useState('schedule'); // schedule, routes, today
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [scheduleModalVisible, setScheduleModalVisible] = useState(false);
   const [routeModalVisible, setRouteModalVisible] = useState(false);
   const [newTrip, setNewTrip] = useState({
@@ -132,7 +132,142 @@ const OperationsScreen = () => {
     stops: '',
     fare: '',
   });
+  // 🔧 FIX: Changed from 'routes' to 'routeList' to avoid conflict with React Navigation prop
+  const [routeList, setRouteList] = useState(initialMockRoutes);
   const [selectedDays, setSelectedDays] = useState<string[]>(['Mon', 'Tue', 'Wed', 'Thu', 'Fri']);
+
+  // Schedule Trip button handler - Navigates to ScheduleTripScreen
+  const handleScheduleTrip = () => {
+    navigation.navigate('ScheduleTripScreen', {
+      mode: 'add',
+      onSave: (tripData: any) => {
+        Alert.alert('Success', 'Trip scheduled successfully');
+      }
+    });
+  };
+
+  // Create New Route button handler - Opens modal
+  const handleCreateRoute = () => {
+    setRouteModalVisible(true);
+  };
+
+  // Add New Route function
+  const handleAddRoute = () => {
+    if (!newRoute.code || !newRoute.name || !newRoute.distance || !newRoute.duration || !newRoute.stops || !newRoute.fare) {
+      Alert.alert('Error', 'Please fill all fields');
+      return;
+    }
+
+    // Check if route code already exists
+    // 🔧 FIX: Changed from routes to routeList
+    const routeExists = routeList.some(route => route.code === newRoute.code.toUpperCase());
+    if (routeExists) {
+      Alert.alert('Error', `Route code ${newRoute.code.toUpperCase()} already exists`);
+      return;
+    }
+
+    const newRouteObj = {
+      id: (routeList.length + 1).toString(),
+      code: newRoute.code.toUpperCase(),
+      name: newRoute.name,
+      distance: newRoute.distance,
+      duration: newRoute.duration,
+      stops: parseInt(newRoute.stops) || 0,
+      fare: parseInt(newRoute.fare) || 0,
+    };
+
+    // 🔧 FIX: Changed from routes to routeList
+    const updatedRoutes = [...routeList, newRouteObj];
+    setRouteList(updatedRoutes);
+
+    Alert.alert(
+      'Success',
+      `Route ${newRoute.code.toUpperCase()} added successfully!\n\nWould you like to schedule a trip with this route?`,
+      [
+        {
+          text: 'Later',
+          onPress: () => {
+            setRouteModalVisible(false);
+            setNewRoute({ code: '', name: '', distance: '', duration: '', stops: '', fare: '' });
+          }
+        },
+        {
+          text: 'Schedule Now',
+          onPress: () => {
+            setRouteModalVisible(false);
+            setNewRoute({ code: '', name: '', distance: '', duration: '', stops: '', fare: '' });
+            // Pre-select this route in schedule modal
+            setNewTrip({...newTrip, route: newRouteObj.code});
+            setScheduleModalVisible(true);
+          }
+        }
+      ]
+    );
+  };
+
+  // Edit Trip handler - Navigates to ScheduleTripScreen in edit mode
+  const handleEditTrip = (trip: any) => {
+    navigation.navigate('ScheduleTripScreen', {
+      mode: 'edit',
+      trip: trip,
+      onSave: (updatedTripData: any) => {
+        Alert.alert('Success', 'Trip updated successfully');
+      }
+    });
+  };
+
+  // Track Trip handler
+  const handleTrackTrip = (trip: any) => {
+    Alert.alert(
+      'Track Trip',
+      `Track ${trip.bus} on ${trip.routeName}`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Live Tracking', onPress: () => {
+          Alert.alert('Live Tracking', `Tracking ${trip.bus}...`);
+        }}
+      ]
+    );
+  };
+
+  // Cancel Trip handler
+  const handleCancelTrip = (trip: any) => {
+    Alert.alert(
+      'Cancel Trip',
+      `Are you sure you want to cancel ${trip.routeCode}?`,
+      [
+        { text: 'No', style: 'cancel' },
+        { text: 'Yes, Cancel', style: 'destructive', onPress: () => {
+          Alert.alert('Cancelled', `Trip ${trip.routeCode} has been cancelled`);
+        }}
+      ]
+    );
+  };
+
+  // Use Route handler - Navigates to ScheduleTripScreen with route pre-selected
+  const handleUseRoute = (route: any) => {
+    navigation.navigate('ScheduleTripScreen', {
+      mode: 'add',
+      preSelectedRoute: route.code,
+      onSave: (tripData: any) => {
+        Alert.alert('Success', 'Trip scheduled successfully');
+      }
+    });
+  };
+
+  // View Trip Details handler
+  const handleViewTripDetails = (trip: any) => {
+    Alert.alert(
+      'Trip Details',
+      `Details for ${trip.routeCode}`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'View Full Details', onPress: () => {
+          Alert.alert('Coming Soon', 'Trip details screen coming soon');
+        }}
+      ]
+    );
+  };
 
   // Filter trips based on status
   const todayTrips = mockTrips.filter(trip =>
@@ -172,7 +307,8 @@ const OperationsScreen = () => {
     }
   };
 
-  const handleScheduleTrip = () => {
+  // Local function for scheduling trip (modal fallback)
+  const handleScheduleTripLocal = () => {
     if (!newTrip.route || !newTrip.bus || !newTrip.driver || !newTrip.departureTime || newTrip.days.length === 0) {
       Alert.alert('Error', 'Please fill all fields and select at least one day');
       return;
@@ -184,17 +320,6 @@ const OperationsScreen = () => {
     setSelectedDays(['Mon', 'Tue', 'Wed', 'Thu', 'Fri']);
   };
 
-  const handleCreateRoute = () => {
-    if (!newRoute.code || !newRoute.name || !newRoute.distance || !newRoute.duration || !newRoute.stops || !newRoute.fare) {
-      Alert.alert('Error', 'Please fill all fields');
-      return;
-    }
-
-    Alert.alert('Success', 'Route created successfully');
-    setNewRoute({ code: '', name: '', distance: '', duration: '', stops: '', fare: '' });
-    setRouteModalVisible(false);
-  };
-
   const toggleDaySelection = (day: string) => {
     if (selectedDays.includes(day)) {
       setSelectedDays(selectedDays.filter(d => d !== day));
@@ -203,16 +328,21 @@ const OperationsScreen = () => {
     }
   };
 
-  const renderTripCard = (trip: any) => (
-    <View key={trip.id} style={styles.tripCard}>
+  // Render Trip Card
+  const renderTripCard = ({ item }: { item: any }) => (
+    <TouchableOpacity
+      style={styles.tripCard}
+      onPress={() => handleViewTripDetails(item)}
+      activeOpacity={0.7}
+    >
       <View style={styles.tripHeader}>
         <View>
-          <Text style={styles.tripRoute}>{trip.routeName}</Text>
-          <Text style={styles.tripCode}>{trip.routeCode}</Text>
+          <Text style={styles.tripRoute}>{item.routeName}</Text>
+          <Text style={styles.tripCode}>{item.routeCode}</Text>
         </View>
-        <View style={[styles.statusBadge, { backgroundColor: getStatusColor(trip.status) }]}>
+        <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) }]}>
           <Text style={styles.statusText}>
-            {getStatusIcon(trip.status)} {trip.status.toUpperCase()}
+            {getStatusIcon(item.status)} {item.status.toUpperCase()}
           </Text>
         </View>
       </View>
@@ -220,35 +350,35 @@ const OperationsScreen = () => {
       <View style={styles.tripDetails}>
         <View style={styles.detailRow}>
           <Text style={styles.detailLabel}>🚌 Bus:</Text>
-          <Text style={styles.detailValue}>{trip.bus}</Text>
+          <Text style={styles.detailValue}>{item.bus}</Text>
         </View>
         <View style={styles.detailRow}>
           <Text style={styles.detailLabel}>👤 Driver:</Text>
-          <Text style={styles.detailValue}>{trip.driver}</Text>
+          <Text style={styles.detailValue}>{item.driver}</Text>
         </View>
         <View style={styles.detailRow}>
           <Text style={styles.detailLabel}>⏰ Time:</Text>
-          <Text style={styles.detailValue}>{trip.departureTime} - {trip.arrivalTime}</Text>
+          <Text style={styles.detailValue}>{item.departureTime} - {item.arrivalTime}</Text>
         </View>
         <View style={styles.detailRow}>
           <Text style={styles.detailLabel}>📅 Days:</Text>
-          <Text style={styles.detailValue}>{trip.days.join(', ')}</Text>
+          <Text style={styles.detailValue}>{item.days.join(', ')}</Text>
         </View>
       </View>
 
       <View style={styles.tripFooter}>
         <View style={styles.footerItem}>
           <Text style={styles.footerLabel}>Passengers</Text>
-          <Text style={styles.footerValue}>{trip.passengers}</Text>
+          <Text style={styles.footerValue}>{item.passengers}</Text>
         </View>
         <View style={styles.footerItem}>
           <Text style={styles.footerLabel}>Revenue</Text>
-          <Text style={styles.footerValue}>₹{trip.revenue}</Text>
+          <Text style={styles.footerValue}>₹{item.revenue}</Text>
         </View>
         <View style={styles.footerItem}>
           <Text style={styles.footerLabel}>Status</Text>
-          <Text style={[styles.footerValue, { color: getStatusColor(trip.status) }]}>
-            {trip.status}
+          <Text style={[styles.footerValue, { color: getStatusColor(item.status) }]}>
+            {item.status}
           </Text>
         </View>
       </View>
@@ -256,57 +386,200 @@ const OperationsScreen = () => {
       <View style={styles.tripActions}>
         <TouchableOpacity
           style={styles.actionButton}
-          onPress={() => Alert.alert('Edit Trip', `Edit ${trip.routeCode}`)}
+          onPress={(e) => {
+            e.stopPropagation(); // Prevent parent onPress from firing
+            handleEditTrip(item);
+          }}
         >
           <Text style={styles.actionButtonText}>✏️ Edit</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={styles.actionButton}
-          onPress={() => Alert.alert('Cancel Trip', `Cancel ${trip.routeCode}?`)}
+          onPress={(e) => {
+            e.stopPropagation(); // Prevent parent onPress from firing
+            handleCancelTrip(item);
+          }}
         >
           <Text style={styles.actionButtonText}>❌ Cancel</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={styles.actionButton}
-          onPress={() => Alert.alert('Track', `Track ${trip.bus}`)}
+          onPress={(e) => {
+            e.stopPropagation(); // Prevent parent onPress from firing
+            handleTrackTrip(item);
+          }}
         >
           <Text style={styles.actionButtonText}>📍 Track</Text>
         </TouchableOpacity>
       </View>
-    </View>
+    </TouchableOpacity>
   );
 
-  const renderRouteCard = (route: any) => (
-    <View key={route.id} style={styles.routeCard}>
+  // Render Route Card
+  const renderRouteCard = ({ item }: { item: any }) => (
+    <View style={styles.routeCard}>
       <View style={styles.routeHeader}>
-        <Text style={styles.routeCode}>{route.code}</Text>
-        <Text style={styles.routeFare}>₹{route.fare}</Text>
+        <Text style={styles.routeCode}>{item.code}</Text>
+        <Text style={styles.routeFare}>₹{item.fare}</Text>
       </View>
-      <Text style={styles.routeName}>{route.name}</Text>
+      <Text style={styles.routeName}>{item.name}</Text>
       <View style={styles.routeDetails}>
         <View style={styles.routeDetail}>
           <Text style={styles.routeDetailIcon}>📏</Text>
-          <Text style={styles.routeDetailText}>{route.distance}</Text>
+          <Text style={styles.routeDetailText}>{item.distance}</Text>
         </View>
         <View style={styles.routeDetail}>
           <Text style={styles.routeDetailIcon}>⏱️</Text>
-          <Text style={styles.routeDetailText}>{route.duration}</Text>
+          <Text style={styles.routeDetailText}>{item.duration}</Text>
         </View>
         <View style={styles.routeDetail}>
           <Text style={styles.routeDetailIcon}>📍</Text>
-          <Text style={styles.routeDetailText}>{route.stops} stops</Text>
+          <Text style={styles.routeDetailText}>{item.stops} stops</Text>
         </View>
       </View>
       <TouchableOpacity
         style={styles.useRouteButton}
-        onPress={() => {
-          setNewTrip({...newTrip, route: route.code});
-          setScheduleModalVisible(true);
-        }}
+        onPress={() => handleUseRoute(item)}
       >
         <Text style={styles.useRouteButtonText}>Use This Route</Text>
       </TouchableOpacity>
     </View>
+  );
+
+  // Render Empty State
+  const renderEmptyState = () => (
+    <TouchableOpacity
+      style={styles.emptyState}
+      onPress={handleScheduleTrip}
+      activeOpacity={0.7}
+    >
+      <Text style={styles.emptyStateIcon}>📅</Text>
+      <Text style={styles.emptyStateText}>No trips scheduled for today</Text>
+      <Text style={styles.emptyStateButtonText}>Schedule a Trip</Text>
+    </TouchableOpacity>
+  );
+
+  // Render Stats Header
+  const renderStatsHeader = () => (
+    <View style={styles.statsContainer}>
+      <TouchableOpacity
+        style={styles.statCard}
+        onPress={() => setActiveTab('schedule')}
+        activeOpacity={0.7}
+      >
+        <Text style={styles.statValue}>{stats.activeTrips}</Text>
+        <Text style={styles.statLabel}>Active Trips</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={styles.statCard}
+        onPress={() => setActiveTab('today')}
+        activeOpacity={0.7}
+      >
+        <Text style={styles.statValue}>{stats.todayTrips}</Text>
+        <Text style={styles.statLabel}>Today's Trips</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={styles.statCard}
+        onPress={() => Alert.alert('Passengers', `Total: ${stats.totalPassengers} passengers`)}
+        activeOpacity={0.7}
+      >
+        <Text style={styles.statValue}>{stats.totalPassengers}</Text>
+        <Text style={styles.statLabel}>Total Passengers</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={styles.statCard}
+        onPress={() => Alert.alert('Revenue', `Total: ₹${stats.totalRevenue.toLocaleString()}`)}
+        activeOpacity={0.7}
+      >
+        <Text style={styles.statValue}>₹{stats.totalRevenue.toLocaleString()}</Text>
+        <Text style={styles.statLabel}>Total Revenue</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
+  // Render Route Modal
+  const renderRouteModal = () => (
+    <Modal
+      animationType="slide"
+      transparent={true}
+      visible={routeModalVisible}
+      onRequestClose={() => setRouteModalVisible(false)}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContainer}>
+          <Text style={styles.modalTitle}>Add New Route</Text>
+
+          <TextInput
+            style={styles.input}
+            placeholder="Route Code (e.g., RT-001)"
+            value={newRoute.code}
+            onChangeText={(text) => setNewRoute({...newRoute, code: text})}
+            autoCapitalize="characters"
+          />
+
+          <TextInput
+            style={styles.input}
+            placeholder="Route Name (e.g., Downtown Express)"
+            value={newRoute.name}
+            onChangeText={(text) => setNewRoute({...newRoute, name: text})}
+          />
+
+          <View style={styles.rowInputs}>
+            <TextInput
+              style={[styles.input, styles.halfInput]}
+              placeholder="Distance (e.g., 15km)"
+              value={newRoute.distance}
+              onChangeText={(text) => setNewRoute({...newRoute, distance: text})}
+            />
+            <TextInput
+              style={[styles.input, styles.halfInput]}
+              placeholder="Duration (e.g., 45min)"
+              value={newRoute.duration}
+              onChangeText={(text) => setNewRoute({...newRoute, duration: text})}
+            />
+          </View>
+
+          <View style={styles.rowInputs}>
+            <TextInput
+              style={[styles.input, styles.halfInput]}
+              placeholder="Number of Stops"
+              value={newRoute.stops}
+              onChangeText={(text) => setNewRoute({...newRoute, stops: text})}
+              keyboardType="numeric"
+            />
+            <TextInput
+              style={[styles.input, styles.halfInput]}
+              placeholder="Fare (₹)"
+              value={newRoute.fare}
+              onChangeText={(text) => setNewRoute({...newRoute, fare: text})}
+              keyboardType="numeric"
+            />
+          </View>
+
+          <View style={styles.modalButtons}>
+            <TouchableOpacity
+              style={[styles.modalButton, styles.cancelButton]}
+              onPress={() => {
+                setRouteModalVisible(false);
+                setNewRoute({ code: '', name: '', distance: '', duration: '', stops: '', fare: '' });
+              }}
+            >
+              <Text style={styles.cancelButtonText}>Cancel</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.modalButton, styles.saveButton]}
+              onPress={handleAddRoute}
+            >
+              <Text style={styles.saveButtonText}>Add Route</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
   );
 
   return (
@@ -320,13 +593,13 @@ const OperationsScreen = () => {
         <View style={styles.headerButtons}>
           <TouchableOpacity
             style={styles.headerButton}
-            onPress={() => setScheduleModalVisible(true)}
+            onPress={handleScheduleTrip}
           >
             <Text style={styles.headerButtonText}>➕ Schedule</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.headerButton}
-            onPress={() => setRouteModalVisible(true)}
+            onPress={handleCreateRoute}
           >
             <Text style={styles.headerButtonText}>🛣️ New Route</Text>
           </TouchableOpacity>
@@ -334,24 +607,7 @@ const OperationsScreen = () => {
       </View>
 
       {/* Stats */}
-      <View style={styles.statsContainer}>
-        <View style={styles.statCard}>
-          <Text style={styles.statValue}>{stats.activeTrips}</Text>
-          <Text style={styles.statLabel}>Active Trips</Text>
-        </View>
-        <View style={styles.statCard}>
-          <Text style={styles.statValue}>{stats.todayTrips}</Text>
-          <Text style={styles.statLabel}>Today's Trips</Text>
-        </View>
-        <View style={styles.statCard}>
-          <Text style={styles.statValue}>{stats.totalPassengers}</Text>
-          <Text style={styles.statLabel}>Total Passengers</Text>
-        </View>
-        <View style={styles.statCard}>
-          <Text style={styles.statValue}>₹{stats.totalRevenue.toLocaleString()}</Text>
-          <Text style={styles.statLabel}>Total Revenue</Text>
-        </View>
-      </View>
+      {renderStatsHeader()}
 
       {/* Tabs */}
       <View style={styles.tabContainer}>
@@ -382,43 +638,45 @@ const OperationsScreen = () => {
       </View>
 
       {/* Content based on active tab */}
-      <ScrollView style={styles.contentContainer} showsVerticalScrollIndicator={false}>
-        {activeTab === 'schedule' && (
-          <>
-            <Text style={styles.sectionTitle}>Scheduled Trips</Text>
-            {mockTrips.map(trip => renderTripCard(trip))}
-          </>
-        )}
+      {activeTab === 'schedule' && (
+        <FlatList
+          data={mockTrips}
+          renderItem={renderTripCard}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.listContainer}
+          showsVerticalScrollIndicator={false}
+          ListHeaderComponent={<Text style={styles.sectionTitle}>Scheduled Trips</Text>}
+        />
+      )}
 
-        {activeTab === 'routes' && (
-          <>
-            <Text style={styles.sectionTitle}>Available Routes</Text>
-            {mockRoutes.map(route => renderRouteCard(route))}
-          </>
-        )}
+      {activeTab === 'routes' && (
+        <FlatList
+          // 🔧 FIX: Changed from routes to routeList
+          data={routeList}
+          renderItem={renderRouteCard}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.listContainer}
+          showsVerticalScrollIndicator={false}
+          ListHeaderComponent={<Text style={styles.sectionTitle}>Available Routes</Text>}
+        />
+      )}
 
-        {activeTab === 'today' && (
-          <>
-            <Text style={styles.sectionTitle}>Today's Schedule</Text>
-            {todayTrips.length > 0 ? (
-              todayTrips.map(trip => renderTripCard(trip))
-            ) : (
-              <View style={styles.emptyState}>
-                <Text style={styles.emptyStateIcon}>📅</Text>
-                <Text style={styles.emptyStateText}>No trips scheduled for today</Text>
-                <TouchableOpacity
-                  style={styles.emptyStateButton}
-                  onPress={() => setScheduleModalVisible(true)}
-                >
-                  <Text style={styles.emptyStateButtonText}>Schedule a Trip</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-          </>
-        )}
-      </ScrollView>
+      {activeTab === 'today' && (
+        <FlatList
+          data={todayTrips}
+          renderItem={renderTripCard}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.listContainer}
+          showsVerticalScrollIndicator={false}
+          ListHeaderComponent={<Text style={styles.sectionTitle}>Today's Schedule</Text>}
+          ListEmptyComponent={renderEmptyState}
+        />
+      )}
 
-      {/* Schedule Trip Modal */}
+      {/* Add Route Modal */}
+      {renderRouteModal()}
+
+      {/* Old Schedule Trip Modal (Fallback if navigation fails) */}
       <Modal
         animationType="slide"
         transparent={true}
@@ -426,13 +684,14 @@ const OperationsScreen = () => {
         onRequestClose={() => setScheduleModalVisible(false)}
       >
         <View style={styles.modalOverlay}>
-          <ScrollView style={styles.modalContainer}>
+          <View style={styles.modalContainer}>
             <Text style={styles.modalTitle}>Schedule New Trip</Text>
 
             {/* Route Selection */}
             <Text style={styles.modalLabel}>Select Route</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.pickerScroll}>
-              {mockRoutes.map(route => (
+            <View style={styles.pickerContainer}>
+              {/* 🔧 FIX: Changed from routes to routeList */}
+              {routeList.map(route => (
                 <TouchableOpacity
                   key={route.id}
                   style={[
@@ -450,11 +709,11 @@ const OperationsScreen = () => {
                   <Text style={styles.pickerOptionSubtext}>{route.name}</Text>
                 </TouchableOpacity>
               ))}
-            </ScrollView>
+            </View>
 
             {/* Bus Selection */}
             <Text style={styles.modalLabel}>Select Bus</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.pickerScroll}>
+            <View style={styles.pickerContainer}>
               {mockBuses.map(bus => (
                 <TouchableOpacity
                   key={bus}
@@ -472,11 +731,11 @@ const OperationsScreen = () => {
                   </Text>
                 </TouchableOpacity>
               ))}
-            </ScrollView>
+            </View>
 
             {/* Driver Selection */}
             <Text style={styles.modalLabel}>Select Driver</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.pickerScroll}>
+            <View style={styles.pickerContainer}>
               {mockDrivers.map(driver => (
                 <TouchableOpacity
                   key={driver}
@@ -494,7 +753,7 @@ const OperationsScreen = () => {
                   </Text>
                 </TouchableOpacity>
               ))}
-            </ScrollView>
+            </View>
 
             {/* Time Selection */}
             <Text style={styles.modalLabel}>Departure Time</Text>
@@ -547,91 +806,12 @@ const OperationsScreen = () => {
 
               <TouchableOpacity
                 style={[styles.modalButton, styles.saveButton]}
-                onPress={handleScheduleTrip}
+                onPress={handleScheduleTripLocal}
               >
                 <Text style={styles.saveButtonText}>Schedule Trip</Text>
               </TouchableOpacity>
             </View>
-          </ScrollView>
-        </View>
-      </Modal>
-
-      {/* Create Route Modal */}
-      <Modal
-        animationType="slide"
-        transparent={true}
-        visible={routeModalVisible}
-        onRequestClose={() => setRouteModalVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <ScrollView style={styles.modalContainer}>
-            <Text style={styles.modalTitle}>Create New Route</Text>
-
-            <TextInput
-              style={styles.input}
-              placeholder="Route Code (e.g., RT-001)"
-              value={newRoute.code}
-              onChangeText={(text) => setNewRoute({...newRoute, code: text})}
-            />
-
-            <TextInput
-              style={styles.input}
-              placeholder="Route Name (e.g., Downtown Express)"
-              value={newRoute.name}
-              onChangeText={(text) => setNewRoute({...newRoute, name: text})}
-            />
-
-            <View style={styles.rowInputs}>
-              <TextInput
-                style={[styles.input, styles.halfInput]}
-                placeholder="Distance (e.g., 15km)"
-                value={newRoute.distance}
-                onChangeText={(text) => setNewRoute({...newRoute, distance: text})}
-              />
-              <TextInput
-                style={[styles.input, styles.halfInput]}
-                placeholder="Duration (e.g., 45min)"
-                value={newRoute.duration}
-                onChangeText={(text) => setNewRoute({...newRoute, duration: text})}
-              />
-            </View>
-
-            <View style={styles.rowInputs}>
-              <TextInput
-                style={[styles.input, styles.halfInput]}
-                placeholder="Number of Stops"
-                value={newRoute.stops}
-                onChangeText={(text) => setNewRoute({...newRoute, stops: text})}
-                keyboardType="numeric"
-              />
-              <TextInput
-                style={[styles.input, styles.halfInput]}
-                placeholder="Fare (₹)"
-                value={newRoute.fare}
-                onChangeText={(text) => setNewRoute({...newRoute, fare: text})}
-                keyboardType="numeric"
-              />
-            </View>
-
-            <View style={styles.modalButtons}>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.cancelButton]}
-                onPress={() => {
-                  setRouteModalVisible(false);
-                  setNewRoute({ code: '', name: '', distance: '', duration: '', stops: '', fare: '' });
-                }}
-              >
-                <Text style={styles.cancelButtonText}>Cancel</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.modalButton, styles.saveButton]}
-                onPress={handleCreateRoute}
-              >
-                <Text style={styles.saveButtonText}>Create Route</Text>
-              </TouchableOpacity>
-            </View>
-          </ScrollView>
+          </View>
         </View>
       </Modal>
     </SafeAreaView>
@@ -723,16 +903,17 @@ const styles = StyleSheet.create({
   tabTextActive: {
     color: '#FFFFFF',
   },
-  contentContainer: {
-    flex: 1,
+  listContainer: {
     paddingHorizontal: 16,
     paddingTop: 16,
+    paddingBottom: 16,
   },
   sectionTitle: {
     fontSize: 18,
     fontWeight: '600',
     color: '#1A237E',
     marginBottom: 16,
+    marginTop: 8,
   },
   tripCard: {
     backgroundColor: '#FFFFFF',
@@ -910,14 +1091,8 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 20,
   },
-  emptyStateButton: {
-    backgroundColor: '#4A90E2',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
-  },
   emptyStateButtonText: {
-    color: '#FFFFFF',
+    color: '#4A90E2',
     fontWeight: '600',
     fontSize: 14,
   },
@@ -949,15 +1124,18 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     marginTop: 16,
   },
-  pickerScroll: {
+  pickerContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     marginBottom: 8,
   },
   pickerOption: {
-    padding: 16,
+    padding: 12,
     borderWidth: 1,
     borderColor: '#E0E0E0',
     borderRadius: 8,
     marginRight: 8,
+    marginBottom: 8,
     minWidth: 100,
   },
   pickerOptionSelected: {

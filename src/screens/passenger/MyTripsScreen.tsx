@@ -10,6 +10,8 @@ import {
   RefreshControl,
   Modal,
   TextInput,
+  Linking,
+  Platform,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
@@ -55,7 +57,7 @@ const MyTripsScreen = () => {
         color: '#4CAF50',
         boardingTime: '07:45 AM',
         driver: 'Ali Ahmed',
-        driverContact: '+92 300 1112233',
+        driverContact: '+923001112233',
         fare: 12,
         serviceFee: 1,
         total: 13,
@@ -81,7 +83,7 @@ const MyTripsScreen = () => {
         color: '#4CAF50',
         boardingTime: '08:45 AM',
         driver: 'Sara Khan',
-        driverContact: '+92 300 2223344',
+        driverContact: '+923002223344',
         fare: 15,
         serviceFee: 1,
         total: 16,
@@ -109,7 +111,7 @@ const MyTripsScreen = () => {
         color: '#2196F3',
         boardingTime: '01:45 PM',
         driver: 'Usman Ali',
-        driverContact: '+92 300 3334455',
+        driverContact: '+923003334455',
         fare: 8,
         serviceFee: 1,
         total: 9,
@@ -120,6 +122,11 @@ const MyTripsScreen = () => {
         eta: '15 minutes',
         occupancy: '32/40 seats',
         speed: '45 km/h',
+        busLocation: {
+          latitude: 31.5204,
+          longitude: 74.3587,
+          route: 'University → Mall Route',
+        },
       },
     ],
     past: [
@@ -175,18 +182,64 @@ const MyTripsScreen = () => {
   };
 
   const handleTrackBus = (trip: any) => {
-    Alert.alert('Track Bus', `Navigating to Track screen for ${trip.busNumber}`);
-    // In real app: navigation.navigate('Track', { tripId: trip.id });
+    // Navigate to Track screen with trip details
+    navigation.navigate('Track', {
+      tripId: trip.id,
+      busNumber: trip.busNumber,
+      from: trip.from,
+      to: trip.to,
+      busLocation: trip.busLocation,
+      currentLocation: trip.currentLocation,
+      nextStop: trip.nextStop,
+      eta: trip.eta,
+    });
   };
 
-  const handleContactDriver = (trip: any) => {
+  const handleContactDriver = async (trip: any) => {
     Alert.alert(
       'Contact Driver',
       `Driver: ${trip.driver}\nContact: ${trip.driverContact}`,
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Call', onPress: () => Alert.alert('Calling', `Calling ${trip.driver}`) },
-        { text: 'Message', onPress: () => Alert.alert('Messaging', `Message to ${trip.driver}`) },
+        {
+          text: 'Call',
+          onPress: async () => {
+            try {
+              const phoneNumber = `tel:${trip.driverContact}`;
+              const canOpen = await Linking.canOpenURL(phoneNumber);
+              if (canOpen) {
+                await Linking.openURL(phoneNumber);
+              } else {
+                Alert.alert('Error', 'Cannot make phone calls from this device');
+              }
+            } catch (error) {
+              Alert.alert('Error', 'Failed to make phone call');
+            }
+          }
+        },
+        {
+          text: 'Message',
+          onPress: async () => {
+            try {
+              const message = `Hello ${trip.driver}, I'm passenger on bus ${trip.busNumber} (Ticket: ${trip.ticketNumber})`;
+              const url = Platform.select({
+                ios: `sms:${trip.driverContact}&body=${encodeURIComponent(message)}`,
+                android: `sms:${trip.driverContact}?body=${encodeURIComponent(message)}`,
+              });
+
+              if (url) {
+                const canOpen = await Linking.canOpenURL(url);
+                if (canOpen) {
+                  await Linking.openURL(url);
+                } else {
+                  Alert.alert('Error', 'Cannot send SMS from this device');
+                }
+              }
+            } catch (error) {
+              Alert.alert('Error', 'Failed to send SMS');
+            }
+          }
+        },
       ]
     );
   };
@@ -311,6 +364,11 @@ const MyTripsScreen = () => {
         },
       ]
     );
+  };
+
+  // Handle navigation to Home screen
+  const handleBookNow = () => {
+    navigation.navigate('HomeTab');
   };
 
   const renderViewTicketModal = () => (
@@ -904,7 +962,7 @@ const MyTripsScreen = () => {
           <TouchableOpacity
             style={[
               styles.tab,
-              selectedTab === 'past' && styles.tabActive,
+              selectedTrip === 'past' && styles.tabActive,
             ]}
             onPress={() => setSelectedTab('past')}
           >
@@ -934,7 +992,7 @@ const MyTripsScreen = () => {
               {selectedTab === 'upcoming' && (
                 <TouchableOpacity
                   style={styles.bookNowButton}
-                  onPress={() => navigation.navigate('Home')}
+                  onPress={handleBookNow}
                 >
                   <Text style={styles.bookNowText}>BOOK A TRIP</Text>
                 </TouchableOpacity>
@@ -961,6 +1019,7 @@ const MyTripsScreen = () => {
   );
 };
 
+// Styles remain the same...
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,

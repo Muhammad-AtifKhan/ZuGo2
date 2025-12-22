@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -6,10 +6,9 @@ import {
   ScrollView,
   TouchableOpacity,
   SafeAreaView,
-  Modal,
-  TextInput,
   Alert,
 } from 'react-native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 
 // Mock data
 const mockBuses = [
@@ -19,17 +18,259 @@ const mockBuses = [
   { id: '4', number: 'B-004', registration: 'GHI-789', capacity: 30, status: 'inactive', driver: null, lastMaintenance: '2023-12-20', nextMaintenance: '2024-01-20' },
   { id: '5', number: 'B-005', registration: 'JKL-012', capacity: 50, status: 'active', driver: 'Sara Ali', lastMaintenance: '2024-01-08', nextMaintenance: '2024-02-08' },
   { id: '6', number: 'B-006', registration: 'MNO-345', capacity: 40, status: 'active', driver: 'Usman Khan', lastMaintenance: '2024-01-15', nextMaintenance: '2024-02-15' },
+  { id: '7', number: 'B-007', registration: 'PQR-678', capacity: 38, status: 'active', driver: 'Bilal Raza', lastMaintenance: '2024-01-18', nextMaintenance: '2024-02-18' },
+  { id: '8', number: 'B-008', registration: 'STU-901', capacity: 42, status: 'maintenance', driver: null, lastMaintenance: '2024-01-03', nextMaintenance: '2024-01-30' },
 ];
 
 const FleetScreen = () => {
+  const navigation = useNavigation<any>();
+  const route = useRoute();
   const [buses, setBuses] = useState(mockBuses);
   const [filter, setFilter] = useState('all'); // all, active, maintenance, inactive
-  const [modalVisible, setModalVisible] = useState(false);
-  const [newBus, setNewBus] = useState({
-    number: '',
-    registration: '',
-    capacity: '',
-  });
+
+  // 🔥 IMPORTANT: useEffect for opening AddBusScreen automatically
+  useEffect(() => {
+    if (route.params?.openAddBus) {
+      handleAddBus();
+      // IMPORTANT: param clear karo
+      navigation.setParams({ openAddBus: false });
+    }
+  }, [route.params?.openAddBus]);
+
+  // Add Bus button handler - Now navigates to AddBusScreen
+  const handleAddBus = () => {
+    navigation.navigate('AddBusScreen', {
+      mode: 'add',
+      onSave: (busData: any) => {
+        // Callback function for when bus is saved in AddBusScreen
+        const newBusObj = {
+          id: (buses.length + 1).toString(),
+          number: busData.number,
+          registration: busData.registration,
+          capacity: parseInt(busData.capacity),
+          status: 'active',
+          driver: null,
+          lastMaintenance: new Date().toISOString().split('T')[0],
+          nextMaintenance: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        };
+
+        setBuses([...buses, newBusObj]);
+        Alert.alert('Success', 'Bus added successfully');
+      }
+    });
+  };
+
+  // Bus detail handler - Navigates to AddBusScreen in edit mode
+  const handleBusPress = (bus: any) => {
+    navigation.navigate('AddBusScreen', {
+      mode: 'edit',
+      bus: bus,
+      onSave: (updatedBusData: any) => {
+        // Update bus in local state
+        setBuses(buses.map(b =>
+          b.id === bus.id ? { ...b, ...updatedBusData } : b
+        ));
+        Alert.alert('Success', 'Bus updated successfully');
+      }
+    });
+  };
+
+  // 📋 DETAILS BUTTON FUNCTIONALITY
+  const handleViewDetails = (bus: any) => {
+    Alert.alert(
+      '🚌 Bus Details',
+      `Bus Number: ${bus.number}\n` +
+      `Registration: ${bus.registration}\n` +
+      `Capacity: ${bus.capacity} seats\n` +
+      `Status: ${bus.status.toUpperCase()}\n` +
+      `Driver: ${bus.driver || 'Not assigned'}\n` +
+      `Last Maintenance: ${bus.lastMaintenance}\n` +
+      `Next Maintenance: ${bus.nextMaintenance}`,
+      [
+        { text: 'OK', style: 'default' },
+        { text: 'Edit Details', onPress: () => handleBusPress(bus) },
+        { text: 'Assign Driver', onPress: () => handleAssignDriver(bus) }
+      ]
+    );
+  };
+
+  // 🔧 MAINTENANCE BUTTON FUNCTIONALITY
+  const handleMaintenance = (bus: any) => {
+    Alert.alert(
+      '🔧 Maintenance Options',
+      `Select maintenance action for ${bus.number}:`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Schedule Maintenance',
+          onPress: () => scheduleMaintenance(bus.id)
+        },
+        {
+          text: 'Log Maintenance Done',
+          onPress: () => logMaintenanceDone(bus.id)
+        },
+        {
+          text: 'View Maintenance History',
+          onPress: () => viewMaintenanceHistory(bus.id)
+        }
+      ]
+    );
+  };
+
+  const scheduleMaintenance = (busId: string) => {
+    Alert.prompt(
+      '📅 Schedule Maintenance',
+      'Enter number of days from now:',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Schedule',
+          onPress: (days) => {
+            if (days && !isNaN(parseInt(days))) {
+              const daysNum = parseInt(days);
+              const nextDate = new Date(Date.now() + daysNum * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+              setBuses(buses.map(bus =>
+                bus.id === busId ? {
+                  ...bus,
+                  status: 'maintenance',
+                  nextMaintenance: nextDate
+                } : bus
+              ));
+
+              Alert.alert(
+                '✅ Scheduled',
+                `Maintenance scheduled for ${days} days from now\nNext maintenance: ${nextDate}`
+              );
+            }
+          }
+        }
+      ],
+      'plain-text',
+      '7'
+    );
+  };
+
+  const logMaintenanceDone = (busId: string) => {
+    setBuses(buses.map(bus =>
+      bus.id === busId ? {
+        ...bus,
+        status: 'active',
+        lastMaintenance: new Date().toISOString().split('T')[0],
+        nextMaintenance: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+      } : bus
+    ));
+
+    Alert.alert(
+      '✅ Maintenance Completed',
+      'Maintenance logged successfully!\nBus status changed to ACTIVE\nNext maintenance scheduled for 30 days from now.'
+    );
+  };
+
+  const viewMaintenanceHistory = (busId: string) => {
+    const bus = buses.find(b => b.id === busId);
+    if (bus) {
+      Alert.alert(
+        '📋 Maintenance History',
+        `Bus: ${bus.number}\n` +
+        `Last Maintenance: ${bus.lastMaintenance}\n` +
+        `Next Maintenance: ${bus.nextMaintenance}\n\n` +
+        'Recent Maintenance History:\n' +
+        '• 2024-01-10: Oil change, tire rotation\n' +
+        '• 2023-12-15: Brake system check\n' +
+        '• 2023-11-20: Engine service\n' +
+        '• 2023-10-25: General inspection'
+      );
+    }
+  };
+
+  // ▶️ ACTIVATE/DEACTIVATE BUTTON FUNCTIONALITY
+  const handleChangeStatus = (busId: string, currentStatus: string) => {
+    const bus = buses.find(b => b.id === busId);
+    if (!bus) return;
+
+    if (currentStatus === 'active') {
+      // Deactivate karna hai
+      Alert.alert(
+        '⏸️ Deactivate Bus',
+        `Are you sure you want to deactivate ${bus.number}?\n\n` +
+        'This will:\n' +
+        '• Remove from active service\n' +
+        '• Unassign driver (if any)\n' +
+        '• Mark as inactive in system',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Deactivate',
+            style: 'destructive',
+            onPress: () => {
+              setBuses(buses.map(b =>
+                b.id === busId ? {
+                  ...b,
+                  status: 'inactive',
+                  driver: null
+                } : b
+              ));
+              Alert.alert('✅ Deactivated', `${bus.number} has been deactivated`);
+            }
+          }
+        ]
+      );
+    } else {
+      // Activate karna hai
+      Alert.alert(
+        '▶️ Activate Bus',
+        `Activate ${bus.number} back to service?`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Activate',
+            onPress: () => {
+              setBuses(buses.map(b =>
+                b.id === busId ? {
+                  ...b,
+                  status: 'active'
+                } : b
+              ));
+              Alert.alert('✅ Activated', `${bus.number} is now active and available for service`);
+            }
+          }
+        ]
+      );
+    }
+  };
+
+  // 👤 ASSIGN DRIVER FUNCTION
+  const handleAssignDriver = (bus: any) => {
+    const availableDrivers = ['Ali Ahmed', 'Ahmed Khan', 'Sara Ali', 'Usman Khan', 'Bilal Raza'];
+
+    Alert.alert(
+      '👤 Assign Driver',
+      `Assign driver to ${bus.number}:`,
+      [
+        ...availableDrivers.map(driver => ({
+          text: driver,
+          onPress: () => {
+            setBuses(buses.map(b =>
+              b.id === bus.id ? { ...b, driver: driver } : b
+            ));
+            Alert.alert('✅ Driver Assigned', `${driver} assigned to ${bus.number}`);
+          }
+        })),
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Unassign Driver',
+          onPress: () => {
+            setBuses(buses.map(b =>
+              b.id === bus.id ? { ...b, driver: null } : b
+            ));
+            Alert.alert('✅ Driver Unassigned', 'Driver removed from bus');
+          },
+          style: 'destructive'
+        }
+      ]
+    );
+  };
 
   const filteredBuses = buses.filter(bus => {
     if (filter === 'all') return true;
@@ -54,36 +295,6 @@ const FleetScreen = () => {
     }
   };
 
-  const handleAddBus = () => {
-    if (!newBus.number || !newBus.registration || !newBus.capacity) {
-      Alert.alert('Error', 'Please fill all fields');
-      return;
-    }
-
-    const newBusObj = {
-      id: (buses.length + 1).toString(),
-      number: newBus.number,
-      registration: newBus.registration,
-      capacity: parseInt(newBus.capacity),
-      status: 'active',
-      driver: null,
-      lastMaintenance: new Date().toISOString().split('T')[0],
-      nextMaintenance: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-    };
-
-    setBuses([...buses, newBusObj]);
-    setNewBus({ number: '', registration: '', capacity: '' });
-    setModalVisible(false);
-    Alert.alert('Success', 'Bus added successfully');
-  };
-
-  const handleChangeStatus = (busId: string, newStatus: string) => {
-    setBuses(buses.map(bus =>
-      bus.id === busId ? { ...bus, status: newStatus } : bus
-    ));
-    Alert.alert('Status Updated', `Bus status changed to ${newStatus}`);
-  };
-
   const stats = {
     total: buses.length,
     active: buses.filter(b => b.status === 'active').length,
@@ -93,7 +304,7 @@ const FleetScreen = () => {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Header */}
+      {/* Header - Fixed */}
       <View style={styles.header}>
         <View>
           <Text style={styles.title}>🚌 Fleet Management</Text>
@@ -101,112 +312,111 @@ const FleetScreen = () => {
         </View>
         <TouchableOpacity
           style={styles.addButton}
-          onPress={() => setModalVisible(true)}
+          onPress={handleAddBus}
         >
           <Text style={styles.addButtonText}>+ Add Bus</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Stats */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.statsScroll}>
-        <View style={styles.statsContainer}>
-          <View style={styles.statCard}>
-            <Text style={styles.statValue}>{stats.total}</Text>
-            <Text style={styles.statLabel}>Total Buses</Text>
-          </View>
-          <View style={[styles.statCard, { backgroundColor: '#E8F5E8' }]}>
-            <Text style={[styles.statValue, { color: '#4CAF50' }]}>{stats.active}</Text>
-            <Text style={styles.statLabel}>Active</Text>
-          </View>
-          <View style={[styles.statCard, { backgroundColor: '#FFF3E0' }]}>
-            <Text style={[styles.statValue, { color: '#FF9800' }]}>{stats.maintenance}</Text>
-            <Text style={styles.statLabel}>Maintenance</Text>
-          </View>
-          <View style={[styles.statCard, { backgroundColor: '#FFEBEE' }]}>
-            <Text style={[styles.statValue, { color: '#F44336' }]}>{stats.inactive}</Text>
-            <Text style={styles.statLabel}>Inactive</Text>
-          </View>
-        </View>
-      </ScrollView>
-
-      {/* Filter Buttons */}
-      <View style={styles.filterContainer}>
+      {/* Stats - Fixed Height */}
+      <View style={styles.statsContainer}>
         <TouchableOpacity
-          style={[styles.filterButton, filter === 'all' && styles.filterButtonActive]}
+          style={[styles.statCard, filter === 'all' && styles.statCardActive]}
           onPress={() => setFilter('all')}
+          activeOpacity={0.7}
         >
-          <Text style={[styles.filterText, filter === 'all' && styles.filterTextActive]}>All</Text>
+          <Text style={styles.statValue}>{stats.total}</Text>
+          <Text style={styles.statLabel}>Total</Text>
         </TouchableOpacity>
+
         <TouchableOpacity
-          style={[styles.filterButton, filter === 'active' && styles.filterButtonActive]}
+          style={[styles.statCard, { backgroundColor: '#E8F5E8' }, filter === 'active' && styles.statCardActive]}
           onPress={() => setFilter('active')}
+          activeOpacity={0.7}
         >
-          <Text style={[styles.filterText, filter === 'active' && styles.filterTextActive]}>Active</Text>
+          <Text style={[styles.statValue, { color: '#4CAF50' }]}>{stats.active}</Text>
+          <Text style={styles.statLabel}>Active</Text>
         </TouchableOpacity>
+
         <TouchableOpacity
-          style={[styles.filterButton, filter === 'maintenance' && styles.filterButtonActive]}
+          style={[styles.statCard, { backgroundColor: '#FFF3E0' }, filter === 'maintenance' && styles.statCardActive]}
           onPress={() => setFilter('maintenance')}
+          activeOpacity={0.7}
         >
-          <Text style={[styles.filterText, filter === 'maintenance' && styles.filterTextActive]}>Maintenance</Text>
+          <Text style={[styles.statValue, { color: '#FF9800' }]}>{stats.maintenance}</Text>
+          <Text style={styles.statLabel}>Maintenance</Text>
         </TouchableOpacity>
+
         <TouchableOpacity
-          style={[styles.filterButton, filter === 'inactive' && styles.filterButtonActive]}
+          style={[styles.statCard, { backgroundColor: '#FFEBEE' }, filter === 'inactive' && styles.statCardActive]}
           onPress={() => setFilter('inactive')}
+          activeOpacity={0.7}
         >
-          <Text style={[styles.filterText, filter === 'inactive' && styles.filterTextActive]}>Inactive</Text>
+          <Text style={[styles.statValue, { color: '#F44336' }]}>{stats.inactive}</Text>
+          <Text style={styles.statLabel}>Inactive</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Bus List */}
-      <ScrollView style={styles.listContainer} showsVerticalScrollIndicator={false}>
+      {/* Bus List - Scrollable */}
+      <ScrollView
+        style={styles.listContainer}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.listContent}
+      >
         {filteredBuses.map((bus) => (
           <View key={bus.id} style={styles.busCard}>
-            <View style={styles.busHeader}>
-              <View style={styles.busInfo}>
-                <Text style={styles.busNumber}>{bus.number}</Text>
-                <Text style={styles.busRegistration}>{bus.registration}</Text>
+            <TouchableOpacity
+              style={styles.busInfoSection}
+              onPress={() => handleBusPress(bus)}
+              activeOpacity={0.7}
+            >
+              <View style={styles.busHeader}>
+                <View style={styles.busInfo}>
+                  <Text style={styles.busNumber}>{bus.number}</Text>
+                  <Text style={styles.busRegistration}>{bus.registration}</Text>
+                </View>
+                <View style={[styles.statusBadge, { backgroundColor: getStatusColor(bus.status) }]}>
+                  <Text style={styles.statusText}>
+                    {getStatusIcon(bus.status)} {bus.status.toUpperCase()}
+                  </Text>
+                </View>
               </View>
-              <View style={[styles.statusBadge, { backgroundColor: getStatusColor(bus.status) }]}>
-                <Text style={styles.statusText}>
-                  {getStatusIcon(bus.status)} {bus.status.toUpperCase()}
-                </Text>
-              </View>
-            </View>
 
-            <View style={styles.busDetails}>
-              <View style={styles.detailItem}>
-                <Text style={styles.detailLabel}>Capacity:</Text>
-                <Text style={styles.detailValue}>{bus.capacity} seats</Text>
+              <View style={styles.busDetails}>
+                <View style={styles.detailItem}>
+                  <Text style={styles.detailLabel}>Capacity:</Text>
+                  <Text style={styles.detailValue}>{bus.capacity} seats</Text>
+                </View>
+                <View style={styles.detailItem}>
+                  <Text style={styles.detailLabel}>Driver:</Text>
+                  <Text style={styles.detailValue}>{bus.driver || 'Not assigned'}</Text>
+                </View>
+                <View style={styles.detailItem}>
+                  <Text style={styles.detailLabel}>Next Maintenance:</Text>
+                  <Text style={styles.detailValue}>{bus.nextMaintenance}</Text>
+                </View>
               </View>
-              <View style={styles.detailItem}>
-                <Text style={styles.detailLabel}>Driver:</Text>
-                <Text style={styles.detailValue}>{bus.driver || 'Not assigned'}</Text>
-              </View>
-              <View style={styles.detailItem}>
-                <Text style={styles.detailLabel}>Next Maintenance:</Text>
-                <Text style={styles.detailValue}>{bus.nextMaintenance}</Text>
-              </View>
-            </View>
+            </TouchableOpacity>
 
+            {/* Action Buttons */}
             <View style={styles.actionButtons}>
               <TouchableOpacity
                 style={styles.actionButton}
-                onPress={() => Alert.alert('Bus Details', `View details of ${bus.number}`)}
+                onPress={() => handleViewDetails(bus)}
               >
                 <Text style={styles.actionButtonText}>📋 Details</Text>
               </TouchableOpacity>
+
               <TouchableOpacity
                 style={styles.actionButton}
-                onPress={() => Alert.alert('Maintenance', `Schedule maintenance for ${bus.number}`)}
+                onPress={() => handleMaintenance(bus)}
               >
                 <Text style={styles.actionButtonText}>🔧 Maintain</Text>
               </TouchableOpacity>
+
               <TouchableOpacity
                 style={styles.actionButton}
-                onPress={() => {
-                  const newStatus = bus.status === 'active' ? 'maintenance' : 'active';
-                  handleChangeStatus(bus.id, newStatus);
-                }}
+                onPress={() => handleChangeStatus(bus.id, bus.status)}
               >
                 <Text style={styles.actionButtonText}>
                   {bus.status === 'active' ? '⏸️ Deactivate' : '▶️ Activate'}
@@ -216,58 +426,6 @@ const FleetScreen = () => {
           </View>
         ))}
       </ScrollView>
-
-      {/* Add Bus Modal */}
-      <Modal
-        animationType="slide"
-        transparent={true}
-        visible={modalVisible}
-        onRequestClose={() => setModalVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContainer}>
-            <Text style={styles.modalTitle}>Add New Bus</Text>
-
-            <TextInput
-              style={styles.input}
-              placeholder="Bus Number (e.g., B-001)"
-              value={newBus.number}
-              onChangeText={(text) => setNewBus({...newBus, number: text})}
-            />
-
-            <TextInput
-              style={styles.input}
-              placeholder="Registration Number"
-              value={newBus.registration}
-              onChangeText={(text) => setNewBus({...newBus, registration: text})}
-            />
-
-            <TextInput
-              style={styles.input}
-              placeholder="Seating Capacity"
-              value={newBus.capacity}
-              onChangeText={(text) => setNewBus({...newBus, capacity: text})}
-              keyboardType="numeric"
-            />
-
-            <View style={styles.modalButtons}>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.cancelButton]}
-                onPress={() => setModalVisible(false)}
-              >
-                <Text style={styles.cancelButtonText}>Cancel</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.modalButton, styles.saveButton]}
-                onPress={handleAddBus}
-              >
-                <Text style={styles.saveButtonText}>Add Bus</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
     </SafeAreaView>
   );
 };
@@ -284,6 +442,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 20,
     backgroundColor: '#1A237E',
+    zIndex: 10,
   },
   title: {
     fontSize: 20,
@@ -306,28 +465,36 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontSize: 14,
   },
-  statsScroll: {
-    marginTop: 16,
-  },
   statsContainer: {
     flexDirection: 'row',
     paddingHorizontal: 16,
+    paddingVertical: 16,
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E0E0E0',
+    zIndex: 5,
+    maxHeight: 100,
   },
   statCard: {
-    backgroundColor: '#FFFFFF',
+    flex: 1,
     borderRadius: 12,
-    padding: 16,
-    marginRight: 12,
+    padding: 12,
+    marginHorizontal: 4,
     alignItems: 'center',
-    minWidth: 100,
+    justifyContent: 'center',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowRadius: 2,
+    elevation: 2,
+    minHeight: 70,
+  },
+  statCardActive: {
+    borderWidth: 2,
+    borderColor: '#4A90E2',
   },
   statValue: {
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: '700',
     color: '#1A237E',
     marginBottom: 4,
@@ -335,48 +502,28 @@ const styles = StyleSheet.create({
   statLabel: {
     fontSize: 12,
     color: '#666666',
-  },
-  filterContainer: {
-    flexDirection: 'row',
-    paddingHorizontal: 16,
-    marginTop: 16,
-    marginBottom: 12,
-  },
-  filterButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    backgroundColor: '#FFFFFF',
-    marginRight: 8,
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
-  },
-  filterButtonActive: {
-    backgroundColor: '#4A90E2',
-    borderColor: '#4A90E2',
-  },
-  filterText: {
-    fontSize: 14,
-    color: '#666666',
-    fontWeight: '500',
-  },
-  filterTextActive: {
-    color: '#FFFFFF',
+    textAlign: 'center',
   },
   listContainer: {
     flex: 1,
+  },
+  listContent: {
     paddingHorizontal: 16,
+    paddingVertical: 16,
+    paddingBottom: 30,
   },
   busCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
-    padding: 16,
     marginBottom: 12,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
+  },
+  busInfoSection: {
+    padding: 16,
   },
   busHeader: {
     flexDirection: 'row',
@@ -408,7 +555,7 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
   busDetails: {
-    marginBottom: 16,
+    marginBottom: 8,
   },
   detailItem: {
     flexDirection: 'row',
@@ -426,7 +573,12 @@ const styles = StyleSheet.create({
   },
   actionButtons: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    borderTopWidth: 1,
+    borderTopColor: '#E0E0E0',
+    paddingTop: 12,
+    marginTop: 8,
+    paddingHorizontal: 16,
+    paddingBottom: 16,
   },
   actionButton: {
     flex: 1,
@@ -440,62 +592,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     color: '#1A237E',
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modalContainer: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 24,
-    width: '90%',
-    maxWidth: 400,
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#1A237E',
-    marginBottom: 20,
-    textAlign: 'center',
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 16,
-    fontSize: 16,
-  },
-  modalButtons: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 8,
-  },
-  modalButton: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginHorizontal: 8,
-  },
-  cancelButton: {
-    backgroundColor: '#F0F0F0',
-  },
-  saveButton: {
-    backgroundColor: '#4A90E2',
-  },
-  cancelButtonText: {
-    color: '#666666',
-    fontWeight: '600',
-    fontSize: 16,
-  },
-  saveButtonText: {
-    color: '#FFFFFF',
-    fontWeight: '600',
-    fontSize: 16,
   },
 });
 

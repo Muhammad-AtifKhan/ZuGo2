@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,7 +9,6 @@ import {
   StatusBar,
   Alert,
   Modal,
-  TextInput,
 } from 'react-native';
 
 interface Passenger {
@@ -26,15 +25,14 @@ const BoardingScreen: React.FC = () => {
   const [currentStop] = useState('Stop 3: University');
   const [nextStop] = useState('Stop 4: Hospital');
   const [nextStopETA] = useState('15 min');
-  const [boardedCount, setBoardedCount] = useState(15);
-  const [totalPassengers] = useState(40);
   const [showScanModal, setShowScanModal] = useState(false);
   const [showPassengerModal, setShowPassengerModal] = useState(false);
   const [selectedPassenger, setSelectedPassenger] = useState<Passenger | null>(null);
   const [filter, setFilter] = useState<'ALL' | 'BOARDED' | 'PENDING'>('ALL');
   const [scanResult, setScanResult] = useState<'success' | 'error' | null>(null);
+  const [isScanning, setIsScanning] = useState(false);
 
-  // Mock passengers data
+  // FIXED: Initialize passengers with proper array
   const [passengers, setPassengers] = useState<Passenger[]>([
     { id: '1', name: 'Ali Ahmed', seat: '12A', fromStop: 'Stop 3', toStop: 'Stop 8', status: 'BOARDED', ticketNumber: 'TKT-2024-001' },
     { id: '2', name: 'Sara Khan', seat: '14B', fromStop: 'Stop 3', toStop: 'Stop 5', status: 'PENDING', ticketNumber: 'TKT-2024-002' },
@@ -46,53 +44,180 @@ const BoardingScreen: React.FC = () => {
     { id: '8', name: 'Hina Shah', seat: '26H', fromStop: 'Stop 3', toStop: 'Stop 5', status: 'PENDING', ticketNumber: 'TKT-2024-008' },
   ]);
 
-  const pendingCount = passengers.filter(p => p.status === 'PENDING').length;
-  const boardedCountValue = passengers.filter(p => p.status === 'BOARDED').length;
+  // FIXED: Safe calculations with optional chaining
+  const pendingCount = passengers?.filter(p => p.status === 'PENDING').length || 0;
+  const boardedCountValue = passengers?.filter(p => p.status === 'BOARDED').length || 0;
+  const missedCount = passengers?.filter(p => p.status === 'MISSED').length || 0;
 
   const handleScanQR = () => {
     setShowScanModal(true);
-    // Simulate QR scan after 1.5 seconds
+    setIsScanning(true);
+    setScanResult(null);
+
     setTimeout(() => {
       setScanResult('success');
+      setIsScanning(false);
 
-      // Simulate finding a passenger
-      const pendingPassenger = passengers.find(p => p.status === 'PENDING');
-      if (pendingPassenger) {
-        setTimeout(() => {
-          setSelectedPassenger(pendingPassenger);
-          setShowScanModal(false);
-          setShowPassengerModal(true);
-          setScanResult(null);
-        }, 500);
-      }
-    }, 1500);
+      setTimeout(() => {
+        if (passengers && passengers.length > 0) {
+          const pendingPassengers = passengers.filter(p => p.status === 'PENDING');
+          if (pendingPassengers.length > 0) {
+            const randomIndex = Math.floor(Math.random() * pendingPassengers.length);
+            setSelectedPassenger(pendingPassengers[randomIndex]);
+            setShowScanModal(false);
+            setShowPassengerModal(true);
+            setScanResult(null);
+          } else {
+            Alert.alert('No Pending Passengers', 'All passengers have been processed.');
+            setShowScanModal(false);
+          }
+        }
+      }, 1000);
+    }, 2000);
+  };
+
+  const handleManualBoarding = () => {
+    Alert.alert(
+      'Manual Boarding',
+      'Enter passenger details:',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Select Passenger',
+          onPress: () => {
+            if (passengers && passengers.length > 0) {
+              const pendingPassengers = passengers.filter(p => p.status === 'PENDING');
+              if (pendingPassengers.length > 0) {
+                const passengerOptions = pendingPassengers.map(p => ({
+                  text: `${p.name} (${p.ticketNumber})`,
+                  onPress: () => {
+                    setSelectedPassenger(p);
+                    setShowPassengerModal(true);
+                  }
+                }));
+
+                Alert.alert(
+                  'Select Passenger',
+                  'Choose a passenger to board:',
+                  [
+                    ...passengerOptions,
+                    { text: 'Cancel', style: 'cancel' }
+                  ]
+                );
+              } else {
+                Alert.alert('No Pending Passengers', 'All passengers have been processed.');
+              }
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const handleAnnounce = () => {
+    Alert.alert(
+      'Make Announcement',
+      'Select announcement type:',
+      [
+        {
+          text: 'Next Stop Announcement',
+          onPress: () => Alert.alert('Announcement Made', 'Next stop announcement has been made.')
+        },
+        {
+          text: 'Welcome Announcement',
+          onPress: () => Alert.alert('Announcement Made', 'Welcome announcement has been made.')
+        },
+        {
+          text: 'Safety Announcement',
+          onPress: () => Alert.alert('Announcement Made', 'Safety announcement has been made.')
+        },
+        { text: 'Cancel', style: 'cancel' }
+      ]
+    );
+  };
+
+  const handleCloseDoors = () => {
+    Alert.alert(
+      'Close Doors',
+      'Are you sure you want to close the doors?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Close Doors',
+          onPress: () => {
+            setPassengers(prev =>
+              prev?.map(p =>
+                p.status === 'PENDING' ? { ...p, status: 'MISSED' } : p
+              ) || []
+            );
+            Alert.alert('Doors Closed', 'All pending passengers marked as missed.');
+          }
+        }
+      ]
+    );
+  };
+
+  const handleReportDelay = () => {
+    Alert.alert(
+      'Report Delay',
+      'Select delay reason:',
+      [
+        {
+          text: 'Traffic Delay (5-10 min)',
+          onPress: () => Alert.alert('Delay Reported', 'Traffic delay reported to dispatch.')
+        },
+        {
+          text: 'Passenger Delay (2-3 min)',
+          onPress: () => Alert.alert('Delay Reported', 'Passenger delay reported.')
+        },
+        {
+          text: 'Mechanical Issue',
+          onPress: () => Alert.alert('Delay Reported', 'Mechanical issue reported to maintenance.')
+        },
+        { text: 'Cancel', style: 'cancel' }
+      ]
+    );
   };
 
   const handleConfirmBoarding = () => {
     if (selectedPassenger) {
       setPassengers(prev =>
-        prev.map(p =>
+        prev?.map(p =>
           p.id === selectedPassenger.id ? { ...p, status: 'BOARDED' } : p
-        )
+        ) || []
       );
-      setBoardedCount(prev => prev + 1);
-      Alert.alert('Boarding Confirmed', `${selectedPassenger.name} has been boarded.`);
+      Alert.alert(
+        'Boarding Confirmed',
+        `${selectedPassenger.name} has been boarded successfully.\nSeat: ${selectedPassenger.seat}\nTicket: ${selectedPassenger.ticketNumber}`
+      );
       setShowPassengerModal(false);
       setSelectedPassenger(null);
     }
   };
 
-  const handleManualBoarding = () => {
-    Alert.alert('Manual Boarding', 'Feature coming soon!');
-  };
-
   const handleMarkMissed = (passengerId: string) => {
-    setPassengers(prev =>
-      prev.map(p =>
-        p.id === passengerId ? { ...p, status: 'MISSED' } : p
-      )
+    Alert.alert(
+      'Mark as Missed',
+      'Are you sure you want to mark this passenger as missed?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Mark as Missed',
+          onPress: () => {
+            setPassengers(prev =>
+              prev?.map(p =>
+                p.id === passengerId ? { ...p, status: 'MISSED' } : p
+              ) || []
+            );
+            Alert.alert('Marked as Missed', 'Passenger has been marked as missed.');
+            if (selectedPassenger?.id === passengerId) {
+              setShowPassengerModal(false);
+              setSelectedPassenger(null);
+            }
+          }
+        }
+      ]
     );
-    Alert.alert('Marked as Missed', 'Passenger has been marked as missed.');
   };
 
   const handleViewPassenger = (passenger: Passenger) => {
@@ -118,12 +243,23 @@ const BoardingScreen: React.FC = () => {
     }
   };
 
-  const filteredPassengers = passengers.filter(passenger => {
+  // FIXED: Safe filtering
+  const filteredPassengers = passengers?.filter(passenger => {
+    if (!passenger) return false;
     if (filter === 'ALL') return true;
     if (filter === 'BOARDED') return passenger.status === 'BOARDED';
     if (filter === 'PENDING') return passenger.status === 'PENDING';
     return true;
-  });
+  }) || [];
+
+  useEffect(() => {
+    if (showScanModal && !isScanning && scanResult === null) {
+      const timer = setTimeout(() => {
+        setShowScanModal(false);
+      }, 10000);
+      return () => clearTimeout(timer);
+    }
+  }, [showScanModal, isScanning, scanResult]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -137,7 +273,7 @@ const BoardingScreen: React.FC = () => {
         </View>
         <View style={styles.passengerCount}>
           <Text style={styles.countText}>
-            👥 {boardedCountValue}/{totalPassengers}
+            👥 {boardedCountValue}/{passengers?.length || 0}
           </Text>
           <Text style={styles.countLabel}>Boarded</Text>
         </View>
@@ -171,9 +307,7 @@ const BoardingScreen: React.FC = () => {
               <Text style={styles.statusLabel}>🔴 Pending</Text>
             </View>
             <View style={styles.statusItem}>
-              <Text style={styles.statusNumber}>
-                {passengers.filter(p => p.status === 'MISSED').length}
-              </Text>
+              <Text style={styles.statusNumber}>{missedCount}</Text>
               <Text style={styles.statusLabel}>❌ Missed</Text>
             </View>
           </View>
@@ -277,17 +411,17 @@ const BoardingScreen: React.FC = () => {
 
         {/* Quick Actions */}
         <View style={styles.quickActions}>
-          <TouchableOpacity style={styles.quickAction}>
+          <TouchableOpacity style={styles.quickAction} onPress={handleAnnounce}>
             <Text style={styles.quickActionEmoji}>📢</Text>
             <Text style={styles.quickActionText}>Announce</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.quickAction}>
+          <TouchableOpacity style={styles.quickAction} onPress={handleCloseDoors}>
             <Text style={styles.quickActionEmoji}>🚪</Text>
             <Text style={styles.quickActionText}>Close Doors</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.quickAction}>
+          <TouchableOpacity style={styles.quickAction} onPress={handleReportDelay}>
             <Text style={styles.quickActionEmoji}>⏰</Text>
             <Text style={styles.quickActionText}>Delay</Text>
           </TouchableOpacity>
@@ -299,13 +433,21 @@ const BoardingScreen: React.FC = () => {
         visible={showScanModal}
         animationType="slide"
         transparent={true}
-        onRequestClose={() => setShowScanModal(false)}
+        onRequestClose={() => {
+          setIsScanning(false);
+          setShowScanModal(false);
+          setScanResult(null);
+        }}
       >
         <View style={styles.modalOverlay}>
           <View style={styles.scanModalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>📱 SCAN QR CODE</Text>
-              <TouchableOpacity onPress={() => setShowScanModal(false)}>
+              <TouchableOpacity onPress={() => {
+                setIsScanning(false);
+                setShowScanModal(false);
+                setScanResult(null);
+              }}>
                 <Text style={styles.modalClose}>✕</Text>
               </TouchableOpacity>
             </View>
@@ -315,6 +457,7 @@ const BoardingScreen: React.FC = () => {
                 <View style={styles.scanSuccess}>
                   <Text style={styles.scanSuccessEmoji}>✅</Text>
                   <Text style={styles.scanSuccessText}>QR Code Scanned Successfully!</Text>
+                  <Text style={styles.scanSuccessSubtext}>Processing passenger details...</Text>
                 </View>
               ) : (
                 <>
@@ -322,14 +465,22 @@ const BoardingScreen: React.FC = () => {
                   <Text style={styles.scanInstruction}>
                     Position QR code within frame
                   </Text>
-                  <Text style={styles.scanningText}>Scanning...</Text>
+                  {isScanning && (
+                    <Text style={styles.scanningText}>
+                      Scanning... {scanResult === null ? 'Looking for QR code' : ''}
+                    </Text>
+                  )}
                 </>
               )}
             </View>
 
             <TouchableOpacity
               style={styles.cancelButton}
-              onPress={() => setShowScanModal(false)}
+              onPress={() => {
+                setIsScanning(false);
+                setShowScanModal(false);
+                setScanResult(null);
+              }}
             >
               <Text style={styles.cancelButtonText}>CANCEL SCAN</Text>
             </TouchableOpacity>
@@ -342,13 +493,19 @@ const BoardingScreen: React.FC = () => {
         visible={showPassengerModal && selectedPassenger !== null}
         animationType="slide"
         transparent={true}
-        onRequestClose={() => setShowPassengerModal(false)}
+        onRequestClose={() => {
+          setShowPassengerModal(false);
+          setSelectedPassenger(null);
+        }}
       >
         <View style={styles.modalOverlay}>
           <View style={styles.passengerModalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>👤 PASSENGER DETAILS</Text>
-              <TouchableOpacity onPress={() => setShowPassengerModal(false)}>
+              <TouchableOpacity onPress={() => {
+                setShowPassengerModal(false);
+                setSelectedPassenger(null);
+              }}>
                 <Text style={styles.modalClose}>✕</Text>
               </TouchableOpacity>
             </View>
@@ -386,26 +543,43 @@ const BoardingScreen: React.FC = () => {
 
                 <View style={styles.modalActions}>
                   {selectedPassenger.status === 'PENDING' && (
-                    <TouchableOpacity
-                      style={styles.confirmButton}
-                      onPress={handleConfirmBoarding}
-                    >
-                      <Text style={styles.confirmButtonText}>✅ CONFIRM BOARDING</Text>
-                    </TouchableOpacity>
+                    <>
+                      <TouchableOpacity
+                        style={styles.confirmButton}
+                        onPress={handleConfirmBoarding}
+                      >
+                        <Text style={styles.confirmButtonText}>✅ CONFIRM BOARDING</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={styles.missedModalButton}
+                        onPress={() => handleMarkMissed(selectedPassenger.id)}
+                      >
+                        <Text style={styles.missedModalButtonText}>MARK AS MISSED</Text>
+                      </TouchableOpacity>
+                    </>
                   )}
 
-                  {selectedPassenger.status === 'PENDING' && (
+                  {(selectedPassenger.status === 'BOARDED' || selectedPassenger.status === 'MISSED') && (
                     <TouchableOpacity
-                      style={styles.missedModalButton}
-                      onPress={() => handleMarkMissed(selectedPassenger.id)}
+                      style={[styles.confirmButton, { backgroundColor: '#666666' }]}
+                      onPress={() => {
+                        setShowPassengerModal(false);
+                        setSelectedPassenger(null);
+                      }}
                     >
-                      <Text style={styles.missedModalButtonText}>MARK AS MISSED</Text>
+                      <Text style={styles.confirmButtonText}>
+                        {selectedPassenger.status === 'BOARDED' ? '✅ ALREADY BOARDED' : '❌ MISSED'}
+                      </Text>
                     </TouchableOpacity>
                   )}
 
                   <TouchableOpacity
                     style={styles.closeButton}
-                    onPress={() => setShowPassengerModal(false)}
+                    onPress={() => {
+                      setShowPassengerModal(false);
+                      setSelectedPassenger(null);
+                    }}
                   >
                     <Text style={styles.closeButtonText}>CLOSE</Text>
                   </TouchableOpacity>
@@ -418,6 +592,8 @@ const BoardingScreen: React.FC = () => {
     </SafeAreaView>
   );
 };
+
+// Rest of the styles remain the same...
 
 const styles = StyleSheet.create({
   container: {

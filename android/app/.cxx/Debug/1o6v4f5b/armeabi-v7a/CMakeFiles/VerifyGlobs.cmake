@@ -12,6 +12,30 @@ if(NOT "${NEW_GLOB}" STREQUAL "${OLD_GLOB}")
   file(TOUCH_NOCREATE "D:/MyProjects/CityTransportManagementSystem/android/app/.cxx/Debug/1o6v4f5b/armeabi-v7a/CMakeFiles/cmake.verify_globs")
 endif()
 
+# react_codegen_SRCS at D:/MyProjects/CityTransportManagementSystem/node_modules/@react-native-community/datetimepicker/android/build/generated/source/codegen/jni/CMakeLists.txt:9 (file)
+file(GLOB NEW_GLOB LIST_DIRECTORIES true "D:/MyProjects/CityTransportManagementSystem/node_modules/@react-native-community/datetimepicker/android/build/generated/source/codegen/jni/*.cpp")
+set(OLD_GLOB
+  "D:/MyProjects/CityTransportManagementSystem/node_modules/@react-native-community/datetimepicker/android/build/generated/source/codegen/jni/RNDateTimePickerCGen-generated.cpp"
+  )
+if(NOT "${NEW_GLOB}" STREQUAL "${OLD_GLOB}")
+  message("-- GLOB mismatch!")
+  file(TOUCH_NOCREATE "D:/MyProjects/CityTransportManagementSystem/android/app/.cxx/Debug/1o6v4f5b/armeabi-v7a/CMakeFiles/cmake.verify_globs")
+endif()
+
+# react_codegen_SRCS at D:/MyProjects/CityTransportManagementSystem/node_modules/@react-native-community/datetimepicker/android/build/generated/source/codegen/jni/CMakeLists.txt:9 (file)
+file(GLOB NEW_GLOB LIST_DIRECTORIES true "D:/MyProjects/CityTransportManagementSystem/node_modules/@react-native-community/datetimepicker/android/build/generated/source/codegen/jni/react/renderer/components/RNDateTimePickerCGen/*.cpp")
+set(OLD_GLOB
+  "D:/MyProjects/CityTransportManagementSystem/node_modules/@react-native-community/datetimepicker/android/build/generated/source/codegen/jni/react/renderer/components/RNDateTimePickerCGen/ComponentDescriptors.cpp"
+  "D:/MyProjects/CityTransportManagementSystem/node_modules/@react-native-community/datetimepicker/android/build/generated/source/codegen/jni/react/renderer/components/RNDateTimePickerCGen/EventEmitters.cpp"
+  "D:/MyProjects/CityTransportManagementSystem/node_modules/@react-native-community/datetimepicker/android/build/generated/source/codegen/jni/react/renderer/components/RNDateTimePickerCGen/Props.cpp"
+  "D:/MyProjects/CityTransportManagementSystem/node_modules/@react-native-community/datetimepicker/android/build/generated/source/codegen/jni/react/renderer/components/RNDateTimePickerCGen/ShadowNodes.cpp"
+  "D:/MyProjects/CityTransportManagementSystem/node_modules/@react-native-community/datetimepicker/android/build/generated/source/codegen/jni/react/renderer/components/RNDateTimePickerCGen/States.cpp"
+  )
+if(NOT "${NEW_GLOB}" STREQUAL "${OLD_GLOB}")
+  message("-- GLOB mismatch!")
+  file(TOUCH_NOCREATE "D:/MyProjects/CityTransportManagementSystem/android/app/.cxx/Debug/1o6v4f5b/armeabi-v7a/CMakeFiles/cmake.verify_globs")
+endif()
+
 # react_codegen_SRCS at D:/MyProjects/CityTransportManagementSystem/node_modules/react-native-gesture-handler/android/build/generated/source/codegen/jni/CMakeLists.txt:9 (file)
 file(GLOB NEW_GLOB LIST_DIRECTORIES true "D:/MyProjects/CityTransportManagementSystem/node_modules/react-native-gesture-handler/android/build/generated/source/codegen/jni/*.cpp")
 set(OLD_GLOB
@@ -30,6 +54,30 @@ set(OLD_GLOB
   "D:/MyProjects/CityTransportManagementSystem/node_modules/react-native-gesture-handler/android/build/generated/source/codegen/jni/react/renderer/components/rngesturehandler_codegen/Props.cpp"
   "D:/MyProjects/CityTransportManagementSystem/node_modules/react-native-gesture-handler/android/build/generated/source/codegen/jni/react/renderer/components/rngesturehandler_codegen/ShadowNodes.cpp"
   "D:/MyProjects/CityTransportManagementSystem/node_modules/react-native-gesture-handler/android/build/generated/source/codegen/jni/react/renderer/components/rngesturehandler_codegen/States.cpp"
+  )
+if(NOT "${NEW_GLOB}" STREQUAL "${OLD_GLOB}")
+  message("-- GLOB mismatch!")
+  file(TOUCH_NOCREATE "D:/MyProjects/CityTransportManagementSystem/android/app/.cxx/Debug/1o6v4f5b/armeabi-v7a/CMakeFiles/cmake.verify_globs")
+endif()
+
+# react_codegen_SRCS at D:/MyProjects/CityTransportManagementSystem/node_modules/react-native-image-picker/android/build/generated/source/codegen/jni/CMakeLists.txt:9 (file)
+file(GLOB NEW_GLOB LIST_DIRECTORIES true "D:/MyProjects/CityTransportManagementSystem/node_modules/react-native-image-picker/android/build/generated/source/codegen/jni/*.cpp")
+set(OLD_GLOB
+  "D:/MyProjects/CityTransportManagementSystem/node_modules/react-native-image-picker/android/build/generated/source/codegen/jni/RNImagePickerSpec-generated.cpp"
+  )
+if(NOT "${NEW_GLOB}" STREQUAL "${OLD_GLOB}")
+  message("-- GLOB mismatch!")
+  file(TOUCH_NOCREATE "D:/MyProjects/CityTransportManagementSystem/android/app/.cxx/Debug/1o6v4f5b/armeabi-v7a/CMakeFiles/cmake.verify_globs")
+endif()
+
+# react_codegen_SRCS at D:/MyProjects/CityTransportManagementSystem/node_modules/react-native-image-picker/android/build/generated/source/codegen/jni/CMakeLists.txt:9 (file)
+file(GLOB NEW_GLOB LIST_DIRECTORIES true "D:/MyProjects/CityTransportManagementSystem/node_modules/react-native-image-picker/android/build/generated/source/codegen/jni/react/renderer/components/RNImagePickerSpec/*.cpp")
+set(OLD_GLOB
+  "D:/MyProjects/CityTransportManagementSystem/node_modules/react-native-image-picker/android/build/generated/source/codegen/jni/react/renderer/components/RNImagePickerSpec/ComponentDescriptors.cpp"
+  "D:/MyProjects/CityTransportManagementSystem/node_modules/react-native-image-picker/android/build/generated/source/codegen/jni/react/renderer/components/RNImagePickerSpec/EventEmitters.cpp"
+  "D:/MyProjects/CityTransportManagementSystem/node_modules/react-native-image-picker/android/build/generated/source/codegen/jni/react/renderer/components/RNImagePickerSpec/Props.cpp"
+  "D:/MyProjects/CityTransportManagementSystem/node_modules/react-native-image-picker/android/build/generated/source/codegen/jni/react/renderer/components/RNImagePickerSpec/ShadowNodes.cpp"
+  "D:/MyProjects/CityTransportManagementSystem/node_modules/react-native-image-picker/android/build/generated/source/codegen/jni/react/renderer/components/RNImagePickerSpec/States.cpp"
   )
 if(NOT "${NEW_GLOB}" STREQUAL "${OLD_GLOB}")
   message("-- GLOB mismatch!")
