@@ -9,6 +9,9 @@ import {
   Alert,
   Dimensions,
   Animated,
+  Linking,
+  Share,
+  Platform,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
@@ -40,7 +43,7 @@ const TrackScreen = () => {
       busNumber: 'B-001',
       seat: '3A',
       driver: 'Ali Ahmed',
-      driverContact: '+92 300 1112233',
+      driverContact: '+923001112233', // Updated with proper format for dialing
       boardingTime: '07:45 AM',
       status: 'active',
       currentLocation: 'Near University',
@@ -190,50 +193,241 @@ const TrackScreen = () => {
   };
 
   const handleRefresh = () => {
-    Alert.alert('Refreshing', 'Updating location data...');
-    // In real app, this would fetch fresh data from server
-  };
-
-  const handleShareLocation = () => {
     Alert.alert(
-      'Share Location',
-      'Share your live location with:',
+      'Refreshing Location',
+      'Fetching latest bus location...',
       [
-        { text: 'Family', onPress: () => Alert.alert('Shared', 'Location shared with family') },
-        { text: 'Friends', onPress: () => Alert.alert('Shared', 'Location shared with friends') },
-        { text: 'Cancel', style: 'cancel' },
+        { text: 'OK', onPress: () => {
+          // Simulate refresh
+          setTrackingData(prev => ({
+            ...prev,
+            lastUpdated: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          }));
+          Alert.alert('Updated', 'Location data refreshed successfully');
+        }}
       ]
     );
   };
 
-  const handleContactDriver = () => {
+  const handleShareLocation = async () => {
+    try {
+      const shareContent = {
+        title: 'My Bus Location',
+        message: `I'm currently tracking my bus:\n\nBus: ${activeTrip?.busNumber}\nFrom: ${activeTrip?.from}\nTo: ${activeTrip?.to}\nCurrent Location: ${activeTrip?.currentLocation}\nETA: ${activeTrip?.etaToDestination}\n\nLive tracking available on Bus App`,
+        url: 'https://busapp.com/track', // In real app, use dynamic URL
+      };
+
+      const result = await Share.share(shareContent);
+
+      if (result.action === Share.sharedAction) {
+        Alert.alert('Shared', 'Location shared successfully!');
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Failed to share location');
+    }
+  };
+
+  const handleContactDriver = async () => {
     if (activeTrip?.driverContact) {
       Alert.alert(
         'Contact Driver',
-        `Contact ${activeTrip.driver}`,
+        `Driver: ${activeTrip.driver}\nBus: ${activeTrip.busNumber}`,
         [
           { text: 'Cancel', style: 'cancel' },
-          { text: 'Call', onPress: () => Alert.alert('Calling', `Calling ${activeTrip.driver}`) },
-          { text: 'Message', onPress: () => Alert.alert('Messaging', `Message to ${activeTrip.driver}`) },
+          {
+            text: '📞 Call',
+            onPress: async () => {
+              try {
+                const phoneNumber = `tel:${activeTrip.driverContact}`;
+                const canOpen = await Linking.canOpenURL(phoneNumber);
+                if (canOpen) {
+                  await Linking.openURL(phoneNumber);
+                } else {
+                  Alert.alert('Cannot Call', 'Phone calling is not available on this device');
+                }
+              } catch (error) {
+                Alert.alert('Error', 'Failed to make phone call');
+              }
+            }
+          },
+          {
+            text: '💬 Message',
+            onPress: async () => {
+              try {
+                const message = `Hello ${activeTrip.driver}, this is passenger on bus ${activeTrip.busNumber} (Ticket: ${activeTrip.ticketNumber}).`;
+                const url = Platform.select({
+                  ios: `sms:${activeTrip.driverContact}&body=${encodeURIComponent(message)}`,
+                  android: `sms:${activeTrip.driverContact}?body=${encodeURIComponent(message)}`,
+                });
+
+                if (url) {
+                  const canOpen = await Linking.canOpenURL(url);
+                  if (canOpen) {
+                    await Linking.openURL(url);
+                  } else {
+                    Alert.alert('Cannot Message', 'SMS app is not available');
+                  }
+                }
+              } catch (error) {
+                Alert.alert('Error', 'Failed to open messaging app');
+              }
+            }
+          },
+          {
+            text: '📧 Email',
+            onPress: () => {
+              Alert.alert('Email Driver', 'Email functionality would open email app');
+              // In real app: Linking.openURL(`mailto:${driverEmail}`);
+            }
+          },
         ]
       );
     }
   };
 
-  const handleGetDirections = () => {
-    Alert.alert('Get Directions', 'Opening maps for directions to bus stop');
-    // In real app: Linking.openURL(`maps://?q=${activeTrip.currentLocation}`);
+  const handleGetDirections = async () => {
+    if (activeTrip?.currentLocation) {
+      Alert.alert(
+        'Get Directions',
+        `Get directions to ${activeTrip.currentLocation}`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Google Maps',
+            onPress: async () => {
+              try {
+                const url = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(activeTrip.currentLocation)}&travelmode=transit`;
+                const canOpen = await Linking.canOpenURL(url);
+                if (canOpen) {
+                  await Linking.openURL(url);
+                } else {
+                  Alert.alert('Cannot Open', 'Google Maps is not installed');
+                }
+              } catch (error) {
+                Alert.alert('Error', 'Failed to open Google Maps');
+              }
+            }
+          },
+          {
+            text: 'Apple Maps',
+            onPress: async () => {
+              try {
+                const url = `http://maps.apple.com/?daddr=${encodeURIComponent(activeTrip.currentLocation)}&dirflg=r`;
+                const canOpen = await Linking.canOpenURL(url);
+                if (canOpen) {
+                  await Linking.openURL(url);
+                } else {
+                  Alert.alert('Cannot Open', 'Apple Maps is not available');
+                }
+              } catch (error) {
+                Alert.alert('Error', 'Failed to open Apple Maps');
+              }
+            }
+          },
+          {
+            text: 'Waze',
+            onPress: async () => {
+              try {
+                const url = `https://waze.com/ul?q=${encodeURIComponent(activeTrip.currentLocation)}&navigate=yes`;
+                const canOpen = await Linking.canOpenURL(url);
+                if (canOpen) {
+                  await Linking.openURL(url);
+                } else {
+                  Alert.alert('Waze Not Installed', 'Please install Waze from app store');
+                }
+              } catch (error) {
+                Alert.alert('Error', 'Failed to open Waze');
+              }
+            }
+          },
+        ]
+      );
+    }
   };
 
   const handleEmergency = () => {
     Alert.alert(
-      'Emergency Contact',
-      'Choose emergency option:',
+      '🚨 EMERGENCY CONTACT 🚨',
+      'Choose emergency contact option:',
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Call Driver', onPress: () => Alert.alert('Calling', 'Calling driver') },
-        { text: 'Contact Support', onPress: () => Alert.alert('Support', 'Connecting to support') },
-        { text: 'Emergency Services', style: 'destructive', onPress: () => Alert.alert('Emergency', 'Calling emergency services') },
+        {
+          text: '📞 Call Driver',
+          onPress: async () => {
+            if (activeTrip?.driverContact) {
+              try {
+                const phoneNumber = `tel:${activeTrip.driverContact}`;
+                await Linking.openURL(phoneNumber);
+              } catch (error) {
+                Alert.alert('Error', 'Cannot make emergency call');
+              }
+            }
+          }
+        },
+        {
+          text: '📞 Contact Support',
+          onPress: async () => {
+            try {
+              await Linking.openURL('tel:+923001234567');
+            } catch (error) {
+              Alert.alert('Support', 'Call: +92 300 1234567');
+            }
+          }
+        },
+        {
+          text: '🚨 Emergency Services',
+          style: 'destructive',
+          onPress: async () => {
+            Alert.alert(
+              'Emergency Services',
+              'Choose emergency service:',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Police - 15',
+                  onPress: async () => {
+                    try {
+                      await Linking.openURL('tel:15');
+                    } catch (error) {
+                      Alert.alert('Police', 'Dial: 15');
+                    }
+                  }
+                },
+                {
+                  text: 'Ambulance - 115',
+                  onPress: async () => {
+                    try {
+                      await Linking.openURL('tel:115');
+                    } catch (error) {
+                      Alert.alert('Ambulance', 'Dial: 115');
+                    }
+                  }
+                },
+                {
+                  text: 'Rescue - 1122',
+                  onPress: async () => {
+                    try {
+                      await Linking.openURL('tel:1122');
+                    } catch (error) {
+                      Alert.alert('Rescue', 'Dial: 1122');
+                    }
+                  }
+                },
+              ]
+            );
+          }
+        },
+        {
+          text: '📍 Share Emergency Location',
+          onPress: () => {
+            const emergencyMessage = `🚨 EMERGENCY ALERT 🚨\n\nI'm on bus ${activeTrip?.busNumber}\nFrom: ${activeTrip?.from}\nTo: ${activeTrip?.to}\nCurrent Location: ${activeTrip?.currentLocation}\nDriver: ${activeTrip?.driver}\nTicket: ${activeTrip?.ticketNumber}\n\n🚨 NEED IMMEDIATE ASSISTANCE 🚨`;
+
+            Share.share({
+              title: 'EMERGENCY ALERT',
+              message: emergencyMessage,
+            });
+          }
+        },
       ]
     );
   };
@@ -253,6 +447,14 @@ const TrackScreen = () => {
         })),
       ]
     );
+  };
+
+  const handleViewAllAlerts = () => {
+    // Navigate to AlertsScreen
+    navigation.navigate('Alerts', {
+      tripId: activeTrip?.id,
+      busNumber: activeTrip?.busNumber
+    });
   };
 
   const renderMapView = () => (
@@ -508,17 +710,32 @@ const TrackScreen = () => {
     <View style={styles.alertsCard}>
       <View style={styles.alertsHeader}>
         <Text style={styles.alertsTitle}>ALERTS & UPDATES</Text>
-        <TouchableOpacity onPress={() => Alert.alert('All Alerts', 'View all alerts')}>
+        <TouchableOpacity onPress={handleViewAllAlerts}>
           <Text style={styles.viewAllText}>View All</Text>
         </TouchableOpacity>
       </View>
 
       {dummyAlerts.map(alert => (
-        <View key={alert.id} style={[
-          styles.alertItem,
-          alert.severity === 'medium' && styles.alertMedium,
-          alert.severity === 'low' && styles.alertLow,
-        ]}>
+        <TouchableOpacity
+          key={alert.id}
+          style={[
+            styles.alertItem,
+            alert.severity === 'medium' && styles.alertMedium,
+            alert.severity === 'low' && styles.alertLow,
+          ]}
+          onPress={() => {
+            Alert.alert(
+              'Alert Details',
+              alert.message,
+              [
+                { text: 'OK' },
+                { text: 'Mark as Read', onPress: () => {
+                  Alert.alert('Marked', 'Alert marked as read');
+                }}
+              ]
+            );
+          }}
+        >
           <Icon
             name={alert.type === 'delay' ? 'warning' : 'info'}
             size={20}
@@ -528,7 +745,7 @@ const TrackScreen = () => {
             <Text style={styles.alertMessage}>{alert.message}</Text>
             <Text style={styles.alertTime}>{alert.time}</Text>
           </View>
-        </View>
+        </TouchableOpacity>
       ))}
     </View>
   );
@@ -596,7 +813,7 @@ const TrackScreen = () => {
 
           <TouchableOpacity
             style={styles.bookTripButton}
-            onPress={() => navigation.navigate('Home')}
+            onPress={() => navigation.navigate('HomeTab')}
           >
             <Text style={styles.bookTripText}>BOOK A TRIP</Text>
           </TouchableOpacity>
@@ -719,7 +936,9 @@ const TrackScreen = () => {
   );
 };
 
+// Styles remain the same as your original
 const styles = StyleSheet.create({
+  // ... all your existing styles remain exactly the same
   safeArea: {
     flex: 1,
     backgroundColor: '#F8F9FA',

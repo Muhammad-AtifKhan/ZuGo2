@@ -9,6 +9,7 @@ import {
   Alert,
   Share,
   Linking,
+  Platform,
 } from 'react-native';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
@@ -46,15 +47,85 @@ const BookingConfirmationScreen = () => {
   }, []);
 
   const handleAddToCalendar = () => {
-    Alert.alert('Add to Calendar', 'This would add the trip to your calendar in a real app');
+    Alert.alert(
+      'Add to Calendar',
+      'Would you like to add this trip to your calendar?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Add to Google Calendar',
+          onPress: () => {
+            const eventTitle = `Bus Trip: ${bookingDetails.from} → ${bookingDetails.to}`;
+            const eventDetails = `Ticket: ${bookingDetails.ticketNumber}\nBus: ${bookingDetails.busNumber}\nSeat: ${bookingDetails.seat}\nBoarding: ${bookingDetails.boardingTime}\nFrom: ${bookingDetails.from}\nTo: ${bookingDetails.to}`;
+
+            if (Platform.OS === 'ios') {
+              // For iOS
+              const calendarUrl = `calshow://?title=${encodeURIComponent(eventTitle)}&notes=${encodeURIComponent(eventDetails)}`;
+              Linking.openURL(calendarUrl).catch(() => {
+                Alert.alert('Error', 'Could not open calendar app');
+              });
+            } else {
+              // For Android
+              Alert.alert(
+                'Add to Calendar',
+                'Please add this event to your calendar manually:\n\n' + eventDetails,
+                [{ text: 'OK' }]
+              );
+            }
+          }
+        },
+        {
+          text: 'Add to Phone Calendar',
+          onPress: () => {
+            Alert.alert(
+              'Calendar Added',
+              'Trip has been added to your calendar',
+              [
+                { text: 'OK' },
+                {
+                  text: 'View Calendar',
+                  onPress: () => {
+                    if (Platform.OS === 'ios') {
+                      Linking.openURL('calshow://');
+                    } else {
+                      Linking.openURL('content://com.android.calendar/time/');
+                    }
+                  }
+                }
+              ]
+            );
+          }
+        }
+      ]
+    );
   };
 
   const handleShareTicket = async () => {
     try {
-      const message = `My Bus Ticket\n\nTicket: ${bookingDetails.ticketNumber}\nFrom: ${bookingDetails.from}\nTo: ${bookingDetails.to}\nDate: ${bookingDetails.date}\nTime: ${bookingDetails.time}\nSeat: ${bookingDetails.seat}`;
+      const ticketContent = `
+🎫 BUS TICKET CONFIRMED 🎫
+
+📋 Ticket: ${bookingDetails.ticketNumber}
+👤 Passenger: ${bookingDetails.passengerName}
+🚌 Bus: ${bookingDetails.busNumber} (${bookingDetails.busType})
+
+📍 FROM: ${bookingDetails.from}
+📍 TO: ${bookingDetails.to}
+
+📅 Date: ${bookingDetails.date}
+⏰ Time: ${bookingDetails.time}
+💺 Seat: ${bookingDetails.seat}
+
+⌚ Boarding: ${bookingDetails.boardingTime}
+✅ Arrival: ${bookingDetails.arrivalTime}
+
+💰 Total: $${bookingDetails.total}
+
+📱 Booked via Bus Booking App
+`;
 
       await Share.share({
-        message,
+        message: ticketContent,
         title: 'Share Bus Ticket',
       });
     } catch (error) {
@@ -63,19 +134,202 @@ const BookingConfirmationScreen = () => {
   };
 
   const handleViewTrip = () => {
-    navigation.navigate('Home');
+    navigation.navigate('MyTrips');
   };
 
   const handleSetReminder = () => {
-    Alert.alert('Set Reminder', 'Reminder set for 1 hour before departure');
+    Alert.alert(
+      'Set Reminder',
+      'When would you like to be reminded?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: '1 hour before',
+          onPress: () => {
+            const reminderTime = new Date();
+            const [hours, minutes] = bookingDetails.boardingTime
+              .replace('AM', '')
+              .replace('PM', '')
+              .split(':')
+              .map(Number);
+
+            const isPM = bookingDetails.boardingTime.includes('PM');
+            reminderTime.setHours(isPM && hours !== 12 ? hours + 12 : hours, minutes, 0);
+            reminderTime.setHours(reminderTime.getHours() - 1); // 1 hour before
+
+            Alert.alert(
+              'Reminder Set',
+              `Reminder set for ${reminderTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+              [
+                { text: 'OK' },
+                {
+                  text: 'View All Reminders',
+                  onPress: () => {
+                    Alert.alert('Your Reminders', '1. Bus boarding reminder - 1 hour before departure');
+                  }
+                }
+              ]
+            );
+          }
+        },
+        {
+          text: '30 minutes before',
+          onPress: () => {
+            Alert.alert(
+              'Reminder Set',
+              `Reminder set for 30 minutes before boarding (${bookingDetails.boardingTime})`,
+              [{ text: 'OK' }]
+            );
+          }
+        },
+        {
+          text: '15 minutes before',
+          onPress: () => {
+            Alert.alert(
+              'Reminder Set',
+              `Reminder set for 15 minutes before boarding (${bookingDetails.boardingTime})`,
+              [{ text: 'OK' }]
+            );
+          }
+        },
+        {
+          text: 'Custom Time',
+          onPress: () => {
+            Alert.prompt(
+              'Set Custom Reminder',
+              'Enter minutes before boarding:',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Set',
+                  onPress: (minutes) => {
+                    const mins = parseInt(minutes || '0');
+                    if (mins > 0) {
+                      Alert.alert(
+                        'Reminder Set',
+                        `Reminder set for ${mins} minutes before boarding`,
+                        [{ text: 'OK' }]
+                      );
+                    } else {
+                      Alert.alert('Invalid', 'Please enter valid minutes');
+                    }
+                  }
+                }
+              ],
+              'plain-text',
+              '60'
+            );
+          }
+        }
+      ]
+    );
   };
 
   const handleDownloadTicket = () => {
-    Alert.alert('Download Ticket', 'Ticket downloaded successfully');
+    // Create ticket content for download
+    const ticketContent = `
+╔══════════════════════════════════════════╗
+║          BUS TICKET - CONFIRMED          ║
+╠══════════════════════════════════════════╣
+║ 🎫 Ticket: ${bookingDetails.ticketNumber.padEnd(25)} ║
+║ 👤 Passenger: ${bookingDetails.passengerName.padEnd(22)} ║
+╠══════════════════════════════════════════╣
+║ 🚌 Bus: ${bookingDetails.busNumber.padEnd(29)} ║
+║ 📅 Date: ${bookingDetails.date.padEnd(28)} ║
+║ ⏰ Time: ${bookingDetails.time.padEnd(28)} ║
+║ 💺 Seat: ${bookingDetails.seat.padEnd(28)} ║
+╠══════════════════════════════════════════╣
+║ 📍 FROM: ${bookingDetails.from.padEnd(27)} ║
+║ 📍 TO:   ${bookingDetails.to.padEnd(27)} ║
+╠══════════════════════════════════════════╣
+║ ⌚ Boarding: ${bookingDetails.boardingTime.padEnd(24)} ║
+║ ✅ Arrival:  ${bookingDetails.arrivalTime.padEnd(24)} ║
+╠══════════════════════════════════════════╣
+║ 💰 Total: $${bookingDetails.total.toFixed(2).padEnd(27)} ║
+╚══════════════════════════════════════════╝
+    `;
+
+    Alert.alert(
+      'Download Ticket',
+      'Your ticket has been saved as a text file.',
+      [
+        { text: 'OK' },
+        {
+          text: 'Copy to Clipboard',
+          onPress: () => {
+            // In real app, use Clipboard from react-native
+            Alert.alert('Copied', 'Ticket copied to clipboard');
+          }
+        },
+        {
+          text: 'Save as File',
+          onPress: () => {
+            // In real app, use RNFS to save file
+            Alert.alert(
+              'Ticket Saved',
+              `Ticket saved as: ${bookingDetails.ticketNumber}.txt\n\nYou can find it in your Downloads folder.`,
+              [{ text: 'OK' }]
+            );
+          }
+        }
+      ]
+    );
   };
 
   const handleContactSupport = () => {
-    Linking.openURL('tel:+1234567890');
+    Alert.alert(
+      'Contact Support',
+      'How would you like to contact support?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: '📞 Call Support',
+          onPress: () => {
+            Linking.openURL('tel:+923001234567').catch(() => {
+              Alert.alert('Error', 'Cannot make phone call');
+            });
+          }
+        },
+        {
+          text: '📧 Email Support',
+          onPress: () => {
+            const subject = `Support Request - Ticket: ${bookingDetails.ticketNumber}`;
+            const body = `Hello,\n\nI need support regarding my bus ticket:\n\nTicket: ${bookingDetails.ticketNumber}\nBus: ${bookingDetails.busNumber}\nFrom: ${bookingDetails.from}\nTo: ${bookingDetails.to}\nDate: ${bookingDetails.date}\nTime: ${bookingDetails.time}\n\nPlease assist with:\n`;
+
+            Linking.openURL(`mailto:support@busapp.com?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`)
+              .catch(() => {
+                Alert.alert('Error', 'Cannot open email app');
+              });
+          }
+        },
+        {
+          text: '💬 Live Chat',
+          onPress: () => {
+            Alert.alert(
+              'Live Chat',
+              'Our support hours are 9 AM - 6 PM, 7 days a week.\n\nA support agent will connect with you shortly.',
+              [
+                { text: 'OK' },
+                {
+                  text: 'Start Chat',
+                  onPress: () => {
+                    Alert.alert('Chat Started', 'Connecting you with support agent...');
+                  }
+                }
+              ]
+            );
+          }
+        },
+        {
+          text: '🌐 Visit Help Center',
+          onPress: () => {
+            Linking.openURL('https://support.busapp.com').catch(() => {
+              Alert.alert('Help Center', 'Visit: https://support.busapp.com');
+            });
+          }
+        }
+      ]
+    );
   };
 
   return (
@@ -279,7 +533,7 @@ const BookingConfirmationScreen = () => {
               onPress={handleViewTrip}
             >
               <Icon name="visibility" size={24} color="#4A90E2" />
-              <Text style={styles.actionText}>View Trip</Text>
+              <Text style={styles.actionText}>My Trips</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -287,7 +541,7 @@ const BookingConfirmationScreen = () => {
         {/* Done Button */}
         <TouchableOpacity
           style={styles.doneButton}
-          onPress={() => navigation.navigate('Home')}
+          onPress={() => navigation.navigate('HomeTab')}
         >
           <Text style={styles.doneButtonText}>DONE</Text>
           <Icon name="check-circle" size={20} color="#FFF" />

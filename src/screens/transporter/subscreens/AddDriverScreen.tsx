@@ -1,3 +1,4 @@
+// AddDriverScreen.tsx - WITH REQUIRED EMAIL FIELD
 import React, { useState } from 'react';
 import {
   View,
@@ -8,12 +9,12 @@ import {
   SafeAreaView,
   TextInput,
   Alert,
-  Image,
   Platform,
   Modal,
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { launchImageLibrary, launchCamera } from 'react-native-image-picker';
+import firestore from '@react-native-firebase/firestore';
+import auth from '@react-native-firebase/auth';
 
 const AddDriverScreen = ({ navigation, route }: any) => {
   const mode = route.params?.mode || 'add';
@@ -24,20 +25,16 @@ const AddDriverScreen = ({ navigation, route }: any) => {
   const [currentDateField, setCurrentDateField] = useState('');
   const [selectedDate, setSelectedDate] = useState(new Date());
 
-  // Document images state
-  const [driverDocuments, setDriverDocuments] = useState({
-    cnicFront: null,
-    cnicBack: null,
-    license: null,
-    photo: null,
-  });
+  const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   const [formData, setFormData] = useState({
-    fullName: existingDriver?.name || '',
-    contactNumber: existingDriver?.contact || '',
-    email: existingDriver?.email || '',
+    fullName: existingDriver?.fullName || '',
+    contactNumber: existingDriver?.contactNumber || '',
+    email: existingDriver?.email || '', // ← Now REQUIRED
     cnic: existingDriver?.cnic || '',
-    licenseNumber: existingDriver?.license || '',
+    licenseNumber: existingDriver?.licenseNumber || '',
     licenseType: existingDriver?.licenseType || 'heavy',
     licenseExpiry: existingDriver?.licenseExpiry || '',
     address: existingDriver?.address || '',
@@ -45,6 +42,10 @@ const AddDriverScreen = ({ navigation, route }: any) => {
     joiningDate: existingDriver?.joiningDate || '',
     salary: existingDriver?.salary || '',
     employmentType: existingDriver?.employmentType || 'fulltime',
+    vehicleAssigned: existingDriver?.vehicleAssigned || '',
+    status: existingDriver?.status || 'active',
+    password: '',
+    confirmPassword: '',
   });
 
   const licenseTypes = [
@@ -59,15 +60,22 @@ const AddDriverScreen = ({ navigation, route }: any) => {
     { id: 'contract', label: 'Contract', icon: '📝' },
   ];
 
+  const statusTypes = [
+    { id: 'active', label: 'Active', color: '#34C759' },
+    { id: 'inactive', label: 'Inactive', color: '#FF3B30' },
+    { id: 'on_leave', label: 'On Leave', color: '#FF9500' },
+    { id: 'suspended', label: 'Suspended', color: '#8E8E93' },
+  ];
+
   // ========== DATE PICKER FUNCTIONS ==========
   const handleDatePress = (field: string) => {
+    if (loading) return;
     setCurrentDateField(field);
-    if (formData[field]) {
-      setSelectedDate(new Date(formData[field]));
+    if (formData[field as keyof typeof formData]) {
+      setSelectedDate(new Date(formData[field as keyof typeof formData] as string));
     } else {
       setSelectedDate(new Date());
     }
-
     setShowDatePicker(true);
   };
 
@@ -100,206 +108,409 @@ const AddDriverScreen = ({ navigation, route }: any) => {
     setShowDatePicker(false);
   };
 
-  // ========== IMAGE PICKER FUNCTIONS ==========
-  const showImagePickerOptions = (docType: string) => {
-    Alert.alert(
-      "Select Document",
-      "Choose document source",
-      [
-        {
-          text: "Camera",
-          onPress: () => takePhoto(docType)
-        },
-        {
-          text: "Gallery",
-          onPress: () => pickImageFromGallery(docType)
-        },
-        {
-          text: "Cancel",
-          style: "cancel"
-        }
-      ]
-    );
-  };
-
-  const takePhoto = async (docType: string) => {
-    const options = {
-      mediaType: 'photo',
-      quality: 0.8,
-      maxWidth: 800,
-      maxHeight: 800,
-      saveToPhotos: true,
-    };
-
-    launchCamera(options, (response) => {
-      if (response.didCancel) {
-        console.log('User cancelled camera');
-      } else if (response.errorCode) {
-        Alert.alert('Error', response.errorMessage || 'Camera error');
-      } else if (response.assets && response.assets[0]) {
-        const imageUri = response.assets[0].uri;
-
-        if (imageUri) {
-          setDriverDocuments(prev => ({
-            ...prev,
-            [docType]: imageUri
-          }));
-          Alert.alert('Success', 'Document captured successfully!');
-        }
-      }
-    });
-  };
-
-  const pickImageFromGallery = async (docType: string) => {
-    const options = {
-      mediaType: 'photo',
-      quality: 0.8,
-      maxWidth: 800,
-      maxHeight: 800,
-      selectionLimit: 1,
-    };
-
-    launchImageLibrary(options, (response) => {
-      if (response.didCancel) {
-        console.log('User cancelled gallery');
-      } else if (response.errorCode) {
-        Alert.alert('Error', response.errorMessage || 'Gallery error');
-      } else if (response.assets && response.assets[0]) {
-        const imageUri = response.assets[0].uri;
-
-        if (imageUri) {
-          setDriverDocuments(prev => ({
-            ...prev,
-            [docType]: imageUri
-          }));
-          Alert.alert('Success', 'Document selected successfully!');
-        }
-      }
-    });
-  };
-
-  const removeDocument = (docType: string) => {
-    Alert.alert(
-      "Remove Document",
-      "Are you sure you want to remove this document?",
-      [
-        {
-          text: "Cancel",
-          style: "cancel"
-        },
-        {
-          text: "Remove",
-          style: "destructive",
-          onPress: () => {
-            setDriverDocuments(prev => ({
-              ...prev,
-              [docType]: null
-            }));
-          }
-        }
-      ]
-    );
-  };
-
-  // ========== DOCUMENT PREVIEW RENDER ==========
-  const renderDocumentPreview = (docType: string, label: string) => {
-    const imageUri = driverDocuments[docType];
-
-    if (imageUri) {
-      return (
-        <TouchableOpacity
-          style={styles.documentPreviewContainer}
-          onPress={() => showImagePickerOptions(docType)}
-          onLongPress={() => removeDocument(docType)}
-        >
-          <Image
-            source={{ uri: imageUri }}
-            style={styles.documentPreview}
-            resizeMode="cover"
-          />
-          <View style={styles.documentOverlay}>
-            <Text style={styles.documentLabel}>{label}</Text>
-            <TouchableOpacity
-              style={styles.removeDocButton}
-              onPress={() => removeDocument(docType)}
-            >
-              <Text style={styles.removeDocButtonText}>✕</Text>
-            </TouchableOpacity>
-          </View>
-        </TouchableOpacity>
-      );
+  // ========== VALIDATION FUNCTIONS ==========
+  const validateForm = () => {
+    // Basic validation
+    if (!formData.fullName.trim()) {
+      Alert.alert('Error', 'Please enter driver full name');
+      return false;
     }
 
-    return (
-      <TouchableOpacity
-        style={styles.documentButton}
-        onPress={() => showImagePickerOptions(docType)}
-      >
-        <Text style={styles.documentIcon}>📄</Text>
-        <Text style={styles.documentText}>{label}</Text>
-        <Text style={styles.documentSubText}>Tap to upload</Text>
-      </TouchableOpacity>
-    );
+    if (!formData.contactNumber.trim()) {
+      Alert.alert('Error', 'Please enter contact number');
+      return false;
+    }
+
+    // Validate phone number
+    const phoneRegex = /^[0-9]{10,15}$/;
+    const cleanedPhone = formData.contactNumber.replace(/\D/g, '');
+    if (!phoneRegex.test(cleanedPhone)) {
+      Alert.alert('Error', 'Please enter a valid phone number (10-15 digits)');
+      return false;
+    }
+
+    // ✅ EMAIL IS NOW REQUIRED
+    if (!formData.email.trim()) {
+      Alert.alert('Error', 'Please enter driver email address');
+      return false;
+    }
+
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(formData.email)) {
+      Alert.alert('Error', 'Please enter a valid email address');
+      return false;
+    }
+
+    if (!formData.cnic.trim()) {
+      Alert.alert('Error', 'Please enter CNIC number');
+      return false;
+    }
+
+    // Validate CNIC format (Pakistan)
+    const cnicRegex = /^[0-9]{5}-[0-9]{7}-[0-9]{1}$/;
+    if (!cnicRegex.test(formData.cnic)) {
+      Alert.alert('Error', 'Please enter CNIC in correct format: 42301-1234567-8');
+      return false;
+    }
+
+    if (!formData.licenseNumber.trim()) {
+      Alert.alert('Error', 'Please enter license number');
+      return false;
+    }
+
+    if (!formData.address.trim()) {
+      Alert.alert('Error', 'Please enter address');
+      return false;
+    }
+
+    // Password validation for new drivers
+    if (mode === 'add') {
+      if (!formData.password) {
+        Alert.alert('Error', 'Please enter password for driver');
+        return false;
+      }
+
+      if (formData.password.length < 6) {
+        Alert.alert('Error', 'Password must be at least 6 characters');
+        return false;
+      }
+
+      if (formData.password !== formData.confirmPassword) {
+        Alert.alert('Error', 'Passwords do not match');
+        return false;
+      }
+    }
+
+    return true;
+  };
+
+  // ========== FIREBASE FUNCTIONS ==========
+  const createDriverAccount = async (driverData: any) => {
+    try {
+      // Use the password provided by transporter
+      const driverPassword = driverData.password;
+
+      // ✅ Use ACTUAL EMAIL provided by transporter (not random)
+      const driverEmail = driverData.email.trim().toLowerCase();
+
+      console.log('Creating driver account with:', {
+        email: driverEmail,
+        password: driverPassword
+      });
+
+      // Create driver user account in Firebase Auth
+      const userCredential = await auth().createUserWithEmailAndPassword(
+        driverEmail, // ← ACTUAL EMAIL FROM FORM
+        driverPassword
+      );
+
+      const driverId = userCredential.user.uid;
+
+      // Update user profile with driver role
+      await userCredential.user.updateProfile({
+        displayName: driverData.fullName,
+      });
+
+      console.log('Driver account created successfully:', driverId);
+
+      // Return driver info with ACTUAL EMAIL
+      return {
+        driverId,
+        email: driverEmail, // ← ACTUAL EMAIL
+        password: driverPassword
+      };
+
+    } catch (error: any) {
+      console.error('Driver account creation error:', error);
+
+      // If email already exists, ask transporter to use different email
+      if (error.code === 'auth/email-already-in-use') {
+        Alert.alert(
+          'Email Already Exists',
+          `The email ${driverData.email} is already registered.\n\nPlease use a different email address for this driver.`,
+          [{ text: 'OK' }]
+        );
+        throw new Error('EMAIL_ALREADY_EXISTS');
+      }
+      throw error;
+    }
+  };
+
+  const saveDriverToFirestore = async (driverId: string, driverData: any, transporterId: string, password: string) => {
+    // ✅ Store ACTUAL EMAIL in Firestore
+    const driverEmail = driverData.email.trim().toLowerCase();
+
+    const driverDataWithMeta = {
+      ...driverData,
+      uid: driverId,
+      email: driverEmail, // ← ACTUAL EMAIL
+      transporterId: transporterId,
+      passwordSetByTransporter: true,
+      passwordSetDate: new Date().toISOString(),
+      createdAt: firestore.FieldValue.serverTimestamp(),
+      updatedAt: firestore.FieldValue.serverTimestamp(),
+      accountCreated: true,
+      lastLogin: null,
+      totalRides: 0,
+      rating: 0,
+      earnings: 0,
+      documents: {
+        cnicFront: null,
+        cnicBack: null,
+        license: null,
+        photo: null,
+      },
+      assignedVehicles: [],
+      currentLocation: null,
+    };
+
+    // Remove password from Firestore data (for security)
+    const { password: _, confirmPassword: __, ...firestoreData } = driverDataWithMeta;
+
+    console.log('Saving driver to Firestore:', {
+      driverId,
+      email: driverEmail,
+      transporterId
+    });
+
+    // Save to drivers collection
+    await firestore()
+      .collection('drivers')
+      .doc(driverId)
+      .set(firestoreData);
+
+    // Also add to users collection for unified querying
+    await firestore()
+      .collection('users')
+      .doc(driverId)
+      .set({
+        uid: driverId,
+        fullName: driverData.fullName,
+        email: driverEmail, // ← ACTUAL EMAIL
+        phone: `+92${driverData.contactNumber.replace(/\D/g, '').slice(1)}`,
+        userType: 'driver',
+        transporterId: transporterId,
+        status: driverData.status || 'active',
+        createdAt: firestore.FieldValue.serverTimestamp(),
+        updatedAt: firestore.FieldValue.serverTimestamp(),
+      });
+
+    // Save credentials securely in separate collection
+    await firestore()
+      .collection('driver_credentials')
+      .doc(driverId)
+      .set({
+        driverId,
+        transporterId,
+        email: driverEmail, // ← ACTUAL EMAIL
+        password: password,
+        driverName: driverData.fullName,
+        phone: driverData.contactNumber,
+        createdAt: firestore.FieldValue.serverTimestamp(),
+        accessAllowed: [transporterId],
+      });
+
+    // Update transporter's drivers list
+    await firestore()
+      .collection('transporters')
+      .doc(transporterId)
+      .update({
+        driversCount: firestore.FieldValue.increment(1),
+        updatedAt: firestore.FieldValue.serverTimestamp(),
+      });
+
+    console.log('Driver saved to Firestore successfully');
+    return driverDataWithMeta;
+  };
+
+  const updateDriverInFirestore = async (driverId: string, driverData: any) => {
+    const { password: _, confirmPassword: __, ...updateData } = {
+      ...driverData,
+      updatedAt: firestore.FieldValue.serverTimestamp(),
+    };
+
+    // Update in drivers collection
+    await firestore()
+      .collection('drivers')
+      .doc(driverId)
+      .update(updateData);
+
+    // Also update in users collection
+    await firestore()
+      .collection('users')
+      .doc(driverId)
+      .update({
+        fullName: driverData.fullName,
+        email: driverData.email.trim().toLowerCase(),
+        phone: `+92${driverData.contactNumber.replace(/\D/g, '').slice(1)}`,
+        status: driverData.status || 'active',
+        updatedAt: firestore.FieldValue.serverTimestamp(),
+      });
+
+    return updateData;
   };
 
   // ========== FORM SUBMISSION ==========
-  const handleSubmit = () => {
-    // Validation
-    if (!formData.fullName.trim()) {
-      Alert.alert('Error', 'Please enter full name');
-      return;
-    }
-    if (!formData.contactNumber.trim()) {
-      Alert.alert('Error', 'Please enter contact number');
-      return;
-    }
-    if (!formData.cnic.trim()) {
-      Alert.alert('Error', 'Please enter CNIC number');
-      return;
-    }
-    if (!formData.licenseNumber.trim()) {
-      Alert.alert('Error', 'Please enter license number');
+  const handleSubmit = async () => {
+    if (!validateForm()) {
       return;
     }
 
-    const finalData = {
-      ...formData,
-      documents: driverDocuments
-    };
+    setLoading(true);
 
-    Alert.alert(
-      mode === 'add' ? 'Add Driver' : 'Update Driver',
-      mode === 'add'
-        ? 'Are you sure you want to add this driver?'
-        : 'Are you sure you want to update driver details?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Confirm',
-          onPress: () => {
-            Alert.alert(
-              'Success',
-              mode === 'add' ? 'Driver added successfully!' : 'Driver updated successfully!',
-              [
-                {
-                  text: 'OK',
-                  onPress: () => {
-                    console.log('Driver Data:', finalData);
-                    navigation.goBack();
+    try {
+      // Get current transporter (logged in user)
+      const currentUser = auth().currentUser;
+      if (!currentUser) {
+        Alert.alert('Error', 'You must be logged in to add drivers');
+        navigation.navigate('Login');
+        setLoading(false);
+        return;
+      }
+
+      const transporterId = currentUser.uid;
+
+      // Prepare driver data
+      const driverData = {
+        ...formData,
+        phone: `+92${formData.contactNumber.replace(/\D/g, '').slice(1)}`,
+        phoneLocal: formData.contactNumber,
+      };
+
+      let driverAccount;
+      let successMessage = '';
+
+      if (mode === 'add') {
+        // Create new driver with transporter-provided email and password
+        driverAccount = await createDriverAccount(driverData);
+        await saveDriverToFirestore(driverAccount.driverId, driverData, transporterId, driverAccount.password);
+
+        successMessage = `✅ Driver Added Successfully!\n\n📋 Driver Login Credentials:\n\n📧 Email: ${driverAccount.email}\n🔑 Password: ${driverAccount.password}\n\n⚠️ Important Instructions:\n1. Share these EXACT credentials with the driver\n2. Driver must use this EXACT email to login\n3. Save this information securely\n4. Driver can login immediately`;
+
+      } else {
+        // Update existing driver
+        const driverId = existingDriver.uid;
+        await updateDriverInFirestore(driverId, driverData);
+        successMessage = 'Driver updated successfully!';
+      }
+
+      setLoading(false);
+
+      // Show success with clear instructions
+      Alert.alert(
+        'Success',
+        successMessage,
+        [
+          {
+            text: 'OK',
+            onPress: () => {
+              navigation.goBack();
+            }
+          },
+          mode === 'add' && {
+            text: '📋 Show Credentials Again',
+            onPress: () => {
+              Alert.alert(
+                'Driver Credentials',
+                `Email: ${driverAccount.email}\nPassword: ${driverAccount.password}`,
+                [
+                  { text: 'OK' },
+                  {
+                    text: 'Email to Driver',
+                    onPress: () => {
+                      Alert.alert(
+                        'Send Email',
+                        `Send credentials to driver via email?\n\nEmail: ${driverAccount.email}`,
+                        [
+                          { text: 'Cancel', style: 'cancel' },
+                          { text: 'Send', onPress: () => {
+                            // Here you would implement email sending
+                            Alert.alert('Info', 'Email functionality will be added in next update');
+                          }}
+                        ]
+                      );
+                    }
                   }
-                },
-                {
-                  text: 'Assign Bus',
-                  onPress: () => {
-                    Alert.alert('Assign Bus', 'Redirecting to bus assignment...');
-                  }
-                }
-              ]
-            );
+                ]
+              );
+            }
           }
-        }
-      ]
+        ].filter(Boolean) as { text: string; onPress: () => void }[]
+      );
+
+    } catch (error: any) {
+      setLoading(false);
+      console.error('Driver save error:', error);
+
+      if (error.message === 'EMAIL_ALREADY_EXISTS') {
+        // Already handled in createDriverAccount
+        return;
+      }
+
+      let errorMessage = 'Failed to save driver. Please try again.';
+
+      switch (error.code) {
+        case 'auth/email-already-in-use':
+          errorMessage = 'This email is already registered. Please use a different email.';
+          break;
+        case 'auth/invalid-email':
+          errorMessage = 'Invalid email address format.';
+          break;
+        case 'auth/weak-password':
+          errorMessage = 'Password is too weak. Please use stronger password.';
+          break;
+        case 'permission-denied':
+          errorMessage = 'You do not have permission to add drivers.';
+          break;
+        default:
+          errorMessage = error.message || 'An unknown error occurred.';
+      }
+
+      Alert.alert('Error', errorMessage);
+    }
+  };
+
+  // ========== RENDER FUNCTIONS ==========
+  const renderStatusOptions = () => {
+    return (
+      <View style={styles.statusOptionsContainer}>
+        {statusTypes.map((status) => (
+          <TouchableOpacity
+            key={status.id}
+            style={[
+              styles.statusButton,
+              { borderColor: status.color },
+              formData.status === status.id && { backgroundColor: `${status.color}20` }
+            ]}
+            onPress={() => {
+              if (!loading) {
+                setFormData({...formData, status: status.id});
+              }
+            }}
+            disabled={loading}
+          >
+            <View style={[styles.statusDot, { backgroundColor: status.color }]} />
+            <Text style={styles.statusLabel}>{status.label}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
     );
+  };
+
+  // Generate random password
+  const generateRandomPassword = () => {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%';
+    let password = '';
+    for (let i = 0; i < 10; i++) {
+      password += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    setFormData({
+      ...formData,
+      password: password,
+      confirmPassword: password
+    });
+    Alert.alert('Password Generated', `Generated: ${password}`);
   };
 
   return (
@@ -307,7 +518,11 @@ const AddDriverScreen = ({ navigation, route }: any) => {
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()}>
+          <TouchableOpacity onPress={() => {
+            if (!loading) {
+              navigation.goBack();
+            }
+          }}>
             <Text style={styles.backButton}>←</Text>
           </TouchableOpacity>
           <Text style={styles.title}>
@@ -328,6 +543,7 @@ const AddDriverScreen = ({ navigation, route }: any) => {
               placeholder="Ali Ahmed"
               value={formData.fullName}
               onChangeText={(text) => setFormData({...formData, fullName: text})}
+              editable={!loading}
             />
           </View>
 
@@ -336,21 +552,28 @@ const AddDriverScreen = ({ navigation, route }: any) => {
               <Text style={styles.label}>Contact Number *</Text>
               <TextInput
                 style={styles.input}
-                placeholder="+92 300 1234567"
+                placeholder="03001234567"
                 value={formData.contactNumber}
                 onChangeText={(text) => setFormData({...formData, contactNumber: text})}
                 keyboardType="phone-pad"
+                editable={!loading}
               />
             </View>
             <View style={[styles.inputGroup, { flex: 1, marginLeft: 8 }]}>
-              <Text style={styles.label}>Email</Text>
+              <Text style={styles.label}>Email Address *</Text> {/* ← NOW REQUIRED */}
               <TextInput
                 style={styles.input}
                 placeholder="driver@email.com"
                 value={formData.email}
                 onChangeText={(text) => setFormData({...formData, email: text})}
                 keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+                editable={!loading}
               />
+              <Text style={styles.inputNote}>
+                Driver will use this email to login
+              </Text>
             </View>
           </View>
 
@@ -361,11 +584,12 @@ const AddDriverScreen = ({ navigation, route }: any) => {
               placeholder="42301-1234567-8"
               value={formData.cnic}
               onChangeText={(text) => setFormData({...formData, cnic: text})}
+              editable={!loading}
             />
           </View>
 
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Address</Text>
+            <Text style={styles.label}>Address *</Text>
             <TextInput
               style={[styles.input, styles.textArea]}
               placeholder="House #, Street, City"
@@ -373,6 +597,7 @@ const AddDriverScreen = ({ navigation, route }: any) => {
               onChangeText={(text) => setFormData({...formData, address: text})}
               multiline
               numberOfLines={3}
+              editable={!loading}
             />
           </View>
 
@@ -380,12 +605,82 @@ const AddDriverScreen = ({ navigation, route }: any) => {
             <Text style={styles.label}>Emergency Contact</Text>
             <TextInput
               style={styles.input}
-              placeholder="+92 300 9876543"
+              placeholder="03009876543"
               value={formData.emergencyContact}
               onChangeText={(text) => setFormData({...formData, emergencyContact: text})}
               keyboardType="phone-pad"
+              editable={!loading}
             />
           </View>
+
+          {/* Login Credentials (Only for new drivers) */}
+          {mode === 'add' && (
+            <>
+              <Text style={styles.sectionTitle}>🔐 Login Credentials</Text>
+
+              <View style={styles.passwordHeader}>
+                <Text style={styles.label}>Set Driver Password *</Text>
+                <TouchableOpacity onPress={generateRandomPassword} disabled={loading}>
+                  <Text style={styles.generatePasswordText}>🎲 Generate</Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.inputGroup}>
+                <View style={styles.passwordInputContainer}>
+                  <TextInput
+                    style={[styles.input, styles.passwordInput]}
+                    placeholder="Enter password (min 6 chars)"
+                    value={formData.password}
+                    onChangeText={(text) => setFormData({...formData, password: text})}
+                    secureTextEntry={!showPassword}
+                    editable={!loading}
+                  />
+                  <TouchableOpacity
+                    style={styles.eyeButton}
+                    onPress={() => setShowPassword(!showPassword)}
+                    disabled={loading}
+                  >
+                    <Text style={styles.eyeIcon}>{showPassword ? '👁️' : '👁️‍🗨️'}</Text>
+                  </TouchableOpacity>
+                </View>
+                <Text style={styles.passwordHint}>
+                  Use strong password with letters, numbers, and symbols
+                </Text>
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Confirm Password *</Text>
+                <View style={styles.passwordInputContainer}>
+                  <TextInput
+                    style={[styles.input, styles.passwordInput]}
+                    placeholder="Confirm password"
+                    value={formData.confirmPassword}
+                    onChangeText={(text) => setFormData({...formData, confirmPassword: text})}
+                    secureTextEntry={!showConfirmPassword}
+                    editable={!loading}
+                  />
+                  <TouchableOpacity
+                    style={styles.eyeButton}
+                    onPress={() => setShowConfirmPassword(!showConfirmPassword)}
+                    disabled={loading}
+                  >
+                    <Text style={styles.eyeIcon}>{showConfirmPassword ? '👁️' : '👁️‍🗨️'}</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              <View style={styles.passwordInfo}>
+                <Text style={styles.passwordInfoTitle}>📝 Important Instructions:</Text>
+                <Text style={styles.passwordInfoText}>
+                  1. Set a password for the driver{'\n'}
+                  2. Share credentials securely with driver{'\n'}
+                  3. Driver will use the email above to login{'\n'}
+                  4. Driver can change password later{'\n'}
+                  5. Keep credentials confidential
+                </Text>
+              </View>
+            </>
+          )}
 
           {/* License Information */}
           <Text style={styles.sectionTitle}>📄 License Details</Text>
@@ -397,6 +692,7 @@ const AddDriverScreen = ({ navigation, route }: any) => {
               placeholder="LHR-123456"
               value={formData.licenseNumber}
               onChangeText={(text) => setFormData({...formData, licenseNumber: text})}
+              editable={!loading}
             />
           </View>
 
@@ -410,7 +706,12 @@ const AddDriverScreen = ({ navigation, route }: any) => {
                     styles.optionButton,
                     formData.licenseType === type.id && styles.optionButtonSelected
                   ]}
-                  onPress={() => setFormData({...formData, licenseType: type.id})}
+                  onPress={() => {
+                    if (!loading) {
+                      setFormData({...formData, licenseType: type.id});
+                    }
+                  }}
+                  disabled={loading}
                 >
                   <Text style={styles.optionIcon}>{type.icon}</Text>
                   <Text style={[
@@ -427,7 +728,7 @@ const AddDriverScreen = ({ navigation, route }: any) => {
           <View style={styles.inputGroup}>
             <Text style={styles.label}>License Expiry Date</Text>
             <TouchableOpacity
-              style={styles.dateInput}
+              style={[styles.dateInput, loading && styles.disabledInput]}
               onPress={() => handleDatePress('licenseExpiry')}
             >
               <Text style={formData.licenseExpiry ? styles.dateSelectedText : styles.datePlaceholderText}>
@@ -443,7 +744,7 @@ const AddDriverScreen = ({ navigation, route }: any) => {
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Joining Date</Text>
             <TouchableOpacity
-              style={styles.dateInput}
+              style={[styles.dateInput, loading && styles.disabledInput]}
               onPress={() => handleDatePress('joiningDate')}
             >
               <Text style={formData.joiningDate ? styles.dateSelectedText : styles.datePlaceholderText}>
@@ -462,6 +763,7 @@ const AddDriverScreen = ({ navigation, route }: any) => {
                 value={formData.salary}
                 onChangeText={(text) => setFormData({...formData, salary: text})}
                 keyboardType="numeric"
+                editable={!loading}
               />
             </View>
             <View style={[styles.inputGroup, { flex: 1, marginLeft: 8 }]}>
@@ -474,7 +776,12 @@ const AddDriverScreen = ({ navigation, route }: any) => {
                       styles.employmentButton,
                       formData.employmentType === type.id && styles.employmentButtonSelected
                     ]}
-                    onPress={() => setFormData({...formData, employmentType: type.id})}
+                    onPress={() => {
+                      if (!loading) {
+                        setFormData({...formData, employmentType: type.id});
+                      }
+                    }}
+                    disabled={loading}
                   >
                     <Text style={[
                       styles.employmentLabel,
@@ -488,32 +795,56 @@ const AddDriverScreen = ({ navigation, route }: any) => {
             </View>
           </View>
 
-          {/* Document Upload */}
-          <Text style={styles.sectionTitle}>📎 Upload Documents</Text>
-          <View style={styles.documentUploadContainer}>
-            {renderDocumentPreview('cnicFront', 'CNIC Front')}
-            {renderDocumentPreview('cnicBack', 'CNIC Back')}
-            {renderDocumentPreview('license', 'License')}
-            {renderDocumentPreview('photo', 'Photo')}
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Driver Status</Text>
+            {renderStatusOptions()}
+          </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Assigned Vehicle (Optional)</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Bus-01 or Registration Number"
+              value={formData.vehicleAssigned}
+              onChangeText={(text) => setFormData({...formData, vehicleAssigned: text})}
+              editable={!loading}
+            />
           </View>
 
           {/* Action Buttons */}
           <View style={styles.actionButtons}>
             <TouchableOpacity
               style={[styles.actionButton, styles.cancelButton]}
-              onPress={() => navigation.goBack()}
+              onPress={() => {
+                if (!loading) {
+                  navigation.goBack();
+                }
+              }}
+              disabled={loading}
             >
               <Text style={styles.cancelButtonText}>Cancel</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[styles.actionButton, styles.submitButton]}
+              style={[styles.actionButton, styles.submitButton, loading && styles.buttonDisabled]}
               onPress={handleSubmit}
+              disabled={loading}
             >
               <Text style={styles.submitButtonText}>
-                {mode === 'add' ? 'Add Driver' : 'Update Driver'}
+                {loading ? 'Saving...' : mode === 'add' ? 'Add Driver' : 'Update Driver'}
               </Text>
             </TouchableOpacity>
+          </View>
+
+          {/* Information Note */}
+          <View style={styles.infoNote}>
+            <Text style={styles.infoNoteTitle}>⚠️ Important:</Text>
+            <Text style={styles.infoNoteText}>
+              • Driver will use the provided email and password to login{'\n'}
+              • Share credentials securely with driver{'\n'}
+              • Driver can change password after login{'\n'}
+              • Keep a record of driver credentials
+            </Text>
           </View>
         </View>
 
@@ -631,6 +962,10 @@ const styles = StyleSheet.create({
     fontSize: 16,
     backgroundColor: '#FFFFFF',
   },
+  disabledInput: {
+    backgroundColor: '#F5F5F5',
+    opacity: 0.7,
+  },
   textArea: {
     minHeight: 80,
     textAlignVertical: 'top',
@@ -718,89 +1053,96 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontWeight: '600',
   },
-  documentUploadContainer: {
+  statusOptionsContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'space-between',
+    marginHorizontal: -4,
   },
-  documentButton: {
-    width: '48%',
-    aspectRatio: 1.5,
-    borderWidth: 2,
-    borderColor: '#E0E0E0',
-    borderStyle: 'dashed',
-    borderRadius: 12,
-    justifyContent: 'center',
+  statusButton: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
-    backgroundColor: '#F8F9FA',
-    padding: 10,
-  },
-  documentIcon: {
-    fontSize: 32,
-    marginBottom: 8,
-    color: '#666666',
-  },
-  documentText: {
-    fontSize: 12,
-    color: '#666666',
-    textAlign: 'center',
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  documentSubText: {
-    fontSize: 10,
-    color: '#999999',
-    textAlign: 'center',
-  },
-  documentPreviewContainer: {
-    width: '48%',
-    aspectRatio: 1.5,
-    borderRadius: 12,
-    overflow: 'hidden',
-    marginBottom: 12,
-    position: 'relative',
     borderWidth: 1,
-    borderColor: '#E0E0E0',
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    margin: 4,
+    backgroundColor: '#FFFFFF',
   },
-  documentPreview: {
-    width: '100%',
-    height: '100%',
-    backgroundColor: '#f0f0f0',
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 6,
   },
-  documentOverlay: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    padding: 8,
+  statusLabel: {
+    fontSize: 12,
+    color: '#333333',
+    fontWeight: '500',
+  },
+  // Password section styles
+  passwordHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    marginBottom: 8,
   },
-  documentLabel: {
-    color: '#FFFFFF',
-    fontSize: 10,
+  generatePasswordText: {
+    color: '#4A90E2',
+    fontSize: 14,
     fontWeight: '600',
   },
-  removeDocButton: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    borderRadius: 12,
-    width: 24,
-    height: 24,
-    justifyContent: 'center',
+  passwordInputContainer: {
+    flexDirection: 'row',
     alignItems: 'center',
   },
-  removeDocButtonText: {
-    color: '#FFFFFF',
+  passwordInput: {
+    flex: 1,
+    paddingRight: 40,
+  },
+  eyeButton: {
+    position: 'absolute',
+    right: 12,
+    padding: 4,
+  },
+  eyeIcon: {
+    fontSize: 20,
+  },
+  passwordHint: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 4,
+    fontStyle: 'italic',
+  },
+  passwordInfo: {
+    backgroundColor: '#FFF3E0',
+    padding: 16,
+    borderRadius: 8,
+    marginBottom: 20,
+    borderLeftWidth: 4,
+    borderLeftColor: '#FFB300',
+  },
+  passwordInfoTitle: {
     fontSize: 14,
     fontWeight: 'bold',
+    color: '#E65100',
+    marginBottom: 8,
+  },
+  passwordInfoText: {
+    fontSize: 12,
+    color: '#5D4037',
+    lineHeight: 18,
+  },
+  // Input note for email
+  inputNote: {
+    fontSize: 11,
+    color: '#666',
+    marginTop: 4,
+    fontStyle: 'italic',
   },
   actionButtons: {
     flexDirection: 'row',
     marginTop: 32,
-    marginBottom: 40,
+    marginBottom: 20,
   },
   actionButton: {
     flex: 1,
@@ -815,6 +1157,9 @@ const styles = StyleSheet.create({
   submitButton: {
     backgroundColor: '#4A90E2',
   },
+  buttonDisabled: {
+    backgroundColor: '#6c8bc7',
+  },
   cancelButtonText: {
     color: '#666666',
     fontWeight: '600',
@@ -824,6 +1169,25 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontWeight: '600',
     fontSize: 16,
+  },
+  infoNote: {
+    backgroundColor: '#E8F0FE',
+    padding: 16,
+    borderRadius: 8,
+    marginTop: 16,
+    borderLeftWidth: 4,
+    borderLeftColor: '#1a73e8',
+  },
+  infoNoteTitle: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#1a73e8',
+    marginBottom: 8,
+  },
+  infoNoteText: {
+    fontSize: 12,
+    color: '#1a73e8',
+    lineHeight: 18,
   },
   // Modal styles
   modalOverlay: {

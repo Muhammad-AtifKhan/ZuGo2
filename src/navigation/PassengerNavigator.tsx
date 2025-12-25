@@ -3,7 +3,6 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 
-
 // Import screens
 import HomeScreen from '../screens/passenger/HomeScreen';
 import SearchResultsScreen from '../screens/passenger/SearchResultsScreen';
@@ -13,6 +12,7 @@ import BookingConfirmationScreen from '../screens/passenger/BookingConfirmationS
 import MyTripsScreen from '../screens/passenger/MyTripsScreen';
 import TrackScreen from '../screens/passenger/TrackScreen';
 import ProfileScreen from '../screens/passenger/ProfileScreen';
+import AlertsScreen from '../screens/passenger/AlertsScreen'; // Add this import
 
 export type PassengerStackParamList = {
   Home: undefined;
@@ -41,6 +41,10 @@ export type PassengerStackParamList = {
   MyTrips: undefined;
   Track: undefined;
   Profile: undefined;
+  Alerts: { // Add this type
+    tripId: string;
+    busNumber: string;
+  };
 };
 
 const Stack = createNativeStackNavigator<PassengerStackParamList>();
@@ -52,9 +56,72 @@ const HomeStack = () => {
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       <Stack.Screen name="Home" component={HomeScreen} />
       <Stack.Screen name="SearchResults" component={SearchResultsScreen} />
-    <Stack.Screen name="SeatSelection" component={SeatSelectionScreen} />
-       <Stack.Screen name="Payment" component={PaymentScreen} />
+      <Stack.Screen name="SeatSelection" component={SeatSelectionScreen} />
+      <Stack.Screen name="Payment" component={PaymentScreen} />
       <Stack.Screen name="BookingConfirmation" component={BookingConfirmationScreen} />
+      <Stack.Screen
+        name="Alerts"
+        component={AlertsScreen}
+        options={{
+          headerShown: true,
+          title: 'Alerts & Updates',
+          headerStyle: {
+            backgroundColor: '#1A237E',
+          },
+          headerTintColor: '#FFF',
+          headerTitleStyle: {
+            fontWeight: 'bold',
+          },
+        }}
+      />
+    </Stack.Navigator>
+  );
+};
+
+// Track Stack Navigator - Since Track has alerts navigation
+const TrackStack = () => {
+  return (
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="TrackMain" component={TrackScreen} />
+      <Stack.Screen
+        name="Alerts"
+        component={AlertsScreen}
+        options={{
+          headerShown: true,
+          title: 'Alerts & Updates',
+          headerStyle: {
+            backgroundColor: '#1A237E',
+          },
+          headerTintColor: '#FFF',
+          headerTitleStyle: {
+            fontWeight: 'bold',
+          },
+        }}
+      />
+    </Stack.Navigator>
+  );
+};
+
+// MyTrips Stack Navigator
+const MyTripsStack = () => {
+  return (
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="MyTripsMain" component={MyTripsScreen} />
+      <Stack.Screen
+        name="Alerts"
+        component={AlertsScreen}
+        options={{
+          headerShown: true,
+          title: 'Alerts & Updates',
+          headerStyle: {
+            backgroundColor: '#1A237E',
+          },
+          headerTintColor: '#FFF',
+          headerTitleStyle: {
+            fontWeight: 'bold',
+          },
+        }}
+      />
     </Stack.Navigator>
   );
 };
@@ -86,7 +153,7 @@ const PassengerNavigator = () => {
       />
       <Tab.Screen
         name="MyTrips"
-        component={MyTripsScreen}
+        component={MyTripsStack}
         options={{
           tabBarLabel: 'My Trips',
           tabBarIcon: ({ color, size }) => (
@@ -96,7 +163,7 @@ const PassengerNavigator = () => {
       />
       <Tab.Screen
         name="Track"
-        component={TrackScreen}
+        component={TrackStack}
         options={{
           tabBarLabel: 'Track',
           tabBarIcon: ({ color, size }) => (

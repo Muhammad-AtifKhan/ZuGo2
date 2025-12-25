@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "419013259294",
+    "project_id": "zugo2-2d31a",
+    "storage_bucket": "zugo2-2d31a.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:419013259294:android:338ca803b9f6332bbe3e0f",
+        "android_client_info": {
+          "package_name": "com.citytransportmanagementsystem"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA3AgzNoHpce8xqgT2bpgsV6pTlrMS430w"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

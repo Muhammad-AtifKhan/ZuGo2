@@ -10,6 +10,7 @@ import {
   TextInput,
   Switch,
   Image,
+  Modal,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
@@ -89,6 +90,20 @@ const ProfileScreen = () => {
   const [isEditing, setIsEditing] = useState(false);
   const [activeSection, setActiveSection] = useState<'profile' | 'payments' | 'notifications' | 'help'>('profile');
 
+  // Dropdown states
+  const [showPaymentDropdown, setShowPaymentDropdown] = useState(false);
+  const [showSeatDropdown, setShowSeatDropdown] = useState(false);
+  const [showLanguageDropdown, setShowLanguageDropdown] = useState(false);
+
+  // Payment modal states
+  const [showAddCardModal, setShowAddCardModal] = useState(false);
+  const [cardDetails, setCardDetails] = useState({
+    number: '',
+    expiry: '',
+    name: '',
+    cvv: '',
+  });
+
   const handleLogout = () => {
     Alert.alert(
       'Logout',
@@ -109,10 +124,18 @@ const ProfileScreen = () => {
 
   const handleEditProfile = () => {
     setIsEditing(true);
+    // Close all dropdowns when starting edit
+    setShowPaymentDropdown(false);
+    setShowSeatDropdown(false);
+    setShowLanguageDropdown(false);
   };
 
   const handleSaveProfile = () => {
     setIsEditing(false);
+    // Close all dropdowns when saving
+    setShowPaymentDropdown(false);
+    setShowSeatDropdown(false);
+    setShowLanguageDropdown(false);
     Alert.alert('Success', 'Profile updated successfully');
   };
 
@@ -122,45 +145,46 @@ const ProfileScreen = () => {
       'Select payment method type:',
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Credit/Debit Card', onPress: () => showAddCardForm() },
+        { text: 'Credit/Debit Card', onPress: () => setShowAddCardModal(true) },
         { text: 'JazzCash', onPress: () => addMobileWallet('jazzcash') },
         { text: 'EasyPaisa', onPress: () => addMobileWallet('easypaisa') },
       ]
     );
   };
 
-  const showAddCardForm = () => {
-    Alert.prompt(
-      'Add Card',
-      'Enter card number:',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Next',
-          onPress: (cardNumber) => {
-            if (cardNumber && cardNumber.replace(/\s/g, '').length === 16) {
-              addCardToMethods(cardNumber);
-            } else {
-              Alert.alert('Invalid', 'Please enter a valid 16-digit card number');
-            }
-          }
-        },
-      ],
-      'plain-text'
-    );
-  };
+  const handleSaveCard = () => {
+    if (!cardDetails.number || cardDetails.number.replace(/\s/g, '').length !== 16) {
+      Alert.alert('Invalid Card', 'Please enter a valid 16-digit card number');
+      return;
+    }
 
-  const addCardToMethods = (cardNumber: string) => {
+    if (!cardDetails.expiry || !/^\d{2}\/\d{2}$/.test(cardDetails.expiry)) {
+      Alert.alert('Invalid Expiry', 'Please enter expiry date in MM/YY format');
+      return;
+    }
+
+    if (!cardDetails.name) {
+      Alert.alert('Invalid Name', 'Please enter cardholder name');
+      return;
+    }
+
+    if (!cardDetails.cvv || cardDetails.cvv.length !== 3) {
+      Alert.alert('Invalid CVV', 'Please enter 3-digit CVV');
+      return;
+    }
+
     const newCard = {
       id: `card-${Date.now()}`,
-      type: 'visa',
-      lastFour: cardNumber.slice(-4),
-      expiry: '12/26',
-      name: 'New Visa Card',
+      type: cardDetails.number.startsWith('4') ? 'visa' : 'mastercard',
+      lastFour: cardDetails.number.slice(-4),
+      expiry: cardDetails.expiry,
+      name: cardDetails.name,
       isDefault: false,
     };
 
     setPaymentMethods([...paymentMethods, newCard]);
+    setShowAddCardModal(false);
+    setCardDetails({ number: '', expiry: '', name: '', cvv: '' });
     Alert.alert('Success', 'Card added successfully');
   };
 
@@ -213,23 +237,23 @@ const ProfileScreen = () => {
       'Choose contact method:',
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Call Support', onPress: () => Alert.alert('Calling', 'Calling support...') },
-        { text: 'Email Support', onPress: () => Alert.alert('Email', 'Opening email...') },
-        { text: 'Live Chat', onPress: () => Alert.alert('Chat', 'Opening chat...') },
+        { text: 'Call Support', onPress: () => Linking.openURL('tel:+92211234567') },
+        { text: 'Email Support', onPress: () => Linking.openURL('mailto:support@transport.com') },
+        { text: 'Live Chat', onPress: () => navigation.navigate('ChatSupport') },
       ]
     );
   };
 
   const handleViewFAQ = () => {
-    Alert.alert('FAQ', 'Opening frequently asked questions');
+    navigation.navigate('FAQ');
   };
 
   const handlePrivacyPolicy = () => {
-    Alert.alert('Privacy Policy', 'Opening privacy policy');
+    navigation.navigate('PrivacyPolicy');
   };
 
   const handleTermsConditions = () => {
-    Alert.alert('Terms & Conditions', 'Opening terms and conditions');
+    navigation.navigate('TermsConditions');
   };
 
   const handleDeleteAccount = () => {
@@ -245,6 +269,20 @@ const ProfileScreen = () => {
         },
       ]
     );
+  };
+
+  const formatCardNumber = (text: string) => {
+    const cleaned = text.replace(/\D/g, '');
+    const match = cleaned.match(/(\d{1,4})/g);
+    return match ? match.join(' ') : '';
+  };
+
+  const formatExpiry = (text: string) => {
+    const cleaned = text.replace(/\D/g, '');
+    if (cleaned.length >= 3) {
+      return cleaned.slice(0, 2) + '/' + cleaned.slice(2, 4);
+    }
+    return cleaned;
   };
 
   const renderProfileSection = () => (
@@ -369,12 +407,49 @@ const ProfileScreen = () => {
         <View style={styles.preferenceRow}>
           <Text style={styles.preferenceLabel}>Default Payment:</Text>
           {isEditing ? (
-            <TouchableOpacity style={styles.dropdown}>
-              <Text style={styles.dropdownText}>
-                {preferences.defaultPayment === 'card' ? 'Credit/Debit Card' : 'Mobile Wallet'}
-              </Text>
-              <Icon name="arrow-drop-down" size={24} color="#666" />
-            </TouchableOpacity>
+            <View style={styles.dropdownContainer}>
+              <TouchableOpacity
+                style={styles.dropdown}
+                onPress={() => {
+                  setShowPaymentDropdown(!showPaymentDropdown);
+                  setShowSeatDropdown(false);
+                  setShowLanguageDropdown(false);
+                }}
+              >
+                <Text style={styles.dropdownText}>
+                  {preferences.defaultPayment === 'card' ? 'Credit/Debit Card' : 'Mobile Wallet'}
+                </Text>
+                <Icon
+                  name={showPaymentDropdown ? "arrow-drop-up" : "arrow-drop-down"}
+                  size={24}
+                  color="#666"
+                />
+              </TouchableOpacity>
+
+              {showPaymentDropdown && (
+                <View style={styles.dropdownMenu}>
+                  <TouchableOpacity
+                    style={styles.dropdownMenuItem}
+                    onPress={() => {
+                      setPreferences({...preferences, defaultPayment: 'card'});
+                      setShowPaymentDropdown(false);
+                    }}
+                  >
+                    <Text style={styles.dropdownMenuItemText}>Credit/Debit Card</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.dropdownMenuItem}
+                    onPress={() => {
+                      setPreferences({...preferences, defaultPayment: 'mobile'});
+                      setShowPaymentDropdown(false);
+                    }}
+                  >
+                    <Text style={styles.dropdownMenuItemText}>Mobile Wallet</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
           ) : (
             <Text style={styles.preferenceValue}>
               {preferences.defaultPayment === 'card' ? 'Credit/Debit Card' : 'Mobile Wallet'}
@@ -385,15 +460,64 @@ const ProfileScreen = () => {
         <View style={styles.preferenceRow}>
           <Text style={styles.preferenceLabel}>Seat Preference:</Text>
           {isEditing ? (
-            <TouchableOpacity style={styles.dropdown}>
-              <Text style={styles.dropdownText}>
-                {preferences.seatPreference === 'window' ? 'Window' : 'Aisle'}
-              </Text>
-              <Icon name="arrow-drop-down" size={24} color="#666" />
-            </TouchableOpacity>
+            <View style={styles.dropdownContainer}>
+              <TouchableOpacity
+                style={styles.dropdown}
+                onPress={() => {
+                  setShowSeatDropdown(!showSeatDropdown);
+                  setShowPaymentDropdown(false);
+                  setShowLanguageDropdown(false);
+                }}
+              >
+                <Text style={styles.dropdownText}>
+                  {preferences.seatPreference === 'window' ? 'Window' :
+                   preferences.seatPreference === 'aisle' ? 'Aisle' : 'Any'}
+                </Text>
+                <Icon
+                  name={showSeatDropdown ? "arrow-drop-up" : "arrow-drop-down"}
+                  size={24}
+                  color="#666"
+                />
+              </TouchableOpacity>
+
+              {showSeatDropdown && (
+                <View style={styles.dropdownMenu}>
+                  <TouchableOpacity
+                    style={styles.dropdownMenuItem}
+                    onPress={() => {
+                      setPreferences({...preferences, seatPreference: 'window'});
+                      setShowSeatDropdown(false);
+                    }}
+                  >
+                    <Text style={styles.dropdownMenuItemText}>Window</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.dropdownMenuItem}
+                    onPress={() => {
+                      setPreferences({...preferences, seatPreference: 'aisle'});
+                      setShowSeatDropdown(false);
+                    }}
+                  >
+                    <Text style={styles.dropdownMenuItemText}>Aisle</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.dropdownMenuItem}
+                    onPress={() => {
+                      setPreferences({...preferences, seatPreference: 'any'});
+                      setShowSeatDropdown(false);
+                    }}
+                  >
+                    <Text style={styles.dropdownMenuItemText}>Any</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
           ) : (
             <Text style={styles.preferenceValue}>
-              {preferences.seatPreference === 'window' ? 'Window' : 'Aisle'}
+              {preferences.seatPreference === 'window' ? 'Window' :
+               preferences.seatPreference === 'aisle' ? 'Aisle' : 'Any'}
             </Text>
           )}
         </View>
@@ -401,15 +525,64 @@ const ProfileScreen = () => {
         <View style={styles.preferenceRow}>
           <Text style={styles.preferenceLabel}>Language:</Text>
           {isEditing ? (
-            <TouchableOpacity style={styles.dropdown}>
-              <Text style={styles.dropdownText}>
-                {preferences.language === 'english' ? 'English' : 'Urdu'}
-              </Text>
-              <Icon name="arrow-drop-down" size={24} color="#666" />
-            </TouchableOpacity>
+            <View style={styles.dropdownContainer}>
+              <TouchableOpacity
+                style={styles.dropdown}
+                onPress={() => {
+                  setShowLanguageDropdown(!showLanguageDropdown);
+                  setShowPaymentDropdown(false);
+                  setShowSeatDropdown(false);
+                }}
+              >
+                <Text style={styles.dropdownText}>
+                  {preferences.language === 'english' ? 'English' :
+                   preferences.language === 'urdu' ? 'Urdu' : 'العربية'}
+                </Text>
+                <Icon
+                  name={showLanguageDropdown ? "arrow-drop-up" : "arrow-drop-down"}
+                  size={24}
+                  color="#666"
+                />
+              </TouchableOpacity>
+
+              {showLanguageDropdown && (
+                <View style={styles.dropdownMenu}>
+                  <TouchableOpacity
+                    style={styles.dropdownMenuItem}
+                    onPress={() => {
+                      setPreferences({...preferences, language: 'english'});
+                      setShowLanguageDropdown(false);
+                    }}
+                  >
+                    <Text style={styles.dropdownMenuItemText}>English</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.dropdownMenuItem}
+                    onPress={() => {
+                      setPreferences({...preferences, language: 'urdu'});
+                      setShowLanguageDropdown(false);
+                    }}
+                  >
+                    <Text style={styles.dropdownMenuItemText}>Urdu</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.dropdownMenuItem}
+                    onPress={() => {
+                      setPreferences({...preferences, language: 'arabic'});
+                      setShowLanguageDropdown(false);
+                    }}
+                  >
+                    <Text style={styles.dropdownMenuItemText}>العربية</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
           ) : (
             <Text style={styles.preferenceValue}>
-              {preferences.language === 'english' ? 'English' : 'Urdu'}
+              {preferences.language === 'english' ? 'English' :
+               preferences.language === 'urdu' ? 'Urdu' : 'العربية'}
             </Text>
           )}
         </View>
@@ -568,7 +741,12 @@ const ProfileScreen = () => {
 
             <TouchableOpacity
               style={[styles.actionButton, styles.cancelButton]}
-              onPress={() => setIsEditing(false)}
+              onPress={() => {
+                setIsEditing(false);
+                setShowPaymentDropdown(false);
+                setShowSeatDropdown(false);
+                setShowLanguageDropdown(false);
+              }}
             >
               <Icon name="close" size={20} color="#666" />
               <Text style={styles.cancelButtonText}>CANCEL</Text>
@@ -652,13 +830,13 @@ const ProfileScreen = () => {
         <Text style={styles.walletsTitle}>MOBILE WALLETS</Text>
 
         <View style={styles.walletsList}>
-          <TouchableOpacity style={styles.walletButton}>
+          <TouchableOpacity style={styles.walletButton} onPress={() => addMobileWallet('jazzcash')}>
             <Icon name="smartphone" size={24} color="#4A90E2" />
             <Text style={styles.walletText}>JazzCash</Text>
             <Text style={styles.walletStatus}>Not Connected</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.walletButton}>
+          <TouchableOpacity style={styles.walletButton} onPress={() => addMobileWallet('easypaisa')}>
             <Icon name="smartphone" size={24} color="#4A90E2" />
             <Text style={styles.walletText}>EasyPaisa</Text>
             <Text style={styles.walletStatus}>Not Connected</Text>
@@ -838,25 +1016,25 @@ const ProfileScreen = () => {
       <View style={styles.helpCard}>
         <Text style={styles.helpSubtitle}>QUICK HELP</Text>
 
-        <TouchableOpacity style={styles.helpItem}>
+        <TouchableOpacity style={styles.helpItem} onPress={handleViewFAQ}>
           <Icon name="help" size={20} color="#4A90E2" />
           <Text style={styles.helpItemText}>How to book a trip?</Text>
           <Icon name="chevron-right" size={24} color="#999" />
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.helpItem}>
+        <TouchableOpacity style={styles.helpItem} onPress={handleViewFAQ}>
           <Icon name="cancel" size={20} color="#4A90E2" />
           <Text style={styles.helpItemText}>How to cancel a booking?</Text>
           <Icon name="chevron-right" size={24} color="#999" />
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.helpItem}>
+        <TouchableOpacity style={styles.helpItem} onPress={handleViewFAQ}>
           <Icon name="location-on" size={20} color="#4A90E2" />
           <Text style={styles.helpItemText}>How to track my bus?</Text>
           <Icon name="chevron-right" size={24} color="#999" />
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.helpItem}>
+        <TouchableOpacity style={styles.helpItem} onPress={handleViewFAQ}>
           <Icon name="payment" size={20} color="#4A90E2" />
           <Text style={styles.helpItemText}>Payment issues?</Text>
           <Icon name="chevron-right" size={24} color="#999" />
@@ -866,7 +1044,7 @@ const ProfileScreen = () => {
       <View style={styles.helpCard}>
         <Text style={styles.helpSubtitle}>CONTACT SUPPORT</Text>
 
-        <TouchableOpacity style={styles.contactItem} onPress={() => Alert.alert('Call', 'Calling support...')}>
+        <TouchableOpacity style={styles.contactItem} onPress={handleContactSupport}>
           <Icon name="phone" size={24} color="#4CAF50" />
           <View style={styles.contactInfo}>
             <Text style={styles.contactLabel}>Phone Support</Text>
@@ -874,7 +1052,7 @@ const ProfileScreen = () => {
           </View>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.contactItem} onPress={() => Alert.alert('Email', 'Opening email...')}>
+        <TouchableOpacity style={styles.contactItem} onPress={handleContactSupport}>
           <Icon name="email" size={24} color="#FF9800" />
           <View style={styles.contactInfo}>
             <Text style={styles.contactLabel}>Email Support</Text>
@@ -882,7 +1060,7 @@ const ProfileScreen = () => {
           </View>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.contactItem} onPress={() => Alert.alert('WhatsApp', 'Opening WhatsApp...')}>
+        <TouchableOpacity style={styles.contactItem} onPress={handleContactSupport}>
           <Icon name="chat" size={24} color="#25D366" />
           <View style={styles.contactInfo}>
             <Text style={styles.contactLabel}>WhatsApp</Text>
@@ -925,6 +1103,98 @@ const ProfileScreen = () => {
         <Text style={styles.appCopyright}>© 2024 City Transport. All rights reserved.</Text>
       </View>
     </View>
+  );
+
+  // Add Payment Method Modal
+  const AddCardModal = () => (
+    <Modal
+      visible={showAddCardModal}
+      animationType="slide"
+      transparent={true}
+      onRequestClose={() => setShowAddCardModal(false)}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContent}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Add New Card</Text>
+            <TouchableOpacity onPress={() => setShowAddCardModal(false)}>
+              <Icon name="close" size={24} color="#666" />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView style={styles.modalBody}>
+            <View style={styles.formGroup}>
+              <Text style={styles.formLabel}>Card Number</Text>
+              <TextInput
+                style={styles.formInput}
+                placeholder="1234 5678 9012 3456"
+                value={formatCardNumber(cardDetails.number)}
+                onChangeText={(text) => setCardDetails({...cardDetails, number: text.replace(/\s/g, '')})}
+                keyboardType="numeric"
+                maxLength={19}
+              />
+            </View>
+
+            <View style={styles.formRow}>
+              <View style={[styles.formGroup, {flex: 1, marginRight: 10}]}>
+                <Text style={styles.formLabel}>Expiry Date</Text>
+                <TextInput
+                  style={styles.formInput}
+                  placeholder="MM/YY"
+                  value={cardDetails.expiry}
+                  onChangeText={(text) => setCardDetails({...cardDetails, expiry: formatExpiry(text)})}
+                  keyboardType="numeric"
+                  maxLength={5}
+                />
+              </View>
+
+              <View style={[styles.formGroup, {flex: 1}]}>
+                <Text style={styles.formLabel}>CVV</Text>
+                <TextInput
+                  style={styles.formInput}
+                  placeholder="123"
+                  value={cardDetails.cvv}
+                  onChangeText={(text) => setCardDetails({...cardDetails, cvv: text.replace(/\D/g, '')})}
+                  keyboardType="numeric"
+                  maxLength={3}
+                  secureTextEntry
+                />
+              </View>
+            </View>
+
+            <View style={styles.formGroup}>
+              <Text style={styles.formLabel}>Cardholder Name</Text>
+              <TextInput
+                style={styles.formInput}
+                placeholder="John Doe"
+                value={cardDetails.name}
+                onChangeText={(text) => setCardDetails({...cardDetails, name: text})}
+              />
+            </View>
+
+            <View style={styles.securityNote}>
+              <Icon name="lock" size={16} color="#4CAF50" />
+              <Text style={styles.securityText}>Your payment information is secure and encrypted</Text>
+            </View>
+          </ScrollView>
+
+          <View style={styles.modalFooter}>
+            <TouchableOpacity
+              style={[styles.modalButton, styles.cancelModalButton]}
+              onPress={() => setShowAddCardModal(false)}
+            >
+              <Text style={styles.cancelModalButtonText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.modalButton, styles.saveModalButton]}
+              onPress={handleSaveCard}
+            >
+              <Text style={styles.saveModalButtonText}>Add Card</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
   );
 
   return (
@@ -1037,6 +1307,9 @@ const ProfileScreen = () => {
           <Text style={styles.logoutText}>LOGOUT</Text>
         </TouchableOpacity>
       </ScrollView>
+
+      {/* Add Card Modal */}
+      <AddCardModal />
     </SafeAreaView>
   );
 };
@@ -1251,6 +1524,10 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#1A1A1A',
   },
+  dropdownContainer: {
+    position: 'relative',
+    minWidth: 150,
+  },
   dropdown: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1266,6 +1543,33 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#1A1A1A',
     flex: 1,
+  },
+  dropdownMenu: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    backgroundColor: '#FFF',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E3E8EF',
+    marginTop: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    zIndex: 1000,
+  },
+  dropdownMenuItem: {
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  dropdownMenuItemText: {
+    fontSize: 16,
+    color: '#1A1A1A',
   },
   specialNeedsContainer: {
     flexDirection: 'row',
@@ -1658,6 +1962,101 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     marginLeft: 8,
+  },
+  // Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#FFF',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '80%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#1A237E',
+  },
+  modalBody: {
+    padding: 20,
+  },
+  formGroup: {
+    marginBottom: 20,
+  },
+  formRow: {
+    flexDirection: 'row',
+    marginBottom: 20,
+  },
+  formLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#666',
+    marginBottom: 8,
+  },
+  formInput: {
+    borderWidth: 1,
+    borderColor: '#E3E8EF',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+    color: '#1A1A1A',
+    backgroundColor: '#F8F9FA',
+  },
+  securityNote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    backgroundColor: '#E8F5E9',
+    borderRadius: 8,
+    marginTop: 10,
+  },
+  securityText: {
+    fontSize: 12,
+    color: '#2E7D32',
+    marginLeft: 8,
+    flex: 1,
+  },
+  modalFooter: {
+    flexDirection: 'row',
+    padding: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#F0F0F0',
+  },
+  modalButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginHorizontal: 8,
+  },
+  cancelModalButton: {
+    backgroundColor: '#FFF',
+    borderWidth: 1,
+    borderColor: '#E3E8EF',
+  },
+  saveModalButton: {
+    backgroundColor: '#4A90E2',
+  },
+  cancelModalButtonText: {
+    color: '#666',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  saveModalButtonText: {
+    color: '#FFF',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
 
