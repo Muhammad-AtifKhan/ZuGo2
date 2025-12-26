@@ -186,7 +186,7 @@
 				{
 					"directoryIndex" : 0,
 					"id" : "appmodules::@6890427a1f51a3e7e1df",
-					"jsonFile" : "target-appmodules-Debug-0d82050c8e0e1b2b587d.json",
+					"jsonFile" : "target-appmodules-Debug-cf09459b4f7c61b430e8.json",
 					"name" : "appmodules",
 					"projectIndex" : 0
 				},
@@ -214,7 +214,7 @@
 				{
 					"directoryIndex" : 2,
 					"id" : "react_codegen_rngesturehandler_codegen::@39f233abcd2c728bc6ec",
-					"jsonFile" : "target-react_codegen_rngesturehandler_codegen-Debug-ad1446c1aab8f247efa0.json",
+					"jsonFile" : "target-react_codegen_rngesturehandler_codegen-Debug-9daf7c5c5657c4d9b8ec.json",
 					"name" : "react_codegen_rngesturehandler_codegen",
 					"projectIndex" : 0
 				},
@@ -228,7 +228,7 @@
 				{
 					"directoryIndex" : 6,
 					"id" : "react_codegen_rnscreens::@25bcbd507e98d3a854ad",
-					"jsonFile" : "target-react_codegen_rnscreens-Debug-c3bde97c620cff591877.json",
+					"jsonFile" : "target-react_codegen_rnscreens-Debug-a0d8c8e33d0789ac84db.json",
 					"name" : "react_codegen_rnscreens",
 					"projectIndex" : 0
 				},
@@ -242,7 +242,7 @@
 				{
 					"directoryIndex" : 5,
 					"id" : "react_codegen_safeareacontext::@7984cd80db47aa7b952a",
-					"jsonFile" : "target-react_codegen_safeareacontext-Debug-cd4666a4d6cfe7be3ba8.json",
+					"jsonFile" : "target-react_codegen_safeareacontext-Debug-b98c7b33a0ab0433b68c.json",
 					"name" : "react_codegen_safeareacontext",
 					"projectIndex" : 0
 				}
@@ -252,7 +252,7 @@
 	"kind" : "codemodel",
 	"paths" : 
 	{
-		"build" : "D:/MyProjects/CityTransportManagementSystem/android/app/.cxx/Debug/1o6v4f5b/x86",
+		"build" : "D:/MyProjects/CityTransportManagementSystem/android/app/.cxx/Debug/1o6v4f5b/arm64-v8a",
 		"source" : "D:/MyProjects/CityTransportManagementSystem/node_modules/react-native/ReactAndroid/cmake-utils/default-app-setup"
 	},
 	"version" : 

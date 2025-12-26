@@ -1,4 +1,4 @@
-// src/screens/auth/LoginScreen.tsx - FIREBASE INTEGRATED
+// src/screens/auth/LoginScreen.tsx - CLEAN VERSION
 import React, { useState } from 'react';
 import {
   View,
@@ -20,41 +20,28 @@ import firestore from '@react-native-firebase/firestore';
 
 // Define navigation types
 type RootStackParamList = {
-  Passenger: undefined;
-  Driver: undefined;
   RoleSelection: undefined;
-  Transporter: undefined;
-  Onboarding: undefined;
-  Auth: undefined;
   ForgotPassword: undefined;
-  Home: undefined;
 };
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
 interface LoginScreenProps {
-  setUserRole?: (role: 'passenger' | 'driver' | 'transporter' | null) => void;
+  setUserRole: (role: 'passenger' | 'driver' | 'transporter' | null) => void;
 }
 
 export default function LoginScreen({ setUserRole }: LoginScreenProps) {
   const navigation = useNavigation<NavigationProp>();
   const [credentials, setCredentials] = useState({
-    emailOrPhone: '',
+    email: '',
     password: '',
   });
   const [loading, setLoading] = useState(false);
-  const [rememberMe, setRememberMe] = useState(false);
 
-  // Helper function to check if input is email or phone
-  const isEmail = (input: string) => {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return emailRegex.test(input);
-  };
-
-  // Handle Firebase login
+  // Handle login
   const handleLogin = async () => {
-    if (!credentials.emailOrPhone.trim()) {
-      Alert.alert('Error', 'Please enter email or phone number');
+    if (!credentials.email.trim()) {
+      Alert.alert('Error', 'Please enter email address');
       return;
     }
 
@@ -66,27 +53,7 @@ export default function LoginScreen({ setUserRole }: LoginScreenProps) {
     setLoading(true);
 
     try {
-      let email = credentials.emailOrPhone.trim();
-
-      // If user entered phone number, convert to email
-      // Note: Firebase requires email for email/password auth
-      // For phone authentication, you'd need separate flow
-      const phoneRegex = /^[0-9]{10,15}$/;
-      if (phoneRegex.test(email.replace(/\D/g, ''))) {
-        // This is a phone number
-        // For now, we'll treat it as email for demo
-        // In production, you need separate phone auth
-        Alert.alert('Info', 'Phone login will be implemented separately');
-        setLoading(false);
-        return;
-      }
-
-      // If not email format
-      if (!isEmail(email)) {
-        Alert.alert('Error', 'Please enter a valid email address');
-        setLoading(false);
-        return;
-      }
+      const email = credentials.email.trim().toLowerCase();
 
       // Firebase login
       const userCredential = await auth().signInWithEmailAndPassword(
@@ -96,36 +63,27 @@ export default function LoginScreen({ setUserRole }: LoginScreenProps) {
 
       const user = userCredential.user;
 
-      // Check if email is verified
-      if (!user.emailVerified) {
-        Alert.alert(
-          'Email Not Verified',
-          'Please verify your email before logging in.',
-          [
-            { text: 'Cancel', style: 'cancel' },
-            {
-              text: 'Resend Verification',
-              onPress: async () => {
-                try {
-                  await user.sendEmailVerification();
-                  Alert.alert('Success', 'Verification email sent!');
-                } catch (error: any) {
-                  Alert.alert('Error', error.message);
-                }
-              }
-            },
-            {
-              text: 'Continue Anyway',
-              onPress: () => navigateBasedOnUserType(user.uid)
-            }
-          ]
-        );
-        setLoading(false);
-        return;
+      // Get user data from Firestore
+      const userDoc = await firestore()
+        .collection('users')
+        .doc(user.uid)
+        .get();
+
+      let userType: 'passenger' | 'driver' | 'transporter' = 'passenger';
+
+      if (userDoc.exists) {
+        const userData = userDoc.data();
+        userType = userData?.userType || 'passenger';
       }
 
-      // Navigate based on user type
-      await navigateBasedOnUserType(user.uid);
+      // Set user role - RootNavigator automatically handle karega
+      setUserRole(userType);
+
+      Alert.alert(
+        'Login Successful',
+        `Welcome back!`,
+        [{ text: 'Continue' }]
+      );
 
     } catch (error: any) {
       console.error('Login error:', error);
@@ -134,25 +92,25 @@ export default function LoginScreen({ setUserRole }: LoginScreenProps) {
 
       switch (error.code) {
         case 'auth/user-not-found':
-          errorMessage = 'No account found with this email. Please register.';
+          errorMessage = 'No account found with this email.';
           break;
         case 'auth/wrong-password':
-          errorMessage = 'Incorrect password. Please try again.';
+          errorMessage = 'Incorrect password.';
           break;
         case 'auth/invalid-email':
-          errorMessage = 'Invalid email address format.';
+          errorMessage = 'Invalid email address.';
           break;
         case 'auth/user-disabled':
           errorMessage = 'This account has been disabled.';
           break;
         case 'auth/too-many-requests':
-          errorMessage = 'Too many failed attempts. Please try again later.';
+          errorMessage = 'Too many failed attempts. Try again later.';
           break;
         case 'auth/network-request-failed':
-          errorMessage = 'Network error. Please check your internet connection.';
+          errorMessage = 'Network error. Check your internet connection.';
           break;
         default:
-          errorMessage = error.message || 'An unknown error occurred.';
+          errorMessage = 'An error occurred. Please try again.';
       }
 
       Alert.alert('Login Failed', errorMessage);
@@ -161,207 +119,14 @@ export default function LoginScreen({ setUserRole }: LoginScreenProps) {
     }
   };
 
-  // Navigate based on user type from Firestore
-  const navigateBasedOnUserType = async (userId: string) => {
-    try {
-      // Get user data from Firestore
-      const userDoc = await firestore()
-        .collection('users')
-        .doc(userId)
-        .get();
-
-      let userType: 'passenger' | 'driver' | 'transporter' = 'passenger';
-
-      if (userDoc.exists) {
-        const userData = userDoc.data();
-        userType = userData?.userType || 'passenger';
-
-        // Set user role in parent component if available
-        if (setUserRole) {
-          setUserRole(userType);
-        }
-
-        // Navigate to respective dashboard
-        const routeMap = {
-          passenger: 'Passenger',
-          driver: 'Driver',
-          transporter: 'Transporter'
-        };
-
-        navigation.reset({
-          index: 0,
-          routes: [{ name: routeMap[userType] as any }],
-        });
-
-        Alert.alert(
-          'Login Successful',
-          `Welcome ${userData?.fullName || ''}!`,
-          [{ text: 'Continue' }]
-        );
-      } else {
-        // User not in Firestore, use default
-        if (setUserRole) setUserRole('passenger');
-        navigation.reset({
-          index: 0,
-          routes: [{ name: 'Passenger' }],
-        });
-        Alert.alert('Success', 'Login successful!');
-      }
-
-    } catch (error) {
-      console.log('Error fetching user data:', error);
-      // Default navigation
-      if (setUserRole) setUserRole('passenger');
-      navigation.reset({
-        index: 0,
-        routes: [{ name: 'Passenger' }],
-      });
-      Alert.alert('Success', 'Login successful!');
-    }
-  };
-
-  // Handle demo login with Firebase test accounts
-  // LoginScreen.tsx - ERROR FIX (line 337 ke aas-pass)
-  const handleDemoLogin = async (role: 'passenger' | 'driver' | 'transporter') => {
-    const roleName = role.charAt(0).toUpperCase() + role.slice(1);
-
-    Alert.alert(
-      `Demo Login as ${roleName}`,
-      `This will sign you in with a test ${role.toLowerCase()} account.`,
-      [
-        {
-          text: 'Cancel',
-          style: 'cancel',
-        },
-        {
-          text: 'Continue',
-          onPress: async () => {
-            setLoading(true);
-
-            // Test credentials for demo
-            const demoCredentials = {
-              passenger: { email: 'demo.passenger@test.com', password: 'Passenger123!' },
-              driver: { email: 'demo.driver@test.com', password: 'Driver123!' },
-              transporter: { email: 'demo.transporter@test.com', password: 'Transporter123!' }
-            };
-
-            try {
-              // Try to login with demo credentials
-              const userCredential = await auth().signInWithEmailAndPassword(
-                demoCredentials[role].email,
-                demoCredentials[role].password
-              );
-
-              // Set user role
-              if (setUserRole) {
-                setUserRole(role);
-              }
-
-              // Navigate to respective dashboard
-              const routeMap = {
-                passenger: 'Passenger',
-                driver: 'Driver',
-                transporter: 'Transporter'
-              };
-
-              navigation.reset({
-                index: 0,
-                routes: [{ name: routeMap[role] as any }],
-              });
-
-              Alert.alert(
-                'Demo Login Successful',
-                `Logged in as ${roleName}`
-              );
-
-            } catch (error: any) { // ← YEH LINE FIX KAREN
-              console.log('Demo login error:', error);
-
-              // If demo accounts don't exist, create them
-              if (error.code === 'auth/user-not-found') {
-                Alert.alert(
-                  'Demo Accounts Not Found',
-                  'Creating demo accounts first...',
-                  [
-                    {
-                      text: 'Create & Login',
-                      onPress: async () => {
-                        try {
-                          // Create demo account
-                          const userCredential = await auth().createUserWithEmailAndPassword(
-                            demoCredentials[role].email,
-                            demoCredentials[role].password
-                          );
-
-                          // Save user data to Firestore
-                          await firestore()
-                            .collection('users')
-                            .doc(userCredential.user.uid)
-                            .set({
-                              uid: userCredential.user.uid,
-                              email: demoCredentials[role].email,
-                              fullName: `Demo ${roleName}`,
-                              userType: role,
-                              isDemo: true,
-                              createdAt: firestore.FieldValue.serverTimestamp(),
-                            });
-
-                          // Set user role and navigate
-                          if (setUserRole) setUserRole(role);
-                          navigation.reset({
-                            index: 0,
-                            routes: [{ name: roleName as any }],
-                          });
-
-                          Alert.alert(
-                            'Demo Account Created',
-                            `Logged in as Demo ${roleName}`
-                          );
-
-                        } catch (createError: any) { // ← YEH BHI FIX KAREN
-                          console.log('Create account error:', createError);
-                          Alert.alert('Error', createError.message || 'Failed to create account');
-                        } finally {
-                          setLoading(false);
-                        }
-                      }
-                    },
-                    {
-                      text: 'Cancel',
-                      style: 'cancel',
-                      onPress: () => setLoading(false)
-                    }
-                  ]
-                );
-              } else {
-                console.log('Other error:', error);
-                Alert.alert('Error', error.message || 'Login failed');
-                setLoading(false);
-              }
-            } finally {
-              if (!error || (error && error.code !== 'auth/user-not-found')) {
-                setLoading(false);
-              }
-            }
-          },
-        },
-      ]
-    );
-  };
-
   // Handle forgot password
   const handleForgotPassword = () => {
-    if (!credentials.emailOrPhone.trim()) {
-      Alert.alert('Email Required', 'Please enter your email first to reset password');
+    if (!credentials.email.trim()) {
+      Alert.alert('Email Required', 'Please enter your email first');
       return;
     }
 
-    const email = credentials.emailOrPhone.trim();
-
-    if (!isEmail(email)) {
-      Alert.alert('Invalid Email', 'Please enter a valid email address');
-      return;
-    }
+    const email = credentials.email.trim();
 
     Alert.alert(
       'Reset Password',
@@ -378,7 +143,7 @@ export default function LoginScreen({ setUserRole }: LoginScreenProps) {
                 'Password reset link has been sent to your email.'
               );
             } catch (error: any) {
-              Alert.alert('Error', error.message);
+              Alert.alert('Error', 'Failed to send reset email. Please check email address.');
             }
           }
         }
@@ -400,14 +165,12 @@ export default function LoginScreen({ setUserRole }: LoginScreenProps) {
         <ScrollView
           contentContainerStyle={styles.scrollContainer}
           showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
         >
           {/* Header */}
           <View style={styles.header}>
             <Text style={styles.title}>Welcome Back</Text>
-            <Text style={styles.subtitle}>Sign in to City Transport System</Text>
-            <View style={styles.firebaseBadge}>
-              <Text style={styles.firebaseBadgeText}>🔐 Firebase Secure Login</Text>
-            </View>
+            <Text style={styles.subtitle}>Sign in to continue</Text>
           </View>
 
           {/* Login Form */}
@@ -416,18 +179,17 @@ export default function LoginScreen({ setUserRole }: LoginScreenProps) {
               <Text style={styles.label}>Email Address</Text>
               <TextInput
                 style={styles.input}
-                placeholder="john@example.com"
-                value={credentials.emailOrPhone}
+                placeholder="Enter your email"
+                value={credentials.email}
                 onChangeText={value =>
-                  setCredentials(prev => ({ ...prev, emailOrPhone: value }))
+                  setCredentials(prev => ({ ...prev, email: value }))
                 }
                 keyboardType="email-address"
                 autoCapitalize="none"
+                autoCorrect={false}
                 editable={!loading}
+                returnKeyType="next"
               />
-              <Text style={styles.inputNote}>
-                Enter your registered email address
-              </Text>
             </View>
 
             <View style={styles.inputGroup}>
@@ -441,33 +203,26 @@ export default function LoginScreen({ setUserRole }: LoginScreenProps) {
                 }
                 secureTextEntry
                 editable={!loading}
+                returnKeyType="done"
+                onSubmitEditing={handleLogin}
               />
             </View>
 
-            {/* Remember Me & Forgot Password */}
-            <View style={styles.optionsRow}>
-              <TouchableOpacity
-                style={styles.rememberContainer}
-                onPress={() => setRememberMe(!rememberMe)}
-                activeOpacity={0.7}
-                disabled={loading}
-              >
-                <View style={styles.checkbox}>
-                  {rememberMe && <View style={styles.checkboxInner} />}
-                </View>
-                <Text style={styles.rememberText}>Remember me</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity onPress={handleForgotPassword} disabled={loading}>
-                <Text style={styles.forgotText}>Forgot Password?</Text>
-              </TouchableOpacity>
-            </View>
+            {/* Forgot Password */}
+            <TouchableOpacity
+              style={styles.forgotContainer}
+              onPress={handleForgotPassword}
+              disabled={loading}
+            >
+              <Text style={styles.forgotText}>Forgot Password?</Text>
+            </TouchableOpacity>
 
             {/* Login Button */}
             <TouchableOpacity
               style={[styles.loginButton, loading && styles.buttonDisabled]}
               onPress={handleLogin}
               disabled={loading}
+              activeOpacity={0.8}
             >
               {loading ? (
                 <ActivityIndicator color="#FFFFFF" size="small" />
@@ -476,81 +231,40 @@ export default function LoginScreen({ setUserRole }: LoginScreenProps) {
               )}
             </TouchableOpacity>
 
-            {/* Firebase Status */}
-            <View style={styles.firebaseStatus}>
-              <Text style={styles.firebaseStatusText}>
-                🔗 Connected to Firebase Authentication
-              </Text>
-            </View>
-
             {/* Divider */}
             <View style={styles.dividerContainer}>
               <View style={styles.divider} />
-              <Text style={styles.dividerText}>OR</Text>
+              <Text style={styles.dividerText}>or</Text>
               <View style={styles.divider} />
-            </View>
-
-            {/* Quick Demo Login Section */}
-            <View style={styles.demoSection}>
-              <Text style={styles.demoTitle}>Quick Demo Access</Text>
-              <Text style={styles.demoSubtitle}>
-                Test different roles with Firebase authentication
-              </Text>
-
-              <View style={styles.demoButtons}>
-                <TouchableOpacity
-                  style={[styles.demoButton, { backgroundColor: '#4285f4' }]}
-                  onPress={() => handleDemoLogin('passenger')}
-                  disabled={loading}
-                >
-                  <View style={styles.demoButtonContent}>
-                    <Text style={styles.demoButtonEmoji}>🧑‍💼</Text>
-                    <Text style={styles.demoButtonText}>Passenger</Text>
-                  </View>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[styles.demoButton, { backgroundColor: '#fbbc04' }]}
-                  onPress={() => handleDemoLogin('driver')}
-                  disabled={loading}
-                >
-                  <View style={styles.demoButtonContent}>
-                    <Text style={styles.demoButtonEmoji}>🚗</Text>
-                    <Text style={styles.demoButtonText}>Driver</Text>
-                  </View>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[styles.demoButton, { backgroundColor: '#ea4335' }]}
-                  onPress={() => handleDemoLogin('transporter')}
-                  disabled={loading}
-                >
-                  <View style={styles.demoButtonContent}>
-                    <Text style={styles.demoButtonEmoji}>🏢</Text>
-                    <Text style={styles.demoButtonText}>Transporter</Text>
-                  </View>
-                </TouchableOpacity>
-              </View>
             </View>
 
             {/* Register Section */}
             <View style={styles.registerSection}>
               <Text style={styles.registerText}>Don't have an account?</Text>
               <TouchableOpacity onPress={handleRegister} disabled={loading}>
-                <Text style={styles.registerLink}> Create Account</Text>
+                <Text style={styles.registerLink}> Sign Up</Text>
               </TouchableOpacity>
             </View>
+          </View>
 
-            {/* Information Note */}
-            <View style={styles.noteContainer}>
-              <Text style={styles.noteTitle}>ℹ️ Firebase Authentication</Text>
-              <Text style={styles.noteText}>
-                • Secure email/password authentication{'\n'}
-                • Email verification supported{'\n'}
-                • Password reset via email{'\n'}
-                • User data stored in Firestore{'\n'}
-                • Real-time authentication state
-              </Text>
+          {/* App Info */}
+          <View style={styles.infoContainer}>
+            <Text style={styles.infoText}>
+              Select your role during registration
+            </Text>
+            <View style={styles.roleIcons}>
+              <View style={styles.roleIcon}>
+                <Text style={styles.roleEmoji}>🧑‍💼</Text>
+                <Text style={styles.roleText}>Passenger</Text>
+              </View>
+              <View style={styles.roleIcon}>
+                <Text style={styles.roleEmoji}>🚗</Text>
+                <Text style={styles.roleText}>Driver</Text>
+              </View>
+              <View style={styles.roleIcon}>
+                <Text style={styles.roleEmoji}>🏢</Text>
+                <Text style={styles.roleText}>Transporter</Text>
+              </View>
             </View>
           </View>
         </ScrollView>
@@ -587,22 +301,9 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#5f6368',
     textAlign: 'center',
-    marginBottom: 12,
-  },
-  firebaseBadge: {
-    backgroundColor: '#FFA000',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    marginTop: 8,
-  },
-  firebaseBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: 'bold',
   },
   form: {
-    marginBottom: 20,
+    marginBottom: 32,
   },
   inputGroup: {
     marginBottom: 20,
@@ -623,41 +324,9 @@ const styles = StyleSheet.create({
     color: '#202124',
     backgroundColor: '#FFFFFF',
   },
-  inputNote: {
-    fontSize: 12,
-    color: '#5f6368',
-    marginTop: 4,
-    fontStyle: 'italic',
-  },
-  optionsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+  forgotContainer: {
+    alignSelf: 'flex-end',
     marginBottom: 32,
-  },
-  rememberContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  checkbox: {
-    width: 20,
-    height: 20,
-    borderWidth: 2,
-    borderColor: '#1a73e8',
-    borderRadius: 4,
-    marginRight: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  checkboxInner: {
-    width: 12,
-    height: 12,
-    backgroundColor: '#1a73e8',
-    borderRadius: 2,
-  },
-  rememberText: {
-    fontSize: 14,
-    color: '#5f6368',
   },
   forgotText: {
     fontSize: 14,
@@ -669,9 +338,7 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     borderRadius: 8,
     alignItems: 'center',
-    marginBottom: 16,
-    flexDirection: 'row',
-    justifyContent: 'center',
+    marginBottom: 24,
   },
   buttonDisabled: {
     backgroundColor: '#6c8bc7',
@@ -681,22 +348,10 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
   },
-  firebaseStatus: {
-    backgroundColor: '#E8F0FE',
-    padding: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  firebaseStatusText: {
-    color: '#1a73e8',
-    fontSize: 14,
-    fontWeight: '500',
-  },
   dividerContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 32,
+    marginBottom: 24,
   },
   divider: {
     flex: 1,
@@ -708,57 +363,9 @@ const styles = StyleSheet.create({
     color: '#5f6368',
     fontSize: 14,
   },
-  demoSection: {
-    backgroundColor: '#F8F9FA',
-    padding: 24,
-    borderRadius: 16,
-    marginBottom: 32,
-    borderWidth: 1,
-    borderColor: '#E8EAED',
-  },
-  demoTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#202124',
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  demoSubtitle: {
-    fontSize: 14,
-    color: '#5f6368',
-    marginBottom: 24,
-    textAlign: 'center',
-    lineHeight: 20,
-  },
-  demoButtons: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  demoButton: {
-    flex: 1,
-    paddingVertical: 20,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    opacity: 1,
-  },
-  demoButtonContent: {
-    alignItems: 'center',
-  },
-  demoButtonEmoji: {
-    fontSize: 28,
-    marginBottom: 8,
-  },
-  demoButtonText: {
-    color: '#FFFFFF',
-    fontWeight: 'bold',
-    fontSize: 14,
-  },
   registerSection: {
     flexDirection: 'row',
     justifyContent: 'center',
-    marginBottom: 32,
   },
   registerText: {
     fontSize: 16,
@@ -769,22 +376,33 @@ const styles = StyleSheet.create({
     color: '#1a73e8',
     fontWeight: 'bold',
   },
-  noteContainer: {
-    backgroundColor: '#E8F0FE',
+  infoContainer: {
+    backgroundColor: '#F8F9FA',
     padding: 20,
     borderRadius: 12,
-    borderLeftWidth: 4,
-    borderLeftColor: '#1a73e8',
+    alignItems: 'center',
   },
-  noteTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#1a73e8',
-    marginBottom: 8,
-  },
-  noteText: {
+  infoText: {
     fontSize: 14,
-    color: '#1a73e8',
-    lineHeight: 22,
+    color: '#5f6368',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  roleIcons: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    width: '100%',
+  },
+  roleIcon: {
+    alignItems: 'center',
+  },
+  roleEmoji: {
+    fontSize: 24,
+    marginBottom: 4,
+  },
+  roleText: {
+    fontSize: 12,
+    color: '#5f6368',
+    fontWeight: '500',
   },
 });
