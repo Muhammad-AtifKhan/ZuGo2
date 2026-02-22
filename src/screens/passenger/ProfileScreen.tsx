@@ -11,16 +11,28 @@ import {
   Switch,
   Image,
   Modal,
+  Linking,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
-import { PassengerStackParamList } from '../../navigation/PassengerNavigator';
+import auth from '@react-native-firebase/auth';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 
-type ProfileScreenNavigationProp = StackNavigationProp<PassengerStackParamList>;
+// Define navigation types
+type RootStackParamList = {
+  Login: undefined;
+  RoleSelection: undefined;
+  ChatSupport: undefined;
+  FAQ: undefined;
+  PrivacyPolicy: undefined;
+  TermsConditions: undefined;
+};
+
+type ProfileScreenNavigationProp = StackNavigationProp<RootStackParamList>;
 
 const ProfileScreen = () => {
   const navigation = useNavigation<ProfileScreenNavigationProp>();
+  const [logoutLoading, setLogoutLoading] = useState(false);
   const [userData, setUserData] = useState({
     name: 'Ali Ahmed',
     email: 'ali.ahmed@email.com',
@@ -113,10 +125,22 @@ const ProfileScreen = () => {
         {
           text: 'Logout',
           style: 'destructive',
-          onPress: () => {
-            Alert.alert('Logged Out', 'You have been successfully logged out');
-            // In real app: navigation.reset to login screen
-          }
+          onPress: async () => {
+            setLogoutLoading(true);
+            try {
+              await auth().signOut();
+              // Reset navigation to Login screen
+              navigation.reset({
+                index: 0,
+                routes: [{ name: 'Login' }],
+              });
+            } catch (error) {
+              console.error('Logout error:', error);
+              Alert.alert('Error', 'Failed to logout. Please try again.');
+            } finally {
+              setLogoutLoading(false);
+            }
+          },
         },
       ]
     );
@@ -1300,11 +1324,14 @@ const ProfileScreen = () => {
 
         {/* Logout Button */}
         <TouchableOpacity
-          style={styles.logoutButton}
+          style={[styles.logoutButton, logoutLoading && styles.buttonDisabled]}
           onPress={handleLogout}
+          disabled={logoutLoading}
         >
-          <Icon name="logout" size={20} color="#F44336" />
-          <Text style={styles.logoutText}>LOGOUT</Text>
+          <Icon name="logout" size={20} color={logoutLoading ? "#999" : "#F44336"} />
+          <Text style={[styles.logoutText, logoutLoading && styles.logoutTextDisabled]}>
+            {logoutLoading ? 'LOGGING OUT...' : 'LOGOUT'}
+          </Text>
         </TouchableOpacity>
       </ScrollView>
 
@@ -1962,6 +1989,13 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     marginLeft: 8,
+  },
+  logoutTextDisabled: {
+    color: '#999',
+  },
+  buttonDisabled: {
+    borderColor: '#CCC',
+    backgroundColor: '#F5F5F5',
   },
   // Modal Styles
   modalOverlay: {

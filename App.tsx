@@ -1,17 +1,15 @@
-// App.tsx - CORRECTED VERSION
 import 'react-native-gesture-handler';
-import React, { useState } from 'react';
+import React from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import RootNavigator from './src/navigation/RootNavigator';
-
-export type UserRole = 'passenger' | 'driver' | 'transporter' | null;
+import { AuthProvider } from './src/context/AuthContext';
 
 const App = () => {
-  const [userRole, setUserRole] = useState<UserRole>(null);
-
   return (
     <SafeAreaProvider>
-      <RootNavigator userRole={userRole} setUserRole={setUserRole} />
+      <AuthProvider>
+        <RootNavigator />
+      </AuthProvider>
     </SafeAreaProvider>
   );
 };

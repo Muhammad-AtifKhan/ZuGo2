@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+// src/screens/transporter/DriversScreen.tsx
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -7,328 +8,339 @@ import {
   TouchableOpacity,
   SafeAreaView,
   Modal,
-  TextInput,
   Alert,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
+import auth from '@react-native-firebase/auth';
+import firestore from '@react-native-firebase/firestore';
+import { StackNavigationProp } from '@react-navigation/stack';
+import { TransporterStackParamList } from '../../navigation/TransporterNavigator';
 
-// Mock data for drivers
-const mockDrivers = [
-  {
-    id: '1',
-    name: 'Ali Ahmed',
-    contact: '+92 300 1234567',
-    cnic: '42301-1234567-8',
-    license: 'LHR-123456',
-    licenseExpiry: '2025-06-15',
-    status: 'on-duty',
-    busAssigned: 'B-001',
-    rating: 4.5,
-    tripsCompleted: 120,
-    joiningDate: '2023-01-15',
-    salary: 45000,
-    emergencyContact: '+92 300 9876543',
-    address: 'House 123, Street 5, Lahore',
-    email: 'ali.ahmed@email.com',
-    dob: '1990-05-15',
-  },
-  {
-    id: '2',
-    name: 'Ahmed Khan',
-    contact: '+92 300 7654321',
-    cnic: '42301-7654321-9',
-    license: 'LHR-987654',
-    licenseExpiry: '2024-12-30',
-    status: 'online',
-    busAssigned: 'B-003',
-    rating: 4.2,
-    tripsCompleted: 95,
-    joiningDate: '2023-03-20',
-    salary: 42000,
-    emergencyContact: '+92 300 1122334',
-    address: 'Flat 45, Model Town, Lahore',
-    email: 'ahmed.khan@email.com',
-    dob: '1988-11-22',
-  },
-  {
-    id: '3',
-    name: 'Sara Ali',
-    contact: '+92 300 9876543',
-    cnic: '42301-9876543-2',
-    license: 'LHR-456789',
-    licenseExpiry: '2025-03-10',
-    status: 'offline',
-    busAssigned: null,
-    rating: 4.8,
-    tripsCompleted: 150,
-    joiningDate: '2022-11-10',
-    salary: 48000,
-    emergencyContact: '+92 300 4455667',
-    address: 'House 78, Gulberg, Lahore',
-    email: 'sara.ali@email.com',
-    dob: '1992-03-08',
-  },
-];
+// Types
+import { Driver, DriverStatus } from '../../types/driver.types';
 
-// Available buses for assignment
-const availableBuses = ['B-001', 'B-002', 'B-003', 'B-004', 'B-005', 'B-006', 'B-007', 'B-008'];
+// Constants
+import { COLORS, SIZES, SHADOWS } from '../../constants/theme';
+
+type DriversScreenNavigationProp = StackNavigationProp<TransporterStackParamList, 'Drivers'>;
 
 const DriversScreen = () => {
-  const navigation = useNavigation<any>();
+  const navigation = useNavigation<DriversScreenNavigationProp>();
   const route = useRoute();
-  const [drivers, setDrivers] = useState(mockDrivers);
-  const [filter, setFilter] = useState('all'); // all, on-duty, online, offline, assigned, unassigned
-  const [selectedDriver, setSelectedDriver] = useState<any>(null);
+  const [drivers, setDrivers] = useState<Driver[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [filter, setFilter] = useState<DriverStatus | 'all' | 'assigned' | 'unassigned'>('all');
+  const [selectedDriver, setSelectedDriver] = useState<Driver | null>(null);
   const [assignModalVisible, setAssignModalVisible] = useState(false);
   const [profileModalVisible, setProfileModalVisible] = useState(false);
+  const [availableBuses, setAvailableBuses] = useState<{id: string, busNumber: string}[]>([]);
+  const [transporterName, setTransporterName] = useState('');
 
-  // 🔥 Add Driver handler
+  const user = auth().currentUser;
+
+  // Helper function to get initials
+  const getInitials = (name: string) => {
+    if (!name) return '?';
+    return name.split(' ').map(n => n[0]).join('').toUpperCase();
+  };
+
+  // Helper function to map Firebase status to display status
+  const getDisplayStatus = (status: string): DriverStatus => {
+    switch(status) {
+      case 'active': return 'on-duty';
+      case 'inactive': return 'offline';
+      default: return status as DriverStatus;
+    }
+  };
+
+  // 🔥 IMPORTANT: useEffect for opening AddDriverScreen automatically
+  useFocusEffect(
+    useCallback(() => {
+      const params = route.params as any;
+      if (params?.openAddDriver) {
+        handleAddDriver();
+        navigation.setParams({ openAddDriver: false });
+      }
+    }, [route.params])
+  );
+
+  // Fetch transporter name
+  useEffect(() => {
+    if (!user) return;
+
+    const unsubscribe = firestore()
+      .collection('users')
+      .doc(user.uid)
+      .onSnapshot(
+        (doc) => {
+          if (doc.exists) {
+            setTransporterName(doc.data()?.fullName || 'Transporter');
+          }
+        },
+        (error) => console.error('Error fetching user:', error)
+      );
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // 🔥 REAL-TIME DRIVERS LISTENER
+  useEffect(() => {
+    if (!user) return;
+
+    setLoading(true);
+
+    const unsubscribe = firestore()
+      .collection('drivers')
+      .where('transporterId', '==', user.uid)
+      .orderBy('createdAt', 'desc')
+      .onSnapshot(
+        (snapshot) => {
+          const driversList = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data(),
+          })) as Driver[];
+
+          setDrivers(driversList);
+          setLoading(false);
+          setRefreshing(false);
+        },
+        (error) => {
+          console.error('Error fetching drivers:', error);
+          Alert.alert('Error', 'Failed to load drivers. Please try again.');
+          setLoading(false);
+          setRefreshing(false);
+        }
+      );
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // 🔥 FETCH AVAILABLE BUSES for assignment
+  useEffect(() => {
+    if (!user) return;
+
+    const unsubscribe = firestore()
+      .collection('buses')
+      .where('transporterId', '==', user.uid)
+      .where('status', '==', 'active')
+      .onSnapshot(
+        (snapshot) => {
+          const busesList = snapshot.docs.map(doc => ({
+            id: doc.id,
+            busNumber: doc.data().busNumber,
+          }));
+          setAvailableBuses(busesList);
+        },
+        (error) => console.error('Error fetching buses:', error)
+      );
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // Stats calculation
+  const stats = useMemo(() => {
+    const total = drivers.length;
+    const onDuty = drivers.filter(d => d.status === 'active').length;
+    const online = drivers.filter(d => d.status === 'online').length;
+    const offline = drivers.filter(d => d.status === 'inactive' || d.status === 'offline').length;
+    const assigned = drivers.filter(d => d.vehicleAssigned).length;
+    const unassigned = drivers.filter(d => !d.vehicleAssigned).length;
+    const avgRating = drivers.length > 0
+      ? drivers.reduce((sum, d) => sum + (d.rating || 0), 0) / drivers.length
+      : 0;
+
+    return { total, onDuty, online, offline, assigned, unassigned, avgRating };
+  }, [drivers]);
+
+  // Filter drivers
+  const filteredDrivers = useMemo(() => {
+    if (filter === 'all') return drivers;
+    if (filter === 'assigned') return drivers.filter(d => d.vehicleAssigned);
+    if (filter === 'unassigned') return drivers.filter(d => !d.vehicleAssigned);
+    if (filter === 'on-duty') return drivers.filter(d => d.status === 'active');
+    if (filter === 'offline') return drivers.filter(d => d.status === 'inactive' || d.status === 'offline');
+    return drivers.filter(d => d.status === filter);
+  }, [drivers, filter]);
+
+  // Manual refresh
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    // Listeners will auto-update
+  }, []);
+
+  // Add Driver handler
   const handleAddDriver = () => {
     navigation.navigate('AddDriverScreen', {
       mode: 'add',
-      onSave: (driverData: any) => {
-        const newDriverObj = {
-          id: (drivers.length + 1).toString(),
-          name: driverData.name,
-          contact: driverData.contact,
-          email: driverData.email || '',
-          cnic: driverData.cnic,
-          license: driverData.license,
-          licenseExpiry: driverData.licenseExpiry || '2024-12-31',
-          status: 'offline',
-          busAssigned: null,
-          rating: 0,
-          tripsCompleted: 0,
-          joiningDate: new Date().toISOString().split('T')[0],
-          salary: parseInt(driverData.salary) || 40000,
-          emergencyContact: driverData.emergencyContact || '',
-          address: driverData.address || '',
-          dob: driverData.dob || '',
-        };
+      transporterId: user?.uid,
+    });
+  };
 
-        setDrivers([...drivers, newDriverObj]);
-        Alert.alert('Success', 'Driver added successfully');
-      }
+  // Edit Driver handler
+  const handleEditDriver = (driver: Driver) => {
+    navigation.navigate('AddDriverScreen', {
+      mode: 'edit',
+      driver: driver,
     });
   };
 
   // 👤 View Profile handler
-  const handleViewProfile = (driver: any) => {
+  const handleViewProfile = (driver: Driver) => {
     setSelectedDriver(driver);
     setProfileModalVisible(true);
   };
 
-  // 📋 Profile Modal
-  const renderProfileModal = () => (
-    <Modal
-      animationType="slide"
-      transparent={true}
-      visible={profileModalVisible}
-      onRequestClose={() => setProfileModalVisible(false)}
-    >
-      <View style={styles.modalOverlay}>
-        <ScrollView style={styles.profileModalContainer}>
-          {/* Profile Header */}
-          <View style={styles.profileHeader}>
-            <View style={styles.profileAvatar}>
-              <Text style={styles.profileAvatarText}>
-                {selectedDriver?.name.split(' ').map(n => n[0]).join('')}
-              </Text>
-            </View>
-            <View style={styles.profileHeaderInfo}>
-              <Text style={styles.profileName}>{selectedDriver?.name}</Text>
-              <Text style={styles.profileContact}>{selectedDriver?.contact}</Text>
-              <View style={styles.profileStatus}>
-                <View style={[
-                  styles.statusIndicator,
-                  { backgroundColor: getStatusColor(selectedDriver?.status) }
-                ]} />
-                <Text style={styles.profileStatusText}>
-                  {selectedDriver?.status.toUpperCase()}
-                </Text>
-              </View>
-            </View>
-          </View>
-
-          {/* Rating */}
-          <View style={styles.profileSection}>
-            <Text style={styles.profileSectionTitle}>⭐ Rating</Text>
-            <View style={styles.ratingContainer}>
-              <Text style={styles.ratingValue}>{selectedDriver?.rating}/5</Text>
-              <View style={styles.starsContainer}>
-                {[1, 2, 3, 4, 5].map((star) => (
-                  <Text key={star} style={styles.profileStar}>
-                    {star <= (selectedDriver?.rating || 0) ? '⭐' : '☆'}
-                  </Text>
-                ))}
-              </View>
-            </View>
-          </View>
-
-          {/* Personal Information */}
-          <View style={styles.profileSection}>
-            <Text style={styles.profileSectionTitle}>👤 Personal Information</Text>
-            <View style={styles.profileDetails}>
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Email:</Text>
-                <Text style={styles.detailValue}>{selectedDriver?.email}</Text>
-              </View>
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>CNIC:</Text>
-                <Text style={styles.detailValue}>{selectedDriver?.cnic}</Text>
-              </View>
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Date of Birth:</Text>
-                <Text style={styles.detailValue}>{selectedDriver?.dob}</Text>
-              </View>
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Address:</Text>
-                <Text style={styles.detailValue}>{selectedDriver?.address}</Text>
-              </View>
-            </View>
-          </View>
-
-          {/* Professional Information */}
-          <View style={styles.profileSection}>
-            <Text style={styles.profileSectionTitle}>💼 Professional Details</Text>
-            <View style={styles.profileDetails}>
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>License Number:</Text>
-                <Text style={styles.detailValue}>{selectedDriver?.license}</Text>
-              </View>
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>License Expiry:</Text>
-                <Text style={styles.detailValue}>{selectedDriver?.licenseExpiry}</Text>
-              </View>
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Joining Date:</Text>
-                <Text style={styles.detailValue}>{selectedDriver?.joiningDate}</Text>
-              </View>
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Monthly Salary:</Text>
-                <Text style={styles.detailValue}>₹{selectedDriver?.salary?.toLocaleString()}</Text>
-              </View>
-            </View>
-          </View>
-
-          {/* Assignment Information */}
-          <View style={styles.profileSection}>
-            <Text style={styles.profileSectionTitle}>🚌 Assignment Details</Text>
-            <View style={styles.profileDetails}>
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Bus Assigned:</Text>
-                <Text style={[
-                  styles.detailValue,
-                  selectedDriver?.busAssigned ? styles.assigned : styles.unassigned
-                ]}>
-                  {selectedDriver?.busAssigned || 'Not Assigned'}
-                </Text>
-              </View>
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Trips Completed:</Text>
-                <Text style={styles.detailValue}>{selectedDriver?.tripsCompleted}</Text>
-              </View>
-            </View>
-          </View>
-
-          {/* Emergency Contact */}
-          <View style={styles.profileSection}>
-            <Text style={styles.profileSectionTitle}>🆘 Emergency Contact</Text>
-            <View style={styles.profileDetails}>
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Contact Person:</Text>
-                <Text style={styles.detailValue}>Emergency Contact</Text>
-              </View>
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Phone Number:</Text>
-                <Text style={styles.detailValue}>{selectedDriver?.emergencyContact}</Text>
-              </View>
-            </View>
-          </View>
-
-          {/* Action Buttons */}
-          <View style={styles.profileActions}>
-            <TouchableOpacity
-              style={[styles.profileActionButton, styles.editButton]}
-              onPress={() => {
-                setProfileModalVisible(false);
-                navigation.navigate('AddDriverScreen', {
-                  mode: 'edit',
-                  driver: selectedDriver,
-                  onSave: (updatedDriverData: any) => {
-                    setDrivers(drivers.map(d =>
-                      d.id === selectedDriver.id ? { ...d, ...updatedDriverData } : d
-                    ));
-                    Alert.alert('Success', 'Driver updated successfully');
-                  }
-                });
-              }}
-            >
-              <Text style={styles.editButtonText}>✏️ Edit Profile</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.profileActionButton, styles.closeButton]}
-              onPress={() => setProfileModalVisible(false)}
-            >
-              <Text style={styles.closeButtonText}>Close</Text>
-            </TouchableOpacity>
-          </View>
-        </ScrollView>
-      </View>
-    </Modal>
-  );
-
   // 🔧 Assign Bus handler
-  const handleAssignBus = (driverId: string, busNumber: string) => {
-    setDrivers(drivers.map(driver =>
-      driver.id === driverId ? { ...driver, busAssigned: busNumber } : driver
-    ));
-    setAssignModalVisible(false);
-    Alert.alert('Success', `Bus ${busNumber} assigned to driver`);
+  const handleAssignBus = async (driverId: string, busId: string, busNumber: string) => {
+    if (!user) return;
+
+    try {
+      // Update driver with bus assignment
+      await firestore()
+        .collection('drivers')
+        .doc(driverId)
+        .update({
+          vehicleAssigned: busNumber,
+          updatedAt: firestore.FieldValue.serverTimestamp(),
+        });
+
+      // Update bus with driver assignment
+      await firestore()
+        .collection('buses')
+        .doc(busId)
+        .update({
+          driverId: driverId,
+          driverName: drivers.find(d => d.id === driverId)?.fullName,
+          updatedAt: firestore.FieldValue.serverTimestamp(),
+        });
+
+      setAssignModalVisible(false);
+      Alert.alert('Success', `Bus ${busNumber} assigned to driver`);
+    } catch (error) {
+      console.error('Error assigning bus:', error);
+      Alert.alert('Error', 'Failed to assign bus');
+    }
+  };
+
+  // Unassign Bus handler
+  const handleUnassignBus = async (driverId: string, busNumber?: string) => {
+    if (!user || !busNumber) return;
+
+    try {
+      // Find bus ID from bus number
+      const busSnapshot = await firestore()
+        .collection('buses')
+        .where('transporterId', '==', user.uid)
+        .where('busNumber', '==', busNumber)
+        .get();
+
+      // Update driver - remove bus assignment
+      await firestore()
+        .collection('drivers')
+        .doc(driverId)
+        .update({
+          vehicleAssigned: '',
+          updatedAt: firestore.FieldValue.serverTimestamp(),
+        });
+
+      // Update bus - remove driver assignment if found
+      if (!busSnapshot.empty) {
+        const busDoc = busSnapshot.docs[0];
+        await firestore()
+          .collection('buses')
+          .doc(busDoc.id)
+          .update({
+            driverId: null,
+            driverName: null,
+            updatedAt: firestore.FieldValue.serverTimestamp(),
+          });
+      }
+
+      Alert.alert('Success', 'Bus unassigned from driver');
+    } catch (error) {
+      console.error('Error unassigning bus:', error);
+      Alert.alert('Error', 'Failed to unassign bus');
+    }
   };
 
   // 🔄 Change Status handler
-  const handleChangeStatus = (driverId: string, newStatus: string) => {
-    setDrivers(drivers.map(driver =>
-      driver.id === driverId ? { ...driver, status: newStatus } : driver
-    ));
-    Alert.alert('Status Updated', `Driver status changed to ${newStatus}`);
+  const handleChangeStatus = async (driverId: string, newStatus: string) => {
+    if (!user) return;
+
+    let firebaseStatus = newStatus;
+    if (newStatus === 'on-duty') firebaseStatus = 'active';
+    if (newStatus === 'offline') firebaseStatus = 'inactive';
+
+    try {
+      await firestore()
+        .collection('drivers')
+        .doc(driverId)
+        .update({
+          status: firebaseStatus,
+          updatedAt: firestore.FieldValue.serverTimestamp(),
+        });
+
+      Alert.alert('Status Updated', `Driver status changed to ${newStatus}`);
+    } catch (error) {
+      console.error('Error updating status:', error);
+      Alert.alert('Error', 'Failed to update status');
+    }
   };
 
-  // 📊 Stats calculation
-  const stats = {
-    total: drivers.length,
-    onDuty: drivers.filter(d => d.status === 'on-duty').length,
-    online: drivers.filter(d => d.status === 'online').length,
-    offline: drivers.filter(d => d.status === 'offline').length,
-    assigned: drivers.filter(d => d.busAssigned !== null).length,
-    unassigned: drivers.filter(d => d.busAssigned === null).length,
+  // Get next status based on current
+  const getNextStatus = (currentStatus: string): { next: string; label: string } => {
+    switch(currentStatus) {
+      case 'active':
+        return { next: 'inactive', label: 'Go Offline' };
+      case 'online':
+        return { next: 'active', label: 'Go On Duty' };
+      case 'inactive':
+      case 'offline':
+        return { next: 'online', label: 'Go Online' };
+      default:
+        return { next: 'online', label: 'Go Online' };
+    }
   };
 
-  // Filter drivers based on status
-  const filteredDrivers = drivers.filter(driver => {
-    if (filter === 'all') return true;
-    if (filter === 'assigned') return driver.busAssigned !== null;
-    if (filter === 'unassigned') return driver.busAssigned === null;
-    return driver.status === filter;
-  });
-
+  // Helper functions
   const getStatusColor = (status: string) => {
     switch(status) {
-      case 'on-duty': return '#4CAF50';
-      case 'online': return '#2196F3';
-      case 'offline': return '#9E9E9E';
-      default: return '#666666';
+      case 'active':
+      case 'on-duty':
+        return COLORS.success;
+      case 'online':
+        return COLORS.info;
+      case 'inactive':
+      case 'offline':
+        return COLORS.grey;
+      default:
+        return COLORS.textLight;
     }
   };
 
   const getStatusIcon = (status: string) => {
     switch(status) {
-      case 'on-duty': return '🟢';
-      case 'online': return '🔵';
-      case 'offline': return '⚫';
-      default: return '⚪';
+      case 'active':
+      case 'on-duty':
+        return '🟢';
+      case 'online':
+        return '🔵';
+      case 'inactive':
+      case 'offline':
+        return '⚫';
+      default:
+        return '⚪';
+    }
+  };
+
+  const getDisplayStatusText = (status: string) => {
+    switch(status) {
+      case 'active': return 'ON DUTY';
+      case 'inactive': return 'OFFLINE';
+      default: return status.toUpperCase();
     }
   };
 
@@ -344,13 +356,174 @@ const DriversScreen = () => {
     return <View style={styles.starsContainer}>{stars}</View>;
   };
 
+  // Profile Modal
+  const renderProfileModal = () => (
+    <Modal
+      animationType="slide"
+      transparent={true}
+      visible={profileModalVisible}
+      onRequestClose={() => setProfileModalVisible(false)}
+    >
+      <View style={styles.modalOverlay}>
+        <ScrollView style={styles.profileModalContainer}>
+          {selectedDriver && (
+            <>
+              {/* Profile Header */}
+              <View style={styles.profileHeader}>
+                <View style={styles.profileAvatar}>
+                  <Text style={styles.profileAvatarText}>
+                    {getInitials(selectedDriver.fullName)}
+                  </Text>
+                </View>
+                <View style={styles.profileHeaderInfo}>
+                  <Text style={styles.profileName}>{selectedDriver.fullName}</Text>
+                  <Text style={styles.profileContact}>{selectedDriver.contactNumber}</Text>
+                  <View style={styles.profileStatus}>
+                    <View style={[
+                      styles.statusIndicator,
+                      { backgroundColor: getStatusColor(selectedDriver.status) }
+                    ]} />
+                    <Text style={styles.profileStatusText}>
+                      {getDisplayStatusText(selectedDriver.status)}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* Rating */}
+              <View style={styles.profileSection}>
+                <Text style={styles.profileSectionTitle}>⭐ Rating</Text>
+                <View style={styles.ratingContainer}>
+                  <Text style={styles.ratingValue}>{selectedDriver.rating || 0}/5</Text>
+                  <View style={styles.starsContainer}>
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <Text key={star} style={styles.profileStar}>
+                        {star <= (selectedDriver.rating || 0) ? '⭐' : '☆'}
+                      </Text>
+                    ))}
+                  </View>
+                </View>
+              </View>
+
+              {/* Personal Information */}
+              <View style={styles.profileSection}>
+                <Text style={styles.profileSectionTitle}>👤 Personal Information</Text>
+                <View style={styles.profileDetails}>
+                  <View style={styles.detailRow}>
+                    <Text style={styles.detailLabel}>Email:</Text>
+                    <Text style={styles.detailValue}>{selectedDriver.email}</Text>
+                  </View>
+                  <View style={styles.detailRow}>
+                    <Text style={styles.detailLabel}>CNIC:</Text>
+                    <Text style={styles.detailValue}>{selectedDriver.cnic}</Text>
+                  </View>
+                  <View style={styles.detailRow}>
+                    <Text style={styles.detailLabel}>Date of Birth:</Text>
+                    <Text style={styles.detailValue}>{selectedDriver.dob || 'N/A'}</Text>
+                  </View>
+                  <View style={styles.detailRow}>
+                    <Text style={styles.detailLabel}>Address:</Text>
+                    <Text style={styles.detailValue}>{selectedDriver.address}</Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* Professional Information */}
+              <View style={styles.profileSection}>
+                <Text style={styles.profileSectionTitle}>💼 Professional Details</Text>
+                <View style={styles.profileDetails}>
+                  <View style={styles.detailRow}>
+                    <Text style={styles.detailLabel}>License Number:</Text>
+                    <Text style={styles.detailValue}>{selectedDriver.licenseNumber}</Text>
+                  </View>
+                  <View style={styles.detailRow}>
+                    <Text style={styles.detailLabel}>License Expiry:</Text>
+                    <Text style={styles.detailValue}>{selectedDriver.licenseExpiry}</Text>
+                  </View>
+                  <View style={styles.detailRow}>
+                    <Text style={styles.detailLabel}>Joining Date:</Text>
+                    <Text style={styles.detailValue}>{selectedDriver.joiningDate}</Text>
+                  </View>
+                  <View style={styles.detailRow}>
+                    <Text style={styles.detailLabel}>Monthly Salary:</Text>
+                    <Text style={styles.detailValue}>PKR {selectedDriver.salary}</Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* Assignment Information */}
+              <View style={styles.profileSection}>
+                <Text style={styles.profileSectionTitle}>🚌 Assignment Details</Text>
+                <View style={styles.profileDetails}>
+                  <View style={styles.detailRow}>
+                    <Text style={styles.detailLabel}>Bus Assigned:</Text>
+                    <Text style={[
+                      styles.detailValue,
+                      selectedDriver.vehicleAssigned ? styles.assigned : styles.unassigned
+                    ]}>
+                      {selectedDriver.vehicleAssigned || 'Not Assigned'}
+                    </Text>
+                  </View>
+                  <View style={styles.detailRow}>
+                    <Text style={styles.detailLabel}>Total Rides:</Text>
+                    <Text style={styles.detailValue}>{selectedDriver.totalRides || 0}</Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* Emergency Contact */}
+              <View style={styles.profileSection}>
+                <Text style={styles.profileSectionTitle}>🆘 Emergency Contact</Text>
+                <View style={styles.profileDetails}>
+                  <View style={styles.detailRow}>
+                    <Text style={styles.detailLabel}>Phone Number:</Text>
+                    <Text style={styles.detailValue}>{selectedDriver.emergencyContact}</Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* Action Buttons */}
+              <View style={styles.profileActions}>
+                <TouchableOpacity
+                  style={[styles.profileActionButton, styles.editButton]}
+                  onPress={() => {
+                    setProfileModalVisible(false);
+                    handleEditDriver(selectedDriver);
+                  }}
+                >
+                  <Text style={styles.editButtonText}>✏️ Edit Profile</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.profileActionButton, styles.closeButton]}
+                  onPress={() => setProfileModalVisible(false)}
+                >
+                  <Text style={styles.closeButtonText}>Close</Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          )}
+        </ScrollView>
+      </View>
+    </Modal>
+  );
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color={COLORS.primary} />
+        <Text style={styles.loadingText}>Loading drivers...</Text>
+      </View>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
         <View>
           <Text style={styles.title}>👤 Driver Management</Text>
-          <Text style={styles.subtitle}>Manage drivers and assignments</Text>
+          <Text style={styles.subtitle}>{transporterName}</Text>
         </View>
         <TouchableOpacity
           style={styles.addButton}
@@ -360,42 +533,38 @@ const DriversScreen = () => {
         </TouchableOpacity>
       </View>
 
-      {/* Stats - COMPACT VERSION */}
+      {/* Stats */}
       <View style={styles.statsContainer}>
         <View style={styles.statsGrid}>
           <TouchableOpacity
-            style={[styles.statCard, filter === 'all' && styles.statCardActive]}
+            style={[styles.statCard, SHADOWS.small, filter === 'all' && styles.statCardActive]}
             onPress={() => setFilter('all')}
-            activeOpacity={0.7}
           >
             <Text style={styles.statValue}>{stats.total}</Text>
             <Text style={styles.statLabel}>Total</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.statCard, { backgroundColor: '#E8F5E8' }, filter === 'on-duty' && styles.statCardActive]}
+            style={[styles.statCard, { backgroundColor: '#E8F5E8' }, SHADOWS.small, filter === 'on-duty' && styles.statCardActive]}
             onPress={() => setFilter('on-duty')}
-            activeOpacity={0.7}
           >
-            <Text style={[styles.statValue, { color: '#4CAF50' }]}>{stats.onDuty}</Text>
+            <Text style={[styles.statValue, { color: COLORS.success }]}>{stats.onDuty}</Text>
             <Text style={styles.statLabel}>On Duty</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.statCard, { backgroundColor: '#E3F2FD' }, filter === 'online' && styles.statCardActive]}
+            style={[styles.statCard, { backgroundColor: '#E3F2FD' }, SHADOWS.small, filter === 'online' && styles.statCardActive]}
             onPress={() => setFilter('online')}
-            activeOpacity={0.7}
           >
-            <Text style={[styles.statValue, { color: '#2196F3' }]}>{stats.online}</Text>
+            <Text style={[styles.statValue, { color: COLORS.info }]}>{stats.online}</Text>
             <Text style={styles.statLabel}>Online</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.statCard, { backgroundColor: '#FFF3E0' }, filter === 'assigned' && styles.statCardActive]}
+            style={[styles.statCard, { backgroundColor: '#FFF3E0' }, SHADOWS.small, filter === 'assigned' && styles.statCardActive]}
             onPress={() => setFilter('assigned')}
-            activeOpacity={0.7}
           >
-            <Text style={[styles.statValue, { color: '#FF9800' }]}>{stats.assigned}</Text>
+            <Text style={[styles.statValue, { color: COLORS.warning }]}>{stats.assigned}</Text>
             <Text style={styles.statLabel}>Assigned</Text>
           </TouchableOpacity>
         </View>
@@ -444,109 +613,140 @@ const DriversScreen = () => {
       </View>
 
       {/* Driver List */}
-      <ScrollView style={styles.listContainer} showsVerticalScrollIndicator={false}>
-        {filteredDrivers.map((driver) => (
-          <View key={driver.id} style={styles.driverCard}>
-            {/* Driver Info Section - Clickable for edit */}
+      <ScrollView
+        style={styles.listContainer}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+      >
+        {filteredDrivers.length === 0 ? (
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyIcon}>👤</Text>
+            <Text style={styles.emptyTitle}>No Drivers Found</Text>
+            <Text style={styles.emptyText}>
+              {filter === 'all'
+                ? 'Add your first driver to get started'
+                : `No ${filter} drivers available`}
+            </Text>
             <TouchableOpacity
-              style={styles.driverInfoSection}
-              onPress={() => navigation.navigate('AddDriverScreen', {
-                mode: 'edit',
-                driver: driver,
-                onSave: (updatedDriverData: any) => {
-                  setDrivers(drivers.map(d =>
-                    d.id === driver.id ? { ...d, ...updatedDriverData } : d
-                  ));
-                  Alert.alert('Success', 'Driver updated successfully');
-                }
-              })}
-              activeOpacity={0.7}
+              style={styles.emptyButton}
+              onPress={handleAddDriver}
             >
-              <View style={styles.driverHeader}>
-                <View style={styles.driverAvatar}>
-                  <Text style={styles.avatarText}>
-                    {driver.name.split(' ').map(n => n[0]).join('')}
-                  </Text>
-                </View>
-                <View style={styles.driverInfo}>
-                  <Text style={styles.driverName}>{driver.name}</Text>
-                  <Text style={styles.driverContact}>{driver.contact}</Text>
-                  {renderStars(driver.rating)}
-                </View>
-                <View style={[styles.statusBadge, { backgroundColor: getStatusColor(driver.status) }]}>
-                  <Text style={styles.statusText}>
-                    {getStatusIcon(driver.status)} {driver.status.toUpperCase()}
-                  </Text>
-                </View>
-              </View>
-
-              <View style={styles.driverDetails}>
-                <View style={styles.detailRow}>
-                  <View style={styles.detailItem}>
-                    <Text style={styles.detailLabel}>CNIC:</Text>
-                    <Text style={styles.detailValue}>{driver.cnic}</Text>
-                  </View>
-                  <View style={styles.detailItem}>
-                    <Text style={styles.detailLabel}>License:</Text>
-                    <Text style={styles.detailValue}>{driver.license}</Text>
-                  </View>
-                </View>
-
-                <View style={styles.detailRow}>
-                  <View style={styles.detailItem}>
-                    <Text style={styles.detailLabel}>Bus Assigned:</Text>
-                    <Text style={[
-                      styles.detailValue,
-                      driver.busAssigned ? styles.assigned : styles.unassigned
-                    ]}>
-                      {driver.busAssigned || 'Not Assigned'}
-                    </Text>
-                  </View>
-                  <View style={styles.detailItem}>
-                    <Text style={styles.detailLabel}>Trips:</Text>
-                    <Text style={styles.detailValue}>{driver.tripsCompleted}</Text>
-                  </View>
-                </View>
-              </View>
+              <Text style={styles.emptyButtonText}>Add Driver</Text>
             </TouchableOpacity>
-
-            {/* Action Buttons */}
-            <View style={styles.actionButtons}>
-              <TouchableOpacity
-                style={styles.actionButton}
-                onPress={() => {
-                  setSelectedDriver(driver);
-                  setAssignModalVisible(true);
-                }}
-              >
-                <Text style={styles.actionButtonText}>
-                  {driver.busAssigned ? '🔄 Change Bus' : '🚌 Assign Bus'}
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.actionButton}
-                onPress={() => handleViewProfile(driver)}
-              >
-                <Text style={styles.actionButtonText}>👤 Profile</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.actionButton}
-                onPress={() => {
-                  const newStatus = driver.status === 'on-duty' ? 'offline' :
-                                  driver.status === 'online' ? 'on-duty' : 'online';
-                  handleChangeStatus(driver.id, newStatus);
-                }}
-              >
-                <Text style={styles.actionButtonText}>
-                  {driver.status === 'on-duty' ? '⏸️ Off Duty' :
-                   driver.status === 'online' ? '🟢 Go On Duty' : '🔵 Go Online'}
-                </Text>
-              </TouchableOpacity>
-            </View>
           </View>
-        ))}
+        ) : (
+          filteredDrivers.map((driver) => {
+            const displayStatus = getDisplayStatus(driver.status);
+            const nextStatus = getNextStatus(driver.status);
+
+            return (
+              <View key={driver.id} style={[styles.driverCard, SHADOWS.medium]}>
+                {/* Driver Info Section - Clickable for edit */}
+                <TouchableOpacity
+                  style={styles.driverInfoSection}
+                  onPress={() => handleEditDriver(driver)}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.driverHeader}>
+                    <View style={styles.driverAvatar}>
+                      <Text style={styles.avatarText}>
+                        {getInitials(driver.fullName)}
+                      </Text>
+                    </View>
+                    <View style={styles.driverInfo}>
+                      <Text style={styles.driverName}>{driver.fullName}</Text>
+                      <Text style={styles.driverContact}>{driver.contactNumber}</Text>
+                      {renderStars(driver.rating || 0)}
+                    </View>
+                    <View style={[styles.statusBadge, { backgroundColor: getStatusColor(displayStatus) }]}>
+                      <Text style={styles.statusText}>
+                        {getStatusIcon(displayStatus)} {getDisplayStatusText(driver.status)}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.driverDetails}>
+                    <View style={styles.detailRow}>
+                      <View style={styles.detailItem}>
+                        <Text style={styles.detailLabel}>CNIC:</Text>
+                        <Text style={styles.detailValue}>{driver.cnic}</Text>
+                      </View>
+                      <View style={styles.detailItem}>
+                        <Text style={styles.detailLabel}>License:</Text>
+                        <Text style={styles.detailValue}>{driver.licenseNumber}</Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.detailRow}>
+                      <View style={styles.detailItem}>
+                        <Text style={styles.detailLabel}>Bus Assigned:</Text>
+                        <Text style={[
+                          styles.detailValue,
+                          driver.vehicleAssigned ? styles.assigned : styles.unassigned
+                        ]}>
+                          {driver.vehicleAssigned || 'Not Assigned'}
+                        </Text>
+                      </View>
+                      <View style={styles.detailItem}>
+                        <Text style={styles.detailLabel}>Rides:</Text>
+                        <Text style={styles.detailValue}>{driver.totalRides || 0}</Text>
+                      </View>
+                    </View>
+                  </View>
+                </TouchableOpacity>
+
+                {/* Action Buttons */}
+                <View style={styles.actionButtons}>
+                  <TouchableOpacity
+                    style={styles.actionButton}
+                    onPress={() => {
+                      setSelectedDriver(driver);
+                      setAssignModalVisible(true);
+                    }}
+                  >
+                    <Text style={styles.actionButtonText}>
+                      {driver.vehicleAssigned ? '🔄 Change Bus' : '🚌 Assign Bus'}
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.actionButton}
+                    onPress={() => handleViewProfile(driver)}
+                  >
+                    <Text style={styles.actionButtonText}>👤 Profile</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.actionButton,
+                      displayStatus === 'on-duty' ? styles.deactivateButton : styles.activateButton
+                    ]}
+                    onPress={() => handleChangeStatus(driver.id, nextStatus.next)}
+                  >
+                    <Text style={[
+                      styles.actionButtonText,
+                      displayStatus === 'on-duty' ? styles.deactivateText : styles.activateText
+                    ]}>
+                      {nextStatus.label}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* Unassign Button if bus assigned */}
+                {driver.vehicleAssigned && (
+                  <TouchableOpacity
+                    style={styles.unassignButton}
+                    onPress={() => handleUnassignBus(driver.id, driver.vehicleAssigned)}
+                  >
+                    <Text style={styles.unassignButtonText}>❌ Unassign Bus</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            );
+          })
+        )}
       </ScrollView>
 
       {/* Assign Bus Modal */}
@@ -559,7 +759,7 @@ const DriversScreen = () => {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
             <Text style={styles.modalTitle}>
-              Assign Bus to {selectedDriver?.name}
+              Assign Bus to {selectedDriver?.fullName}
             </Text>
 
             <Text style={styles.modalSubtitle}>
@@ -567,26 +767,43 @@ const DriversScreen = () => {
             </Text>
 
             <ScrollView style={styles.busList}>
-              {availableBuses.map((busNumber) => (
-                <TouchableOpacity
-                  key={busNumber}
-                  style={[
-                    styles.busOption,
-                    selectedDriver?.busAssigned === busNumber && styles.busOptionSelected
-                  ]}
-                  onPress={() => handleAssignBus(selectedDriver?.id, busNumber)}
-                >
-                  <Text style={[
-                    styles.busOptionText,
-                    selectedDriver?.busAssigned === busNumber && styles.busOptionTextSelected
-                  ]}>
-                    🚌 {busNumber}
-                  </Text>
-                  <Text style={styles.busOptionStatus}>
-                    {selectedDriver?.busAssigned === busNumber ? 'Currently Assigned' : 'Click to Assign'}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+              {availableBuses.length === 0 ? (
+                <View style={styles.noBusesContainer}>
+                  <Text style={styles.noBusesText}>No active buses available</Text>
+                  <TouchableOpacity
+                    style={styles.addBusButton}
+                    onPress={() => {
+                      setAssignModalVisible(false);
+                      navigation.navigate('AddBusScreen', { mode: 'add' });
+                    }}
+                  >
+                    <Text style={styles.addBusButtonText}>+ Add New Bus</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                availableBuses.map((bus) => (
+                  <TouchableOpacity
+                    key={bus.id}
+                    style={[
+                      styles.busOption,
+                      selectedDriver?.vehicleAssigned === bus.busNumber && styles.busOptionSelected
+                    ]}
+                    onPress={() => handleAssignBus(selectedDriver?.id, bus.id, bus.busNumber)}
+                  >
+                    <Text style={[
+                      styles.busOptionText,
+                      selectedDriver?.vehicleAssigned === bus.busNumber && styles.busOptionTextSelected
+                    ]}>
+                      🚌 {bus.busNumber}
+                    </Text>
+                    <Text style={styles.busOptionStatus}>
+                      {selectedDriver?.vehicleAssigned === bus.busNumber
+                        ? 'Currently Assigned'
+                        : 'Click to Assign'}
+                    </Text>
+                  </TouchableOpacity>
+                ))
+              )}
             </ScrollView>
 
             <TouchableOpacity
@@ -608,133 +825,165 @@ const DriversScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F8F9FA',
+    backgroundColor: COLORS.background,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: COLORS.background,
+  },
+  loadingText: {
+    marginTop: SIZES.sm,
+    fontSize: 16,
+    color: COLORS.primary,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 20,
-    backgroundColor: '#1A237E',
+    paddingHorizontal: SIZES.md,
+    paddingVertical: SIZES.lg,
+    backgroundColor: COLORS.primary,
   },
   title: {
     fontSize: 20,
     fontWeight: '700',
-    color: '#FFFFFF',
+    color: COLORS.white,
   },
   subtitle: {
     fontSize: 14,
-    color: '#E0E0E0',
-    marginTop: 4,
+    color: COLORS.greyLight,
+    marginTop: 2,
   },
   addButton: {
-    backgroundColor: '#4CAF50',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 8,
+    backgroundColor: COLORS.success,
+    paddingHorizontal: SIZES.lg,
+    paddingVertical: SIZES.sm,
+    borderRadius: SIZES.xs,
   },
   addButtonText: {
-    color: '#FFFFFF',
+    color: COLORS.white,
     fontWeight: '600',
     fontSize: 14,
   },
-  // 🆕 COMPACT STATS SECTION
   statsContainer: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: COLORS.white,
     borderBottomWidth: 1,
-    borderBottomColor: '#E0E0E0',
-    paddingVertical: 12,
+    borderBottomColor: COLORS.border,
+    paddingVertical: SIZES.sm,
   },
   statsGrid: {
     flexDirection: 'row',
-    paddingHorizontal: 12,
+    paddingHorizontal: SIZES.sm,
   },
   statCard: {
     flex: 1,
-    borderRadius: 8,
-    padding: 10,
-    marginHorizontal: 4,
+    borderRadius: SIZES.xs,
+    padding: SIZES.xs,
+    marginHorizontal: 2,
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 70,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
+    minHeight: 60,
   },
   statCardActive: {
     borderWidth: 2,
-    borderColor: '#4A90E2',
+    borderColor: COLORS.secondary,
   },
   statValue: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '700',
-    color: '#1A237E',
-    marginBottom: 4,
+    color: COLORS.primary,
+    marginBottom: 2,
   },
   statLabel: {
-    fontSize: 11,
-    color: '#666666',
+    fontSize: 10,
+    color: COLORS.textLight,
     textAlign: 'center',
   },
   filterContainer: {
-    backgroundColor: '#FFFFFF',
-    paddingVertical: 10,
+    backgroundColor: COLORS.white,
+    paddingVertical: SIZES.xs,
   },
   filterButton: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingHorizontal: SIZES.md,
+    paddingVertical: SIZES.xs,
     borderRadius: 16,
-    backgroundColor: '#F5F5F5',
-    marginHorizontal: 6,
+    backgroundColor: COLORS.greyLight,
+    marginHorizontal: 4,
   },
   filterButtonActive: {
-    backgroundColor: '#4A90E2',
+    backgroundColor: COLORS.secondary,
   },
   filterText: {
-    fontSize: 13,
-    color: '#666666',
+    fontSize: 12,
+    color: COLORS.textLight,
     fontWeight: '500',
   },
   filterTextActive: {
-    color: '#FFFFFF',
+    color: COLORS.white,
   },
   listContainer: {
     flex: 1,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingHorizontal: SIZES.md,
+    paddingVertical: SIZES.sm,
+  },
+  emptyContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 60,
+  },
+  emptyIcon: {
+    fontSize: 60,
+    marginBottom: SIZES.md,
+  },
+  emptyTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: COLORS.text,
+    marginBottom: SIZES.xs,
+  },
+  emptyText: {
+    fontSize: 14,
+    color: COLORS.textLight,
+    textAlign: 'center',
+    marginBottom: SIZES.lg,
+  },
+  emptyButton: {
+    backgroundColor: COLORS.secondary,
+    paddingHorizontal: SIZES.xl,
+    paddingVertical: SIZES.md,
+    borderRadius: SIZES.xs,
+  },
+  emptyButtonText: {
+    color: COLORS.white,
+    fontWeight: '600',
+    fontSize: 16,
   },
   driverCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    marginBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    backgroundColor: COLORS.white,
+    borderRadius: SIZES.md,
+    marginBottom: SIZES.sm,
   },
   driverInfoSection: {
-    padding: 16,
+    padding: SIZES.md,
   },
   driverHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: SIZES.sm,
   },
   driverAvatar: {
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: '#4A90E2',
+    backgroundColor: COLORS.secondary,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+    marginRight: SIZES.sm,
   },
   avatarText: {
-    color: '#FFFFFF',
+    color: COLORS.white,
     fontSize: 16,
     fontWeight: '700',
   },
@@ -744,83 +993,109 @@ const styles = StyleSheet.create({
   driverName: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#1A237E',
-    marginBottom: 4,
+    color: COLORS.primary,
+    marginBottom: 2,
   },
   driverContact: {
-    fontSize: 13,
-    color: '#666666',
+    fontSize: 12,
+    color: COLORS.textLight,
     marginBottom: 4,
   },
   starsContainer: {
     flexDirection: 'row',
   },
   star: {
-    fontSize: 13,
+    fontSize: 12,
     marginRight: 2,
   },
   statusBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingHorizontal: SIZES.sm,
+    paddingVertical: SIZES.xs,
     borderRadius: 16,
   },
   statusText: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '600',
-    color: '#FFFFFF',
+    color: COLORS.white,
   },
   driverDetails: {
-    marginBottom: 8,
+    marginTop: SIZES.xs,
   },
   detailRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 6,
+    marginBottom: 4,
   },
   detailItem: {
     flex: 1,
   },
   detailLabel: {
     fontSize: 11,
-    color: '#666666',
+    color: COLORS.textLight,
     marginBottom: 2,
   },
   detailValue: {
-    fontSize: 13,
-    color: '#333333',
+    fontSize: 12,
+    color: COLORS.text,
     fontWeight: '500',
   },
   assigned: {
-    color: '#4CAF50',
+    color: COLORS.success,
     fontWeight: '600',
   },
   unassigned: {
-    color: '#F44336',
+    color: COLORS.danger,
     fontWeight: '600',
   },
   actionButtons: {
     flexDirection: 'row',
     borderTopWidth: 1,
-    borderTopColor: '#E0E0E0',
-    paddingTop: 12,
-    paddingHorizontal: 16,
-    paddingBottom: 16,
+    borderTopColor: COLORS.border,
+    paddingTop: SIZES.sm,
+    paddingHorizontal: SIZES.md,
+    paddingBottom: SIZES.sm,
   },
   actionButton: {
     flex: 1,
-    paddingVertical: 8,
+    paddingVertical: SIZES.xs,
     alignItems: 'center',
-    marginHorizontal: 4,
-    borderRadius: 8,
-    backgroundColor: '#F0F0F0',
+    marginHorizontal: 2,
+    borderRadius: SIZES.xs,
+    backgroundColor: COLORS.greyLight,
   },
   actionButtonText: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '600',
-    color: '#1A237E',
+    color: COLORS.primary,
     textAlign: 'center',
   },
-  // 🔥 PROFILE MODAL STYLES
+  deactivateButton: {
+    backgroundColor: '#FFEBEE',
+  },
+  activateButton: {
+    backgroundColor: '#E8F5E9',
+  },
+  deactivateText: {
+    color: COLORS.danger,
+  },
+  activateText: {
+    color: COLORS.success,
+  },
+  unassignButton: {
+    backgroundColor: '#FFEBEE',
+    paddingVertical: SIZES.xs,
+    alignItems: 'center',
+    marginHorizontal: SIZES.md,
+    marginBottom: SIZES.md,
+    borderRadius: SIZES.xs,
+    padding: SIZES.xs,
+  },
+  unassignButtonText: {
+    color: COLORS.danger,
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  // Modal Styles
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
@@ -828,8 +1103,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   profileModalContainer: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
+    backgroundColor: COLORS.white,
+    borderRadius: SIZES.md,
     width: '90%',
     maxWidth: 400,
     maxHeight: '85%',
@@ -837,21 +1112,21 @@ const styles = StyleSheet.create({
   profileHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 20,
+    padding: SIZES.lg,
     borderBottomWidth: 1,
-    borderBottomColor: '#E0E0E0',
+    borderBottomColor: COLORS.border,
   },
   profileAvatar: {
     width: 60,
     height: 60,
     borderRadius: 30,
-    backgroundColor: '#4A90E2',
+    backgroundColor: COLORS.secondary,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 16,
+    marginRight: SIZES.md,
   },
   profileAvatarText: {
-    color: '#FFFFFF',
+    color: COLORS.white,
     fontSize: 20,
     fontWeight: '700',
   },
@@ -861,13 +1136,13 @@ const styles = StyleSheet.create({
   profileName: {
     fontSize: 20,
     fontWeight: '700',
-    color: '#1A237E',
-    marginBottom: 4,
+    color: COLORS.primary,
+    marginBottom: 2,
   },
   profileContact: {
     fontSize: 14,
-    color: '#666666',
-    marginBottom: 8,
+    color: COLORS.textLight,
+    marginBottom: 4,
   },
   profileStatus: {
     flexDirection: 'row',
@@ -881,88 +1156,87 @@ const styles = StyleSheet.create({
   },
   profileStatusText: {
     fontSize: 12,
-    color: '#666666',
+    color: COLORS.textLight,
     fontWeight: '600',
   },
   profileSection: {
-    padding: 16,
+    padding: SIZES.md,
     borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
+    borderBottomColor: COLORS.border,
   },
   profileSectionTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#1A237E',
-    marginBottom: 12,
+    color: COLORS.primary,
+    marginBottom: SIZES.sm,
   },
   ratingContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: SIZES.xs,
   },
   ratingValue: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#FF9800',
-    marginRight: 12,
+    color: COLORS.warning,
+    marginRight: SIZES.sm,
   },
   profileStar: {
     fontSize: 18,
     marginRight: 2,
   },
   profileDetails: {
-    marginLeft: 8,
+    marginLeft: SIZES.xs,
   },
   detailRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 8,
-    paddingVertical: 4,
+    marginBottom: 6,
   },
   detailLabel: {
     fontSize: 14,
-    color: '#666666',
+    color: COLORS.textLight,
     flex: 1,
   },
   detailValue: {
     fontSize: 14,
-    color: '#333333',
+    color: COLORS.text,
     fontWeight: '500',
     flex: 1,
     textAlign: 'right',
   },
   profileActions: {
-    padding: 20,
+    padding: SIZES.lg,
     flexDirection: 'row',
   },
   profileActionButton: {
     flex: 1,
-    paddingVertical: 12,
-    borderRadius: 8,
+    paddingVertical: SIZES.sm,
+    borderRadius: SIZES.xs,
     alignItems: 'center',
-    marginHorizontal: 8,
+    marginHorizontal: SIZES.xs,
   },
   editButton: {
-    backgroundColor: '#4A90E2',
+    backgroundColor: COLORS.secondary,
   },
   closeButton: {
-    backgroundColor: '#F0F0F0',
+    backgroundColor: COLORS.greyLight,
   },
   editButtonText: {
-    color: '#FFFFFF',
+    color: COLORS.white,
     fontWeight: '600',
     fontSize: 14,
   },
   closeButtonText: {
-    color: '#666666',
+    color: COLORS.textLight,
     fontWeight: '600',
     fontSize: 14,
   },
   // Assign Bus Modal
   modalContainer: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 24,
+    backgroundColor: COLORS.white,
+    borderRadius: SIZES.md,
+    padding: SIZES.lg,
     width: '90%',
     maxWidth: 400,
     maxHeight: '80%',
@@ -970,54 +1244,73 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 20,
     fontWeight: '700',
-    color: '#1A237E',
-    marginBottom: 16,
+    color: COLORS.primary,
+    marginBottom: SIZES.md,
     textAlign: 'center',
   },
   modalSubtitle: {
     fontSize: 16,
-    color: '#666666',
-    marginBottom: 16,
+    color: COLORS.textLight,
+    marginBottom: SIZES.md,
     textAlign: 'center',
   },
   busList: {
     maxHeight: 300,
-    marginBottom: 16,
+    marginBottom: SIZES.md,
   },
   busOption: {
-    padding: 16,
+    padding: SIZES.md,
     borderWidth: 1,
-    borderColor: '#E0E0E0',
-    borderRadius: 8,
-    marginBottom: 8,
+    borderColor: COLORS.border,
+    borderRadius: SIZES.xs,
+    marginBottom: SIZES.xs,
   },
   busOptionSelected: {
-    backgroundColor: '#E3F2FD',
-    borderColor: '#4A90E2',
+    backgroundColor: COLORS.infoLight,
+    borderColor: COLORS.secondary,
   },
   busOptionText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#333333',
-    marginBottom: 4,
+    color: COLORS.text,
+    marginBottom: 2,
   },
   busOptionTextSelected: {
-    color: '#1A237E',
+    color: COLORS.primary,
   },
   busOptionStatus: {
     fontSize: 12,
-    color: '#666666',
+    color: COLORS.textLight,
+  },
+  noBusesContainer: {
+    alignItems: 'center',
+    padding: SIZES.lg,
+  },
+  noBusesText: {
+    fontSize: 16,
+    color: COLORS.textLight,
+    marginBottom: SIZES.md,
+  },
+  addBusButton: {
+    backgroundColor: COLORS.secondary,
+    paddingHorizontal: SIZES.lg,
+    paddingVertical: SIZES.sm,
+    borderRadius: SIZES.xs,
+  },
+  addBusButtonText: {
+    color: COLORS.white,
+    fontWeight: '600',
   },
   modalButton: {
-    paddingVertical: 12,
-    borderRadius: 8,
+    paddingVertical: SIZES.sm,
+    borderRadius: SIZES.xs,
     alignItems: 'center',
   },
   cancelButton: {
-    backgroundColor: '#F0F0F0',
+    backgroundColor: COLORS.greyLight,
   },
   cancelButtonText: {
-    color: '#666666',
+    color: COLORS.textLight,
     fontWeight: '600',
     fontSize: 16,
   },

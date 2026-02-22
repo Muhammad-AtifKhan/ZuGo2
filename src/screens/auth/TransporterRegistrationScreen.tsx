@@ -208,39 +208,21 @@ export default function TransporterRegistrationScreen() {
           totalRides: 0,
         });
 
-      // 6. Show success message
-      Alert.alert(
-        'Registration Submitted! 🎉',
-        `Your transport business registration has been submitted!\n\nWe've sent a verification email to ${formData.businessEmail}.\n\nPlease note: Transport business accounts require admin approval. You'll be notified once your account is verified.`,
-        [
+      // 6. Navigate to OTP Verification Screen
+      navigation.reset({
+        index: 0,
+        routes: [
           {
-            text: 'Go to Login',
-            onPress: () => {
-              // Reset form
-              setFormData({
-                companyName: '',
-                businessEmail: '',
-                contactPhone: '',
-                businessAddress: '',
-                taxNumber: '',
-                contactPerson: '',
-                password: '',
-                confirmPassword: '',
-              });
-              setTermsAccepted(false);
-
-              // Navigate to login
-              navigation.reset({
-                index: 0,
-                routes: [{
-                  name: 'Login',
-                  params: { preFilledEmail: formData.businessEmail }
-                }],
-              });
-            }
-          }
-        ]
-      );
+            name: 'OTPVerification',
+            params: {
+              email: formData.businessEmail.trim().toLowerCase(),
+              phone: formData.contactPhone.trim(),
+              role: 'transporter',
+              userId: user.uid,
+            },
+          },
+        ],
+      });
 
     } catch (error: any) {
       console.error('Transporter Registration Error:', error);

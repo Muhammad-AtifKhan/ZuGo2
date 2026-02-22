@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+// src/screens/transporter/NotificationsScreen.tsx
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,85 +8,91 @@ import {
   TouchableOpacity,
   SafeAreaView,
   Alert,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import auth from '@react-native-firebase/auth';
+import firestore from '@react-native-firebase/firestore';
 
-const NotificationsScreen = ({ navigation }: any) => {
-  const [notifications, setNotifications] = useState([
-    {
-      id: '1',
-      type: 'maintenance',
-      title: 'Maintenance Due',
-      message: 'Bus B-005 maintenance due tomorrow',
-      time: '2 hours ago',
-      read: false,
-      action: 'fleet'
-    },
-    {
-      id: '2',
-      type: 'success',
-      title: 'Driver Achievement',
-      message: 'Driver Ahmed Khan completed 50 trips today',
-      time: '4 hours ago',
-      read: false,
-      action: 'drivers'
-    },
-    {
-      id: '3',
-      type: 'warning',
-      title: 'Route Delay',
-      message: 'Route R-003 delayed by 15 minutes',
-      time: '1 hour ago',
-      read: true,
-      action: 'operations'
-    },
-    {
-      id: '4',
-      type: 'info',
-      title: 'Target Achieved',
-      message: 'Monthly revenue target achieved',
-      time: '1 day ago',
-      read: true,
-      action: 'reports'
-    },
-    {
-      id: '5',
-      type: 'emergency',
-      title: 'Emergency',
-      message: 'Bus B-001 needs immediate attention',
-      time: '30 mins ago',
-      read: false,
-      action: 'emergency'
-    },
-    {
-      id: '6',
-      type: 'payment',
-      title: 'Payment Received',
-      message: 'Payment of ₹25,000 received for trip #TR-456',
-      time: '2 days ago',
-      read: true,
-      action: 'reports'
-    },
-    {
-      id: '7',
-      type: 'driver',
-      title: 'Driver Check-in',
-      message: 'Driver Ali Ahmed started duty',
-      time: '3 days ago',
-      read: true,
-      action: 'drivers'
-    },
-    {
-      id: '8',
-      type: 'maintenance',
-      title: 'Maintenance Complete',
-      message: 'Bus B-002 maintenance completed successfully',
-      time: '1 week ago',
-      read: true,
-      action: 'fleet'
-    },
-  ]);
+// Types
+import { Notification, NotificationType, NotificationStats } from '../../types/notifications.types';
 
-  const getNotificationIcon = (type: string) => {
+// Constants
+import { COLORS, SIZES, SHADOWS } from '../../constants/theme';
+
+const NotificationsScreen = () => {
+  const navigation = useNavigation();
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [stats, setStats] = useState<NotificationStats>({
+    total: 0,
+    unread: 0,
+    critical: 0,
+  });
+
+  const user = auth().currentUser;
+
+  // 🔥 REAL-TIME NOTIFICATIONS LISTENER
+  useEffect(() => {
+    if (!user) return;
+
+    setLoading(true);
+
+    const unsubscribe = firestore()
+      .collection('notifications')
+      .where('transporterId', '==', user.uid)
+      .orderBy('createdAt', 'desc')
+      .limit(50)
+      .onSnapshot(
+        (snapshot) => {
+          const notifList = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data(),
+            time: doc.data().createdAt, // Use createdAt as time
+          })) as Notification[];
+
+          setNotifications(notifList);
+
+          // Calculate stats
+          const total = notifList.length;
+          const unread = notifList.filter(n => !n.read).length;
+          const critical = notifList.filter(n =>
+            n.type === 'emergency' || n.type === 'warning' || n.type === 'error'
+          ).length;
+
+          setStats({ total, unread, critical });
+          setLoading(false);
+          setRefreshing(false);
+        },
+        (error) => {
+          console.error('Error fetching notifications:', error);
+          Alert.alert('Error', 'Failed to load notifications');
+          setLoading(false);
+          setRefreshing(false);
+        }
+      );
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // Manual refresh
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    // Listener will auto-update
+  }, []);
+
+  // Mark notifications as read when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      // Optional: You can mark all as read when user views the screen
+      // markAllAsRead();
+    }, [])
+  );
+
+  // ========== NOTIFICATION FUNCTIONS ==========
+  const getNotificationIcon = (type: NotificationType): string => {
     switch(type) {
       case 'maintenance': return '🔧';
       case 'success': return '✅';
@@ -94,76 +101,296 @@ const NotificationsScreen = ({ navigation }: any) => {
       case 'emergency': return '🚨';
       case 'payment': return '💰';
       case 'driver': return '👤';
-      default: return 'ℹ️';
+      case 'trip': return '🚌';
+      case 'booking': return '🎫';
+      case 'info': return 'ℹ️';
+      default: return '🔔';
     }
   };
 
-  const getNotificationColor = (type: string) => {
+  const getNotificationColor = (type: NotificationType): string => {
     switch(type) {
-      case 'maintenance': return '#FF9800';
-      case 'success': return '#4CAF50';
-      case 'warning': return '#FF9800';
-      case 'error': return '#F44336';
-      case 'emergency': return '#F44336';
-      case 'payment': return '#4CAF50';
-      case 'driver': return '#2196F3';
-      default: return '#666666';
+      case 'maintenance': return COLORS.warning;
+      case 'success': return COLORS.success;
+      case 'warning': return COLORS.warning;
+      case 'error': return COLORS.danger;
+      case 'emergency': return COLORS.danger;
+      case 'payment': return COLORS.success;
+      case 'driver': return COLORS.info;
+      case 'trip': return COLORS.secondary;
+      case 'booking': return COLORS.purple;
+      case 'info': return COLORS.info;
+      default: return COLORS.textLight;
     }
   };
 
-  const handleNotificationPress = (notification: any) => {
-    // Mark as read
-    setNotifications(notifications.map(n =>
-      n.id === notification.id ? { ...n, read: true } : n
-    ));
+  const formatTime = (timestamp: any): string => {
+    if (!timestamp) return 'Unknown';
+
+    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMins / 60);
+    const diffDays = Math.floor(diffHours / 24);
+
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins} min ago`;
+    if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+    if (diffDays < 7) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
+
+    return date.toLocaleDateString('en-PK');
+  };
+
+  const handleNotificationPress = async (notification: Notification) => {
+    // Mark as read in Firebase
+    if (!notification.read) {
+      try {
+        await firestore()
+          .collection('notifications')
+          .doc(notification.id)
+          .update({
+            read: true,
+            updatedAt: firestore.FieldValue.serverTimestamp(),
+          });
+
+        // Update local state
+        setNotifications(prev =>
+          prev.map(n => n.id === notification.id ? { ...n, read: true } : n)
+        );
+
+        setStats(prev => ({
+          ...prev,
+          unread: prev.unread - 1,
+        }));
+      } catch (error) {
+        console.error('Error marking notification as read:', error);
+      }
+    }
 
     // Navigate based on action
     switch(notification.action) {
       case 'fleet':
-        navigation.navigate('Fleet');
+        if (notification.actionId) {
+          navigation.navigate('Fleet', {
+            screen: 'BusDetails',
+            params: { busId: notification.actionId }
+          });
+        } else {
+          navigation.navigate('Fleet');
+        }
         break;
+
       case 'drivers':
-        navigation.navigate('Drivers');
+        if (notification.actionId) {
+          navigation.navigate('Drivers', {
+            screen: 'DriverDetails',
+            params: { driverId: notification.actionId }
+          });
+        } else {
+          navigation.navigate('Drivers');
+        }
         break;
+
       case 'operations':
-        navigation.navigate('Operations');
+      case 'trip':
+        if (notification.actionId) {
+          navigation.navigate('Operations', {
+            screen: 'TripDetails',
+            params: { tripId: notification.actionId }
+          });
+        } else {
+          navigation.navigate('Operations');
+        }
         break;
+
       case 'reports':
-        navigation.navigate('ReportsProfile');
+        navigation.navigate('ReportsProfile', { screen: 'Reports' });
         break;
+
       case 'emergency':
-        Alert.alert('Emergency', 'Taking emergency action...');
+        Alert.alert(
+          '🚨 Emergency Alert',
+          notification.message,
+          [
+            { text: 'Call Driver', onPress: () => handleEmergencyCall(notification) },
+            { text: 'View Details', onPress: () => handleEmergencyDetails(notification) },
+            { text: 'Dismiss', style: 'cancel' },
+          ]
+        );
         break;
+
+      case 'booking':
+        if (notification.actionId) {
+          navigation.navigate('Operations', {
+            screen: 'BookingDetails',
+            params: { bookingId: notification.actionId }
+          });
+        }
+        break;
+
       default:
         Alert.alert(notification.title, notification.message);
     }
   };
 
-  const handleDismiss = (id: string) => {
-    setNotifications(notifications.filter(n => n.id !== id));
+  const handleEmergencyCall = (notification: Notification) => {
+    // In a real app, you would integrate with phone calling
+    Alert.alert('Calling', 'Emergency contact will be called');
   };
 
-  const markAllAsRead = () => {
-    setNotifications(notifications.map(n => ({ ...n, read: true })));
-    Alert.alert('Success', 'All notifications marked as read');
+  const handleEmergencyDetails = (notification: Notification) => {
+    // Navigate to emergency details screen
+    Alert.alert('Emergency Details', 'Viewing emergency details...');
   };
 
-  const clearAllNotifications = () => {
+  const handleDismiss = async (id: string) => {
     Alert.alert(
-      'Clear All',
-      'Are you sure you want to clear all notifications?',
+      'Dismiss Notification',
+      'Are you sure you want to dismiss this notification?',
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Clear All',
+          text: 'Dismiss',
           style: 'destructive',
-          onPress: () => setNotifications([])
+          onPress: async () => {
+            try {
+              // Delete from Firebase
+              await firestore()
+                .collection('notifications')
+                .doc(id)
+                .delete();
+
+              // Update local state
+              const notification = notifications.find(n => n.id === id);
+              setNotifications(prev => prev.filter(n => n.id !== id));
+
+              if (notification && !notification.read) {
+                setStats(prev => ({
+                  ...prev,
+                  total: prev.total - 1,
+                  unread: prev.unread - 1,
+                }));
+              } else {
+                setStats(prev => ({
+                  ...prev,
+                  total: prev.total - 1,
+                }));
+              }
+            } catch (error) {
+              console.error('Error dismissing notification:', error);
+              Alert.alert('Error', 'Failed to dismiss notification');
+            }
+          }
         }
       ]
     );
   };
 
-  const unreadCount = notifications.filter(n => !n.read).length;
+  const markAllAsRead = async () => {
+    if (!user) return;
+
+    const unreadNotifs = notifications.filter(n => !n.read);
+    if (unreadNotifs.length === 0) {
+      Alert.alert('Info', 'No unread notifications');
+      return;
+    }
+
+    Alert.alert(
+      'Mark All as Read',
+      `Mark ${unreadNotifs.length} notification(s) as read?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Mark All Read',
+          onPress: async () => {
+            try {
+              const batch = firestore().batch();
+
+              unreadNotifs.forEach(notification => {
+                const ref = firestore().collection('notifications').doc(notification.id);
+                batch.update(ref, {
+                  read: true,
+                  updatedAt: firestore.FieldValue.serverTimestamp(),
+                });
+              });
+
+              await batch.commit();
+
+              // Update local state
+              setNotifications(prev =>
+                prev.map(n => ({ ...n, read: true }))
+              );
+
+              setStats(prev => ({
+                ...prev,
+                unread: 0,
+              }));
+
+              Alert.alert('Success', 'All notifications marked as read');
+            } catch (error) {
+              console.error('Error marking all as read:', error);
+              Alert.alert('Error', 'Failed to mark notifications as read');
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const clearAllNotifications = () => {
+    if (notifications.length === 0) {
+      Alert.alert('Info', 'No notifications to clear');
+      return;
+    }
+
+    Alert.alert(
+      'Clear All',
+      `Are you sure you want to clear all ${notifications.length} notifications?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear All',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const batch = firestore().batch();
+
+              notifications.forEach(notification => {
+                const ref = firestore().collection('notifications').doc(notification.id);
+                batch.delete(ref);
+              });
+
+              await batch.commit();
+
+              // Clear local state
+              setNotifications([]);
+              setStats({ total: 0, unread: 0, critical: 0 });
+
+              Alert.alert('Success', 'All notifications cleared');
+            } catch (error) {
+              console.error('Error clearing notifications:', error);
+              Alert.alert('Error', 'Failed to clear notifications');
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const filterByType = (type: string) => {
+    // This would navigate to filtered view
+    Alert.alert('Filter', `Showing ${type} notifications`);
+  };
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color={COLORS.primary} />
+        <Text style={styles.loadingText}>Loading notifications...</Text>
+      </View>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -174,7 +401,7 @@ const NotificationsScreen = ({ navigation }: any) => {
         </TouchableOpacity>
         <Text style={styles.title}>Notifications</Text>
         <View style={styles.headerActions}>
-          {unreadCount > 0 && (
+          {stats.unread > 0 && (
             <TouchableOpacity onPress={markAllAsRead}>
               <Text style={styles.markReadText}>Mark all read</Text>
             </TouchableOpacity>
@@ -184,31 +411,47 @@ const NotificationsScreen = ({ navigation }: any) => {
 
       {/* Stats */}
       <View style={styles.statsContainer}>
-        <View style={styles.statCard}>
-          <Text style={styles.statValue}>{notifications.length}</Text>
+        <TouchableOpacity
+          style={styles.statCard}
+          onPress={() => filterByType('all')}
+        >
+          <Text style={styles.statValue}>{stats.total}</Text>
           <Text style={styles.statLabel}>Total</Text>
-        </View>
-        <View style={styles.statCard}>
-          <Text style={[styles.statValue, { color: '#F44336' }]}>{unreadCount}</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.statCard}
+          onPress={() => filterByType('unread')}
+        >
+          <Text style={[styles.statValue, { color: COLORS.danger }]}>{stats.unread}</Text>
           <Text style={styles.statLabel}>Unread</Text>
-        </View>
-        <View style={styles.statCard}>
-          <Text style={styles.statValue}>
-            {notifications.filter(n => n.type === 'emergency' || n.type === 'warning').length}
-          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.statCard}
+          onPress={() => filterByType('critical')}
+        >
+          <Text style={[styles.statValue, { color: COLORS.warning }]}>{stats.critical}</Text>
           <Text style={styles.statLabel}>Critical</Text>
-        </View>
+        </TouchableOpacity>
+
         <TouchableOpacity
           style={[styles.statCard, styles.clearAllCard]}
           onPress={clearAllNotifications}
         >
-          <Text style={[styles.statValue, { color: '#F44336' }]}>🗑️</Text>
-          <Text style={[styles.statLabel, { color: '#F44336' }]}>Clear All</Text>
+          <Text style={[styles.statValue, { color: COLORS.danger }]}>🗑️</Text>
+          <Text style={[styles.statLabel, { color: COLORS.danger }]}>Clear All</Text>
         </TouchableOpacity>
       </View>
 
       {/* Notifications List */}
-      <ScrollView style={styles.listContainer} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={styles.listContainer}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+      >
         {notifications.length === 0 ? (
           <View style={styles.emptyState}>
             <Text style={styles.emptyIcon}>🔔</Text>
@@ -221,6 +464,7 @@ const NotificationsScreen = ({ navigation }: any) => {
               key={notification.id}
               style={[
                 styles.notificationCard,
+                SHADOWS.small,
                 !notification.read && styles.unreadCard
               ]}
               onPress={() => handleNotificationPress(notification)}
@@ -237,7 +481,9 @@ const NotificationsScreen = ({ navigation }: any) => {
                 </View>
                 <View style={styles.notificationInfo}>
                   <Text style={styles.notificationTitle}>{notification.title}</Text>
-                  <Text style={styles.notificationTime}>{notification.time}</Text>
+                  <Text style={styles.notificationTime}>
+                    {formatTime(notification.time)}
+                  </Text>
                 </View>
                 {!notification.read && <View style={styles.unreadDot} />}
                 <TouchableOpacity
@@ -249,7 +495,14 @@ const NotificationsScreen = ({ navigation }: any) => {
               </View>
               <Text style={styles.notificationMessage}>{notification.message}</Text>
               <View style={styles.notificationFooter}>
-                <Text style={styles.actionText}>Tap to view details →</Text>
+                <Text style={styles.actionText}>
+                  {notification.action === 'emergency'
+                    ? '🚨 Emergency - Tap to handle'
+                    : 'Tap to view details →'}
+                </Text>
+                {notification.actionId && (
+                  <Text style={styles.actionId}>ID: {notification.actionId.substring(0, 8)}...</Text>
+                )}
               </View>
             </TouchableOpacity>
           ))
@@ -262,65 +515,77 @@ const NotificationsScreen = ({ navigation }: any) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F8F9FA',
+    backgroundColor: COLORS.background,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: COLORS.background,
+  },
+  loadingText: {
+    marginTop: SIZES.sm,
+    fontSize: 16,
+    color: COLORS.primary,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 20,
-    backgroundColor: '#1A237E',
+    paddingHorizontal: SIZES.md,
+    paddingVertical: SIZES.lg,
+    backgroundColor: COLORS.primary,
   },
   backButton: {
     fontSize: 24,
-    color: '#FFFFFF',
+    color: COLORS.white,
     fontWeight: '700',
   },
   title: {
     fontSize: 20,
     fontWeight: '700',
-    color: '#FFFFFF',
+    color: COLORS.white,
   },
   headerActions: {
-    width: 40,
+    minWidth: 70,
+    alignItems: 'flex-end',
   },
   markReadText: {
-    color: '#4A90E2',
+    color: COLORS.secondary,
     fontWeight: '600',
     fontSize: 14,
   },
   statsContainer: {
     flexDirection: 'row',
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    backgroundColor: '#FFFFFF',
+    paddingHorizontal: SIZES.md,
+    paddingVertical: SIZES.md,
+    backgroundColor: COLORS.white,
     borderBottomWidth: 1,
-    borderBottomColor: '#E0E0E0',
+    borderBottomColor: COLORS.border,
   },
   statCard: {
     flex: 1,
     alignItems: 'center',
-    padding: 8,
+    padding: SIZES.xs,
   },
   statValue: {
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: '700',
-    color: '#1A237E',
+    color: COLORS.primary,
     marginBottom: 4,
   },
   statLabel: {
-    fontSize: 12,
-    color: '#666666',
+    fontSize: 11,
+    color: COLORS.textLight,
   },
   clearAllCard: {
     borderLeftWidth: 1,
-    borderLeftColor: '#E0E0E0',
+    borderLeftColor: COLORS.border,
   },
   listContainer: {
     flex: 1,
-    paddingHorizontal: 16,
-    paddingTop: 16,
+    paddingHorizontal: SIZES.md,
+    paddingTop: SIZES.md,
   },
   emptyState: {
     alignItems: 'center',
@@ -329,42 +594,37 @@ const styles = StyleSheet.create({
   },
   emptyIcon: {
     fontSize: 64,
-    marginBottom: 20,
+    marginBottom: SIZES.lg,
   },
   emptyTitle: {
     fontSize: 24,
     fontWeight: '700',
-    color: '#1A237E',
-    marginBottom: 8,
+    color: COLORS.primary,
+    marginBottom: SIZES.xs,
   },
   emptyText: {
     fontSize: 16,
-    color: '#666666',
+    color: COLORS.textLight,
     textAlign: 'center',
   },
   notificationCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    backgroundColor: COLORS.white,
+    borderRadius: SIZES.md,
+    padding: SIZES.md,
+    marginBottom: SIZES.sm,
   },
   unreadCard: {
-    backgroundColor: '#F0F7FF',
+    backgroundColor: COLORS.infoLight,
     borderLeftWidth: 4,
-    borderLeftColor: '#4A90E2',
+    borderLeftColor: COLORS.secondary,
   },
   notificationHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: SIZES.sm,
   },
   notificationIconContainer: {
-    marginRight: 12,
+    marginRight: SIZES.sm,
   },
   notificationIcon: {
     fontSize: 24,
@@ -375,43 +635,50 @@ const styles = StyleSheet.create({
   notificationTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#1A237E',
+    color: COLORS.primary,
     marginBottom: 2,
   },
   notificationTime: {
-    fontSize: 12,
-    color: '#666666',
+    fontSize: 11,
+    color: COLORS.textLight,
   },
   unreadDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#4A90E2',
-    marginRight: 12,
+    backgroundColor: COLORS.secondary,
+    marginRight: SIZES.sm,
   },
   dismissButton: {
     padding: 4,
   },
   dismissText: {
     fontSize: 24,
-    color: '#999999',
+    color: COLORS.textLighter,
     fontWeight: '300',
   },
   notificationMessage: {
     fontSize: 14,
-    color: '#333333',
+    color: COLORS.text,
     lineHeight: 20,
-    marginBottom: 12,
+    marginBottom: SIZES.sm,
   },
   notificationFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     borderTopWidth: 1,
-    borderTopColor: '#E0E0E0',
-    paddingTop: 12,
+    borderTopColor: COLORS.border,
+    paddingTop: SIZES.sm,
   },
   actionText: {
     fontSize: 12,
-    color: '#4A90E2',
+    color: COLORS.secondary,
     fontWeight: '600',
+  },
+  actionId: {
+    fontSize: 10,
+    color: COLORS.textLighter,
   },
 });
 

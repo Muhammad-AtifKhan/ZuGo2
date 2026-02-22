@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+// src/screens/transporter/OperationsScreen.tsx
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -9,290 +10,498 @@ import {
   TextInput,
   Alert,
   FlatList,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
+import auth from '@react-native-firebase/auth';
+import firestore from '@react-native-firebase/firestore';
+import { StackNavigationProp } from '@react-navigation/stack';
+import { TransporterStackParamList } from '../../navigation/TransporterNavigator';
 
-// Initial mock data for routes
-const initialMockRoutes = [
-  { id: '1', code: 'RT-001', name: 'Downtown Express', distance: '15km', duration: '45min', stops: 10, fare: 50 },
-  { id: '2', code: 'RT-002', name: 'University Shuttle', distance: '12km', duration: '35min', stops: 8, fare: 40 },
-  { id: '3', code: 'RT-003', name: 'Mall Route', distance: '20km', duration: '60min', stops: 15, fare: 60 },
-  { id: '4', code: 'RT-004', name: 'Airport Express', distance: '25km', duration: '50min', stops: 5, fare: 100 },
-  { id: '5', code: 'RT-005', name: 'Industrial Zone', distance: '18km', duration: '55min', stops: 12, fare: 55 },
-];
+// Types
+import { Route, Trip, TripStatus, OperationsStats } from '../../types/operations.types';
 
-// Mock data for buses
-const mockBuses = ['B-001', 'B-002', 'B-003', 'B-004', 'B-005', 'B-006'];
+// Constants
+import { COLORS, SIZES, SHADOWS } from '../../constants/theme';
 
-// Mock data for drivers
-const mockDrivers = ['Ali Ahmed', 'Ahmed Khan', 'Sara Ali', 'Usman Khan', 'Bilal Raza'];
+type OperationsScreenNavigationProp = StackNavigationProp<TransporterStackParamList, 'Operations'>;
 
-// Mock data for scheduled trips
-const mockTrips = [
-  {
-    id: '1',
-    routeCode: 'RT-001',
-    routeName: 'Downtown Express',
-    bus: 'B-001',
-    driver: 'Ali Ahmed',
-    departureTime: '08:00',
-    arrivalTime: '08:45',
-    days: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'],
-    status: 'active',
-    passengers: 32,
-    revenue: 1600,
-  },
-  {
-    id: '2',
-    routeCode: 'RT-002',
-    routeName: 'University Shuttle',
-    bus: 'B-003',
-    driver: 'Ahmed Khan',
-    departureTime: '09:30',
-    arrivalTime: '10:05',
-    days: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
-    status: 'delayed',
-    passengers: 28,
-    revenue: 1120,
-  },
-  {
-    id: '3',
-    routeCode: 'RT-004',
-    routeName: 'Airport Express',
-    bus: 'B-005',
-    driver: 'Sara Ali',
-    departureTime: '11:00',
-    arrivalTime: '11:50',
-    days: ['Daily'],
-    status: 'active',
-    passengers: 40,
-    revenue: 4000,
-  },
-  {
-    id: '4',
-    routeCode: 'RT-003',
-    routeName: 'Mall Route',
-    bus: 'B-002',
-    driver: 'Usman Khan',
-    departureTime: '14:00',
-    arrivalTime: '15:00',
-    days: ['Sat', 'Sun'],
-    status: 'completed',
-    passengers: 35,
-    revenue: 2100,
-  },
-  {
-    id: '5',
-    routeCode: 'RT-001',
-    routeName: 'Downtown Express',
-    bus: 'B-006',
-    driver: 'Bilal Raza',
-    departureTime: '16:00',
-    arrivalTime: '16:45',
-    days: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'],
-    status: 'upcoming',
-    passengers: 0,
-    revenue: 0,
-  },
-  {
-    id: '6',
-    routeCode: 'RT-005',
-    routeName: 'Industrial Zone',
-    bus: 'B-004',
-    driver: 'Ali Ahmed',
-    departureTime: '18:00',
-    arrivalTime: '18:55',
-    days: ['Mon', 'Wed', 'Fri'],
-    status: 'cancelled',
-    passengers: 0,
-    revenue: 0,
-  },
-];
-
-// Days of week
-const daysOfWeek = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+// Firebase Trip type based on your document
+type FirebaseTrip = {
+  id: string;
+  routeCode: string;
+  routeName: string;
+  from: string;
+  to: string;
+  busId: string;
+  busNumber: string;
+  driverId: string;
+  driverName: string;
+  departureTime: string;
+  arrivalTime: string;
+  days: string[];
+  status: TripStatus;
+  totalSeats: number;
+  availableSeats: number;
+  fare: number;
+  distance: number;
+  estimatedRevenue: number;
+  transporterId: string;
+  createdAt: any;
+  updatedAt: any;
+  startDate?: string;
+  endDate?: string;
+  repeatType?: string;
+  cancelledAt?: any;
+};
 
 const OperationsScreen = () => {
-  const navigation = useNavigation();
+  const navigation = useNavigation<OperationsScreenNavigationProp>();
+  const route = useRoute();
   const [activeTab, setActiveTab] = useState('schedule'); // schedule, routes, today
   const [scheduleModalVisible, setScheduleModalVisible] = useState(false);
   const [routeModalVisible, setRouteModalVisible] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [transporterName, setTransporterName] = useState('');
+
+  // Data states
+  const [routes, setRoutes] = useState<Route[]>([]);
+  const [trips, setTrips] = useState<FirebaseTrip[]>([]);
+  const [buses, setBuses] = useState<{id: string, busNumber: string}[]>([]);
+  const [drivers, setDrivers] = useState<{id: string, fullName: string}[]>([]);
+
+  // Form states
   const [newTrip, setNewTrip] = useState({
-    route: '',
-    bus: '',
-    driver: '',
+    routeCode: '',
+    busId: '',
+    driverId: '',
     departureTime: '',
     days: [] as string[],
   });
+
   const [newRoute, setNewRoute] = useState({
     code: '',
     name: '',
+    from: '',
+    to: '',
     distance: '',
     duration: '',
     stops: '',
     fare: '',
   });
-  // 🔧 FIX: Changed from 'routes' to 'routeList' to avoid conflict with React Navigation prop
-  const [routeList, setRouteList] = useState(initialMockRoutes);
+
   const [selectedDays, setSelectedDays] = useState<string[]>(['Mon', 'Tue', 'Wed', 'Thu', 'Fri']);
 
-  // Schedule Trip button handler - Navigates to ScheduleTripScreen
+  const user = auth().currentUser;
+
+  // Days of week
+  const daysOfWeek = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+  // 🔥 IMPORTANT: useEffect for opening ScheduleTripScreen automatically
+  useFocusEffect(
+    useCallback(() => {
+      const params = route.params as any;
+      if (params?.openScheduleTrip) {
+        handleScheduleTrip();
+        navigation.setParams({ openScheduleTrip: false });
+      }
+    }, [route.params])
+  );
+
+  // Fetch transporter name
+  useEffect(() => {
+    if (!user) return;
+
+    const unsubscribe = firestore()
+      .collection('users')
+      .doc(user.uid)
+      .onSnapshot(
+        (doc) => {
+          if (doc.exists) {
+            setTransporterName(doc.data()?.fullName || 'Transporter');
+          }
+        },
+        (error) => console.error('Error fetching user:', error)
+      );
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // 🔥 REAL-TIME ROUTES LISTENER
+  useEffect(() => {
+    if (!user) return;
+
+    const unsubscribe = firestore()
+      .collection('routes')
+      .where('transporterId', '==', user.uid)
+      .orderBy('createdAt', 'desc')
+      .onSnapshot(
+        (snapshot) => {
+          const routesList = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data(),
+          })) as Route[];
+          setRoutes(routesList);
+        },
+        (error) => console.error('Error fetching routes:', error)
+      );
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // 🔥 REAL-TIME TRIPS LISTENER
+  useEffect(() => {
+    if (!user) return;
+
+    setLoading(true);
+
+    const unsubscribe = firestore()
+      .collection('trips')
+      .where('transporterId', '==', user.uid)
+      .orderBy('createdAt', 'desc')
+      .onSnapshot(
+        (snapshot) => {
+          const tripsList = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data(),
+          })) as FirebaseTrip[];
+
+          setTrips(tripsList);
+          setLoading(false);
+          setRefreshing(false);
+        },
+        (error) => {
+          console.error('Error fetching trips:', error);
+          setLoading(false);
+          setRefreshing(false);
+        }
+      );
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // 🔥 FETCH AVAILABLE BUSES
+  useEffect(() => {
+    if (!user) return;
+
+    const unsubscribe = firestore()
+      .collection('buses')
+      .where('transporterId', '==', user.uid)
+      .where('status', '==', 'active')
+      .onSnapshot(
+        (snapshot) => {
+          const busesList = snapshot.docs.map(doc => ({
+            id: doc.id,
+            busNumber: doc.data().busNumber,
+          }));
+          setBuses(busesList);
+        },
+        (error) => console.error('Error fetching buses:', error)
+      );
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // 🔥 FETCH AVAILABLE DRIVERS
+  useEffect(() => {
+    if (!user) return;
+
+    const unsubscribe = firestore()
+      .collection('drivers')
+      .where('transporterId', '==', user.uid)
+      .where('status', '==', 'active')
+      .onSnapshot(
+        (snapshot) => {
+          const driversList = snapshot.docs.map(doc => ({
+            id: doc.id,
+            fullName: doc.data().fullName,
+          }));
+          setDrivers(driversList);
+        },
+        (error) => console.error('Error fetching drivers:', error)
+      );
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // Manual refresh
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    // Listeners will auto-update
+  }, []);
+
+  // Calculate stats from Firebase trips
+  const stats = useMemo(() => {
+    const activeTrips = trips.filter(t => t.status === 'active').length;
+    const today = new Date().toLocaleDateString('en-US', { weekday: 'short' });
+    const todayTrips = trips.filter(trip =>
+      trip.days?.includes('Daily') || trip.days?.includes(today)
+    ).length;
+    const completedTrips = trips.filter(t => t.status === 'completed').length;
+    const delayedTrips = trips.filter(t => t.status === 'delayed').length;
+
+    // Calculate passengers and revenue from Firebase fields
+    let totalPassengers = 0;
+    let totalRevenue = 0;
+
+    trips.forEach(trip => {
+      const passengers = (trip.totalSeats || 0) - (trip.availableSeats || 0);
+      totalPassengers += passengers;
+      totalRevenue += passengers * (trip.fare || 0);
+    });
+
+    return {
+      activeTrips,
+      todayTrips,
+      completedTrips,
+      delayedTrips,
+      totalRevenue,
+      totalPassengers,
+      totalRoutes: routes.length,
+    };
+  }, [trips, routes]);
+
+  // Get today's trips
+  const todayTrips = useMemo(() => {
+    const today = new Date().toLocaleDateString('en-US', { weekday: 'short' });
+    return trips.filter(trip =>
+      trip.days?.includes('Daily') || trip.days?.includes(today)
+    );
+  }, [trips]);
+
+  // Format trip for display
+  const formatTripForDisplay = (trip: FirebaseTrip) => {
+    const passengers = (trip.totalSeats || 0) - (trip.availableSeats || 0);
+    const revenue = passengers * (trip.fare || 0);
+
+    // Create route name from from/to if routeName is empty
+    const routeName = trip.routeName ||
+                     (trip.from && trip.to ? `${trip.from} → ${trip.to}` : 'Unknown Route');
+
+    // Use routeCode or create from from/to
+    const routeCode = trip.routeCode ||
+                     (trip.from && trip.to ? `${trip.from.substring(0,3)}-${trip.to.substring(0,3)}` : 'RT-000');
+
+    return {
+      ...trip,
+      displayRouteName: routeName,
+      displayRouteCode: routeCode,
+      displayPassengers: passengers,
+      displayRevenue: revenue,
+    };
+  };
+
+  // Schedule Trip button handler
   const handleScheduleTrip = () => {
     navigation.navigate('ScheduleTripScreen', {
       mode: 'add',
-      onSave: (tripData: any) => {
-        Alert.alert('Success', 'Trip scheduled successfully');
-      }
+      transporterId: user?.uid,
     });
   };
 
-  // Create New Route button handler - Opens modal
+  // Create New Route button handler
   const handleCreateRoute = () => {
     setRouteModalVisible(true);
   };
 
   // Add New Route function
-  const handleAddRoute = () => {
-    if (!newRoute.code || !newRoute.name || !newRoute.distance || !newRoute.duration || !newRoute.stops || !newRoute.fare) {
+  const handleAddRoute = async () => {
+    if (!user) return;
+
+    if (!newRoute.code || !newRoute.name || !newRoute.from || !newRoute.to || !newRoute.distance || !newRoute.duration || !newRoute.stops || !newRoute.fare) {
       Alert.alert('Error', 'Please fill all fields');
       return;
     }
 
     // Check if route code already exists
-    // 🔧 FIX: Changed from routes to routeList
-    const routeExists = routeList.some(route => route.code === newRoute.code.toUpperCase());
+    const routeExists = routes.some(route => route.code === newRoute.code.toUpperCase());
     if (routeExists) {
       Alert.alert('Error', `Route code ${newRoute.code.toUpperCase()} already exists`);
       return;
     }
 
-    const newRouteObj = {
-      id: (routeList.length + 1).toString(),
-      code: newRoute.code.toUpperCase(),
-      name: newRoute.name,
-      distance: newRoute.distance,
-      duration: newRoute.duration,
-      stops: parseInt(newRoute.stops) || 0,
-      fare: parseInt(newRoute.fare) || 0,
-    };
+    setLoading(true);
 
-    // 🔧 FIX: Changed from routes to routeList
-    const updatedRoutes = [...routeList, newRouteObj];
-    setRouteList(updatedRoutes);
+    try {
+      const routeData = {
+        code: newRoute.code.toUpperCase(),
+        name: newRoute.name,
+        from: newRoute.from,
+        to: newRoute.to,
+        distance: newRoute.distance,
+        duration: newRoute.duration,
+        stops: parseInt(newRoute.stops) || 0,
+        fare: parseInt(newRoute.fare) || 0,
+        transporterId: user.uid,
+        createdAt: firestore.FieldValue.serverTimestamp(),
+        updatedAt: firestore.FieldValue.serverTimestamp(),
+      };
+
+      await firestore()
+        .collection('routes')
+        .add(routeData);
+
+      Alert.alert(
+        'Success',
+        `Route ${newRoute.code.toUpperCase()} added successfully!`,
+        [
+          {
+            text: 'OK',
+            onPress: () => {
+              setRouteModalVisible(false);
+              setNewRoute({ code: '', name: '', from: '', to: '', distance: '', duration: '', stops: '', fare: '' });
+            }
+          },
+          {
+            text: 'Schedule Now',
+            onPress: () => {
+              setRouteModalVisible(false);
+              setNewRoute({ code: '', name: '', from: '', to: '', distance: '', duration: '', stops: '', fare: '' });
+              navigation.navigate('ScheduleTripScreen', {
+                mode: 'add',
+                preSelectedRoute: routeData.code,
+              });
+            }
+          }
+        ]
+      );
+    } catch (error) {
+      console.error('Error adding route:', error);
+      Alert.alert('Error', 'Failed to add route. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Edit Trip handler
+  const handleEditTrip = (trip: FirebaseTrip) => {
+    navigation.navigate('ScheduleTripScreen', {
+      mode: 'edit',
+      trip: trip as any,
+    });
+  };
+
+  // Track Trip handler
+  const handleTrackTrip = (trip: FirebaseTrip) => {
+    Alert.alert(
+      'Track Trip',
+      `Track ${trip.busNumber} from ${trip.from || 'Unknown'} to ${trip.to || 'Unknown'}`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Live Tracking', onPress: () => {
+          Alert.alert('Live Tracking', `Tracking ${trip.busNumber}...`);
+        }}
+      ]
+    );
+  };
+
+  // Update Trip Status handler
+  const handleUpdateStatus = async (tripId: string, newStatus: TripStatus) => {
+    if (!user) return;
+
+    try {
+      const updateData: any = {
+        status: newStatus,
+        updatedAt: firestore.FieldValue.serverTimestamp(),
+      };
+
+      if (newStatus === 'cancelled') {
+        updateData.cancelledAt = firestore.FieldValue.serverTimestamp();
+      }
+
+      await firestore()
+        .collection('trips')
+        .doc(tripId)
+        .update(updateData);
+
+      Alert.alert('Success', `Trip status updated to ${newStatus}`);
+    } catch (error) {
+      console.error('Error updating trip status:', error);
+      Alert.alert('Error', 'Failed to update trip status');
+    }
+  };
+
+  // Cancel Trip handler
+  const handleCancelTrip = (trip: FirebaseTrip) => {
+    const routeInfo = trip.displayRouteName || `${trip.from || 'Unknown'} → ${trip.to || 'Unknown'}`;
 
     Alert.alert(
-      'Success',
-      `Route ${newRoute.code.toUpperCase()} added successfully!\n\nWould you like to schedule a trip with this route?`,
+      'Cancel Trip',
+      `Are you sure you want to cancel ${routeInfo}?`,
       [
+        { text: 'No', style: 'cancel' },
         {
-          text: 'Later',
-          onPress: () => {
-            setRouteModalVisible(false);
-            setNewRoute({ code: '', name: '', distance: '', duration: '', stops: '', fare: '' });
-          }
-        },
-        {
-          text: 'Schedule Now',
-          onPress: () => {
-            setRouteModalVisible(false);
-            setNewRoute({ code: '', name: '', distance: '', duration: '', stops: '', fare: '' });
-            // Pre-select this route in schedule modal
-            setNewTrip({...newTrip, route: newRouteObj.code});
-            setScheduleModalVisible(true);
-          }
+          text: 'Yes, Cancel',
+          style: 'destructive',
+          onPress: () => handleUpdateStatus(trip.id, 'cancelled')
         }
       ]
     );
   };
 
-  // Edit Trip handler - Navigates to ScheduleTripScreen in edit mode
-  const handleEditTrip = (trip: any) => {
-    navigation.navigate('ScheduleTripScreen', {
-      mode: 'edit',
-      trip: trip,
-      onSave: (updatedTripData: any) => {
-        Alert.alert('Success', 'Trip updated successfully');
-      }
-    });
-  };
+  // Complete Trip handler
+  const handleCompleteTrip = (trip: FirebaseTrip) => {
+    const routeInfo = trip.displayRouteName || `${trip.from || 'Unknown'} → ${trip.to || 'Unknown'}`;
 
-  // Track Trip handler
-  const handleTrackTrip = (trip: any) => {
     Alert.alert(
-      'Track Trip',
-      `Track ${trip.bus} on ${trip.routeName}`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Live Tracking', onPress: () => {
-          Alert.alert('Live Tracking', `Tracking ${trip.bus}...`);
-        }}
-      ]
-    );
-  };
-
-  // Cancel Trip handler
-  const handleCancelTrip = (trip: any) => {
-    Alert.alert(
-      'Cancel Trip',
-      `Are you sure you want to cancel ${trip.routeCode}?`,
+      'Complete Trip',
+      `Mark ${routeInfo} as completed?`,
       [
         { text: 'No', style: 'cancel' },
-        { text: 'Yes, Cancel', style: 'destructive', onPress: () => {
-          Alert.alert('Cancelled', `Trip ${trip.routeCode} has been cancelled`);
-        }}
+        {
+          text: 'Yes, Complete',
+          onPress: () => handleUpdateStatus(trip.id, 'completed')
+        }
       ]
     );
   };
 
-  // Use Route handler - Navigates to ScheduleTripScreen with route pre-selected
-  const handleUseRoute = (route: any) => {
+  // Use Route handler
+  const handleUseRoute = (route: Route) => {
     navigation.navigate('ScheduleTripScreen', {
       mode: 'add',
       preSelectedRoute: route.code,
-      onSave: (tripData: any) => {
-        Alert.alert('Success', 'Trip scheduled successfully');
-      }
     });
   };
 
   // View Trip Details handler
-  const handleViewTripDetails = (trip: any) => {
+  const handleViewTripDetails = (trip: FirebaseTrip) => {
+    const passengers = (trip.totalSeats || 0) - (trip.availableSeats || 0);
+    const revenue = passengers * (trip.fare || 0);
+
     Alert.alert(
       'Trip Details',
-      `Details for ${trip.routeCode}`,
+      `Route: ${trip.displayRouteName || 'Unknown'}\n` +
+      `From: ${trip.from || 'N/A'}\n` +
+      `To: ${trip.to || 'N/A'}\n` +
+      `Bus: ${trip.busNumber}\n` +
+      `Driver: ${trip.driverName}\n` +
+      `Time: ${trip.departureTime} - ${trip.arrivalTime}\n` +
+      `Days: ${trip.days?.join(', ') || 'N/A'}\n` +
+      `Status: ${trip.status}\n` +
+      `Total Seats: ${trip.totalSeats || 0}\n` +
+      `Available: ${trip.availableSeats || 0}\n` +
+      `Passengers: ${passengers}\n` +
+      `Fare: PKR ${trip.fare || 0}\n` +
+      `Revenue: PKR ${revenue.toLocaleString()}`,
       [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'View Full Details', onPress: () => {
-          Alert.alert('Coming Soon', 'Trip details screen coming soon');
-        }}
+        { text: 'OK' },
+        { text: 'Edit', onPress: () => handleEditTrip(trip) }
       ]
     );
   };
 
-  // Filter trips based on status
-  const todayTrips = mockTrips.filter(trip =>
-    trip.days.includes('Daily') ||
-    trip.days.includes(new Date().toLocaleDateString('en-US', { weekday: 'short' }))
-  );
-
-  // Calculate stats
-  const stats = {
-    activeTrips: mockTrips.filter(t => t.status === 'active').length,
-    todayTrips: todayTrips.length,
-    completedTrips: mockTrips.filter(t => t.status === 'completed').length,
-    delayedTrips: mockTrips.filter(t => t.status === 'delayed').length,
-    totalRevenue: mockTrips.reduce((sum, trip) => sum + trip.revenue, 0),
-    totalPassengers: mockTrips.reduce((sum, trip) => sum + trip.passengers, 0),
-  };
-
+  // Helper functions
   const getStatusColor = (status: string) => {
     switch(status) {
-      case 'active': return '#4CAF50';
-      case 'upcoming': return '#2196F3';
-      case 'delayed': return '#FF9800';
-      case 'completed': return '#9C27B0';
-      case 'cancelled': return '#F44336';
-      default: return '#666666';
+      case 'active': return COLORS.success;
+      case 'upcoming': return COLORS.info;
+      case 'delayed': return COLORS.warning;
+      case 'completed': return COLORS.purple;
+      case 'cancelled': return COLORS.danger;
+      default: return COLORS.textLight;
     }
   };
 
@@ -307,122 +516,133 @@ const OperationsScreen = () => {
     }
   };
 
-  // Local function for scheduling trip (modal fallback)
-  const handleScheduleTripLocal = () => {
-    if (!newTrip.route || !newTrip.bus || !newTrip.driver || !newTrip.departureTime || newTrip.days.length === 0) {
-      Alert.alert('Error', 'Please fill all fields and select at least one day');
-      return;
-    }
-
-    Alert.alert('Success', 'Trip scheduled successfully');
-    setNewTrip({ route: '', bus: '', driver: '', departureTime: '', days: [] });
-    setScheduleModalVisible(false);
-    setSelectedDays(['Mon', 'Tue', 'Wed', 'Thu', 'Fri']);
-  };
-
-  const toggleDaySelection = (day: string) => {
-    if (selectedDays.includes(day)) {
-      setSelectedDays(selectedDays.filter(d => d !== day));
-    } else {
-      setSelectedDays([...selectedDays, day]);
-    }
-  };
-
   // Render Trip Card
-  const renderTripCard = ({ item }: { item: any }) => (
-    <TouchableOpacity
-      style={styles.tripCard}
-      onPress={() => handleViewTripDetails(item)}
-      activeOpacity={0.7}
-    >
-      <View style={styles.tripHeader}>
-        <View>
-          <Text style={styles.tripRoute}>{item.routeName}</Text>
-          <Text style={styles.tripCode}>{item.routeCode}</Text>
-        </View>
-        <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) }]}>
-          <Text style={styles.statusText}>
-            {getStatusIcon(item.status)} {item.status.toUpperCase()}
-          </Text>
-        </View>
-      </View>
+  const renderTripCard = ({ item }: { item: FirebaseTrip }) => {
+    const passengers = (item.totalSeats || 0) - (item.availableSeats || 0);
+    const revenue = passengers * (item.fare || 0);
+    const routeName = item.displayRouteName || `${item.from || 'Unknown'} → ${item.to || 'Unknown'}`;
+    const routeCode = item.displayRouteCode || '';
 
-      <View style={styles.tripDetails}>
-        <View style={styles.detailRow}>
-          <Text style={styles.detailLabel}>🚌 Bus:</Text>
-          <Text style={styles.detailValue}>{item.bus}</Text>
+    return (
+      <TouchableOpacity
+        style={[styles.tripCard, SHADOWS.medium]}
+        onPress={() => handleViewTripDetails(item)}
+        activeOpacity={0.7}
+      >
+        <View style={styles.tripHeader}>
+          <View>
+            <Text style={styles.tripRoute}>{routeName}</Text>
+            <Text style={styles.tripCode}>{routeCode}</Text>
+          </View>
+          <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) }]}>
+            <Text style={styles.statusText}>
+              {getStatusIcon(item.status)} {item.status.toUpperCase()}
+            </Text>
+          </View>
         </View>
-        <View style={styles.detailRow}>
-          <Text style={styles.detailLabel}>👤 Driver:</Text>
-          <Text style={styles.detailValue}>{item.driver}</Text>
-        </View>
-        <View style={styles.detailRow}>
-          <Text style={styles.detailLabel}>⏰ Time:</Text>
-          <Text style={styles.detailValue}>{item.departureTime} - {item.arrivalTime}</Text>
-        </View>
-        <View style={styles.detailRow}>
-          <Text style={styles.detailLabel}>📅 Days:</Text>
-          <Text style={styles.detailValue}>{item.days.join(', ')}</Text>
-        </View>
-      </View>
 
-      <View style={styles.tripFooter}>
-        <View style={styles.footerItem}>
-          <Text style={styles.footerLabel}>Passengers</Text>
-          <Text style={styles.footerValue}>{item.passengers}</Text>
+        <View style={styles.tripDetails}>
+          <View style={styles.detailRow}>
+            <Text style={styles.detailLabel}>🚌 Bus:</Text>
+            <Text style={styles.detailValue}>{item.busNumber}</Text>
+          </View>
+          <View style={styles.detailRow}>
+            <Text style={styles.detailLabel}>👤 Driver:</Text>
+            <Text style={styles.detailValue}>{item.driverName}</Text>
+          </View>
+          <View style={styles.detailRow}>
+            <Text style={styles.detailLabel}>📍 Route:</Text>
+            <Text style={styles.detailValue}>{item.from || '?'} → {item.to || '?'}</Text>
+          </View>
+          <View style={styles.detailRow}>
+            <Text style={styles.detailLabel}>⏰ Time:</Text>
+            <Text style={styles.detailValue}>{item.departureTime} - {item.arrivalTime}</Text>
+          </View>
+          <View style={styles.detailRow}>
+            <Text style={styles.detailLabel}>📅 Days:</Text>
+            <Text style={styles.detailValue}>{item.days?.join(', ') || 'N/A'}</Text>
+          </View>
         </View>
-        <View style={styles.footerItem}>
-          <Text style={styles.footerLabel}>Revenue</Text>
-          <Text style={styles.footerValue}>₹{item.revenue}</Text>
-        </View>
-        <View style={styles.footerItem}>
-          <Text style={styles.footerLabel}>Status</Text>
-          <Text style={[styles.footerValue, { color: getStatusColor(item.status) }]}>
-            {item.status}
-          </Text>
-        </View>
-      </View>
 
-      <View style={styles.tripActions}>
-        <TouchableOpacity
-          style={styles.actionButton}
-          onPress={(e) => {
-            e.stopPropagation(); // Prevent parent onPress from firing
-            handleEditTrip(item);
-          }}
-        >
-          <Text style={styles.actionButtonText}>✏️ Edit</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.actionButton}
-          onPress={(e) => {
-            e.stopPropagation(); // Prevent parent onPress from firing
-            handleCancelTrip(item);
-          }}
-        >
-          <Text style={styles.actionButtonText}>❌ Cancel</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.actionButton}
-          onPress={(e) => {
-            e.stopPropagation(); // Prevent parent onPress from firing
-            handleTrackTrip(item);
-          }}
-        >
-          <Text style={styles.actionButtonText}>📍 Track</Text>
-        </TouchableOpacity>
-      </View>
-    </TouchableOpacity>
-  );
+        <View style={styles.tripFooter}>
+          <View style={styles.footerItem}>
+            <Text style={styles.footerLabel}>Seats</Text>
+            <Text style={styles.footerValue}>
+              {item.availableSeats || 0}/{item.totalSeats || 0}
+            </Text>
+          </View>
+          <View style={styles.footerItem}>
+            <Text style={styles.footerLabel}>Passengers</Text>
+            <Text style={styles.footerValue}>{passengers}</Text>
+          </View>
+          <View style={styles.footerItem}>
+            <Text style={styles.footerLabel}>Revenue</Text>
+            <Text style={styles.footerValue}>
+              PKR {revenue.toLocaleString()}
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.tripActions}>
+          <TouchableOpacity
+            style={styles.actionButton}
+            onPress={(e) => {
+              e.stopPropagation();
+              handleEditTrip(item);
+            }}
+          >
+            <Text style={styles.actionButtonText}>✏️ Edit</Text>
+          </TouchableOpacity>
+
+          {item.status !== 'completed' && item.status !== 'cancelled' && (
+            <TouchableOpacity
+              style={[styles.actionButton, styles.completeButton]}
+              onPress={(e) => {
+                e.stopPropagation();
+                handleCompleteTrip(item);
+              }}
+            >
+              <Text style={[styles.actionButtonText, styles.completeButtonText]}>✅ Complete</Text>
+            </TouchableOpacity>
+          )}
+
+          {item.status !== 'cancelled' && (
+            <TouchableOpacity
+              style={[styles.actionButton, styles.cancelActionButton]}
+              onPress={(e) => {
+                e.stopPropagation();
+                handleCancelTrip(item);
+              }}
+            >
+              <Text style={[styles.actionButtonText, styles.cancelButtonText]}>❌ Cancel</Text>
+            </TouchableOpacity>
+          )}
+
+          <TouchableOpacity
+            style={styles.actionButton}
+            onPress={(e) => {
+              e.stopPropagation();
+              handleTrackTrip(item);
+            }}
+          >
+            <Text style={styles.actionButtonText}>📍 Track</Text>
+          </TouchableOpacity>
+        </View>
+      </TouchableOpacity>
+    );
+  };
 
   // Render Route Card
-  const renderRouteCard = ({ item }: { item: any }) => (
-    <View style={styles.routeCard}>
+  const renderRouteCard = ({ item }: { item: Route }) => (
+    <View style={[styles.routeCard, SHADOWS.medium]}>
       <View style={styles.routeHeader}>
         <Text style={styles.routeCode}>{item.code}</Text>
-        <Text style={styles.routeFare}>₹{item.fare}</Text>
+        <Text style={styles.routeFare}>PKR {item.fare}</Text>
       </View>
       <Text style={styles.routeName}>{item.name}</Text>
+      {item.from && item.to && (
+        <Text style={styles.routePath}>{item.from} → {item.to}</Text>
+      )}
       <View style={styles.routeDetails}>
         <View style={styles.routeDetail}>
           <Text style={styles.routeDetailIcon}>📏</Text>
@@ -447,16 +667,21 @@ const OperationsScreen = () => {
   );
 
   // Render Empty State
-  const renderEmptyState = () => (
-    <TouchableOpacity
-      style={styles.emptyState}
-      onPress={handleScheduleTrip}
-      activeOpacity={0.7}
-    >
+  const renderEmptyState = (type: string) => (
+    <View style={styles.emptyState}>
       <Text style={styles.emptyStateIcon}>📅</Text>
-      <Text style={styles.emptyStateText}>No trips scheduled for today</Text>
-      <Text style={styles.emptyStateButtonText}>Schedule a Trip</Text>
-    </TouchableOpacity>
+      <Text style={styles.emptyStateText}>
+        {type === 'trips' ? 'No trips found' : 'No routes found'}
+      </Text>
+      <TouchableOpacity
+        style={styles.emptyStateButton}
+        onPress={type === 'trips' ? handleScheduleTrip : handleCreateRoute}
+      >
+        <Text style={styles.emptyStateButtonText}>
+          {type === 'trips' ? 'Schedule a Trip' : 'Create a Route'}
+        </Text>
+      </TouchableOpacity>
+    </View>
   );
 
   // Render Stats Header
@@ -486,16 +711,16 @@ const OperationsScreen = () => {
         activeOpacity={0.7}
       >
         <Text style={styles.statValue}>{stats.totalPassengers}</Text>
-        <Text style={styles.statLabel}>Total Passengers</Text>
+        <Text style={styles.statLabel}>Passengers</Text>
       </TouchableOpacity>
 
       <TouchableOpacity
         style={styles.statCard}
-        onPress={() => Alert.alert('Revenue', `Total: ₹${stats.totalRevenue.toLocaleString()}`)}
+        onPress={() => Alert.alert('Revenue', `Total: PKR ${stats.totalRevenue.toLocaleString()}`)}
         activeOpacity={0.7}
       >
-        <Text style={styles.statValue}>₹{stats.totalRevenue.toLocaleString()}</Text>
-        <Text style={styles.statLabel}>Total Revenue</Text>
+        <Text style={styles.statValue}>PKR {stats.totalRevenue.toLocaleString()}</Text>
+        <Text style={styles.statLabel}>Revenue</Text>
       </TouchableOpacity>
     </View>
   );
@@ -518,6 +743,7 @@ const OperationsScreen = () => {
             value={newRoute.code}
             onChangeText={(text) => setNewRoute({...newRoute, code: text})}
             autoCapitalize="characters"
+            editable={!loading}
           />
 
           <TextInput
@@ -525,20 +751,40 @@ const OperationsScreen = () => {
             placeholder="Route Name (e.g., Downtown Express)"
             value={newRoute.name}
             onChangeText={(text) => setNewRoute({...newRoute, name: text})}
+            editable={!loading}
           />
 
           <View style={styles.rowInputs}>
             <TextInput
               style={[styles.input, styles.halfInput]}
-              placeholder="Distance (e.g., 15km)"
-              value={newRoute.distance}
-              onChangeText={(text) => setNewRoute({...newRoute, distance: text})}
+              placeholder="From (e.g., Lahore)"
+              value={newRoute.from}
+              onChangeText={(text) => setNewRoute({...newRoute, from: text})}
+              editable={!loading}
             />
             <TextInput
               style={[styles.input, styles.halfInput]}
-              placeholder="Duration (e.g., 45min)"
+              placeholder="To (e.g., Islamabad)"
+              value={newRoute.to}
+              onChangeText={(text) => setNewRoute({...newRoute, to: text})}
+              editable={!loading}
+            />
+          </View>
+
+          <View style={styles.rowInputs}>
+            <TextInput
+              style={[styles.input, styles.halfInput]}
+              placeholder="Distance (e.g., 375km)"
+              value={newRoute.distance}
+              onChangeText={(text) => setNewRoute({...newRoute, distance: text})}
+              editable={!loading}
+            />
+            <TextInput
+              style={[styles.input, styles.halfInput]}
+              placeholder="Duration (e.g., 5h 30m)"
               value={newRoute.duration}
               onChangeText={(text) => setNewRoute({...newRoute, duration: text})}
+              editable={!loading}
             />
           </View>
 
@@ -549,13 +795,15 @@ const OperationsScreen = () => {
               value={newRoute.stops}
               onChangeText={(text) => setNewRoute({...newRoute, stops: text})}
               keyboardType="numeric"
+              editable={!loading}
             />
             <TextInput
               style={[styles.input, styles.halfInput]}
-              placeholder="Fare (₹)"
+              placeholder="Fare (PKR)"
               value={newRoute.fare}
               onChangeText={(text) => setNewRoute({...newRoute, fare: text})}
               keyboardType="numeric"
+              editable={!loading}
             />
           </View>
 
@@ -564,8 +812,9 @@ const OperationsScreen = () => {
               style={[styles.modalButton, styles.cancelButton]}
               onPress={() => {
                 setRouteModalVisible(false);
-                setNewRoute({ code: '', name: '', distance: '', duration: '', stops: '', fare: '' });
+                setNewRoute({ code: '', name: '', from: '', to: '', distance: '', duration: '', stops: '', fare: '' });
               }}
+              disabled={loading}
             >
               <Text style={styles.cancelButtonText}>Cancel</Text>
             </TouchableOpacity>
@@ -573,8 +822,13 @@ const OperationsScreen = () => {
             <TouchableOpacity
               style={[styles.modalButton, styles.saveButton]}
               onPress={handleAddRoute}
+              disabled={loading}
             >
-              <Text style={styles.saveButtonText}>Add Route</Text>
+              {loading ? (
+                <ActivityIndicator color={COLORS.white} size="small" />
+              ) : (
+                <Text style={styles.saveButtonText}>Add Route</Text>
+              )}
             </TouchableOpacity>
           </View>
         </View>
@@ -582,13 +836,22 @@ const OperationsScreen = () => {
     </Modal>
   );
 
+  if (loading && trips.length === 0) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color={COLORS.primary} />
+        <Text style={styles.loadingText}>Loading operations...</Text>
+      </View>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
         <View>
           <Text style={styles.title}>📅 Operations</Text>
-          <Text style={styles.subtitle}>Manage routes and schedules</Text>
+          <Text style={styles.subtitle}>{transporterName}</Text>
         </View>
         <View style={styles.headerButtons}>
           <TouchableOpacity
@@ -640,24 +903,31 @@ const OperationsScreen = () => {
       {/* Content based on active tab */}
       {activeTab === 'schedule' && (
         <FlatList
-          data={mockTrips}
+          data={trips}
           renderItem={renderTripCard}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContainer}
           showsVerticalScrollIndicator={false}
-          ListHeaderComponent={<Text style={styles.sectionTitle}>Scheduled Trips</Text>}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
+          ListHeaderComponent={<Text style={styles.sectionTitle}>All Scheduled Trips</Text>}
+          ListEmptyComponent={renderEmptyState('trips')}
         />
       )}
 
       {activeTab === 'routes' && (
         <FlatList
-          // 🔧 FIX: Changed from routes to routeList
-          data={routeList}
+          data={routes}
           renderItem={renderRouteCard}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContainer}
           showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
           ListHeaderComponent={<Text style={styles.sectionTitle}>Available Routes</Text>}
+          ListEmptyComponent={renderEmptyState('routes')}
         />
       )}
 
@@ -668,152 +938,16 @@ const OperationsScreen = () => {
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContainer}
           showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
           ListHeaderComponent={<Text style={styles.sectionTitle}>Today's Schedule</Text>}
-          ListEmptyComponent={renderEmptyState}
+          ListEmptyComponent={renderEmptyState('trips')}
         />
       )}
 
       {/* Add Route Modal */}
       {renderRouteModal()}
-
-      {/* Old Schedule Trip Modal (Fallback if navigation fails) */}
-      <Modal
-        animationType="slide"
-        transparent={true}
-        visible={scheduleModalVisible}
-        onRequestClose={() => setScheduleModalVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContainer}>
-            <Text style={styles.modalTitle}>Schedule New Trip</Text>
-
-            {/* Route Selection */}
-            <Text style={styles.modalLabel}>Select Route</Text>
-            <View style={styles.pickerContainer}>
-              {/* 🔧 FIX: Changed from routes to routeList */}
-              {routeList.map(route => (
-                <TouchableOpacity
-                  key={route.id}
-                  style={[
-                    styles.pickerOption,
-                    newTrip.route === route.code && styles.pickerOptionSelected
-                  ]}
-                  onPress={() => setNewTrip({...newTrip, route: route.code})}
-                >
-                  <Text style={[
-                    styles.pickerOptionText,
-                    newTrip.route === route.code && styles.pickerOptionTextSelected
-                  ]}>
-                    {route.code}
-                  </Text>
-                  <Text style={styles.pickerOptionSubtext}>{route.name}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            {/* Bus Selection */}
-            <Text style={styles.modalLabel}>Select Bus</Text>
-            <View style={styles.pickerContainer}>
-              {mockBuses.map(bus => (
-                <TouchableOpacity
-                  key={bus}
-                  style={[
-                    styles.pickerOption,
-                    newTrip.bus === bus && styles.pickerOptionSelected
-                  ]}
-                  onPress={() => setNewTrip({...newTrip, bus: bus})}
-                >
-                  <Text style={[
-                    styles.pickerOptionText,
-                    newTrip.bus === bus && styles.pickerOptionTextSelected
-                  ]}>
-                    🚌 {bus}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            {/* Driver Selection */}
-            <Text style={styles.modalLabel}>Select Driver</Text>
-            <View style={styles.pickerContainer}>
-              {mockDrivers.map(driver => (
-                <TouchableOpacity
-                  key={driver}
-                  style={[
-                    styles.pickerOption,
-                    newTrip.driver === driver && styles.pickerOptionSelected
-                  ]}
-                  onPress={() => setNewTrip({...newTrip, driver: driver})}
-                >
-                  <Text style={[
-                    styles.pickerOptionText,
-                    newTrip.driver === driver && styles.pickerOptionTextSelected
-                  ]}>
-                    👤 {driver}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            {/* Time Selection */}
-            <Text style={styles.modalLabel}>Departure Time</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="HH:MM (e.g., 08:00)"
-              value={newTrip.departureTime}
-              onChangeText={(text) => setNewTrip({...newTrip, departureTime: text})}
-            />
-
-            {/* Days Selection */}
-            <Text style={styles.modalLabel}>Select Days</Text>
-            <View style={styles.daysContainer}>
-              {daysOfWeek.map(day => (
-                <TouchableOpacity
-                  key={day}
-                  style={[
-                    styles.dayButton,
-                    selectedDays.includes(day) && styles.dayButtonSelected
-                  ]}
-                  onPress={() => toggleDaySelection(day)}
-                >
-                  <Text style={[
-                    styles.dayButtonText,
-                    selectedDays.includes(day) && styles.dayButtonTextSelected
-                  ]}>
-                    {day}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            <TouchableOpacity
-              style={styles.selectAllButton}
-              onPress={() => setSelectedDays(daysOfWeek)}
-            >
-              <Text style={styles.selectAllText}>Select All Days</Text>
-            </TouchableOpacity>
-
-            <View style={styles.modalButtons}>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.cancelButton]}
-                onPress={() => {
-                  setScheduleModalVisible(false);
-                  setNewTrip({ route: '', bus: '', driver: '', departureTime: '', days: [] });
-                  setSelectedDays(['Mon', 'Tue', 'Wed', 'Thu', 'Fri']);
-                }}
-              >
-                <Text style={styles.cancelButtonText}>Cancel</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.modalButton, styles.saveButton]}
-                onPress={handleScheduleTripLocal}
-              >
-                <Text style={styles.saveButtonText}>Schedule Trip</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
     </SafeAreaView>
   );
 };
@@ -821,45 +955,56 @@ const OperationsScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F8F9FA',
+    backgroundColor: COLORS.background,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: COLORS.background,
+  },
+  loadingText: {
+    marginTop: SIZES.sm,
+    fontSize: 16,
+    color: COLORS.primary,
   },
   header: {
-    paddingHorizontal: 16,
-    paddingVertical: 20,
-    backgroundColor: '#1A237E',
+    paddingHorizontal: SIZES.md,
+    paddingVertical: SIZES.lg,
+    backgroundColor: COLORS.primary,
   },
   title: {
     fontSize: 20,
     fontWeight: '700',
-    color: '#FFFFFF',
+    color: COLORS.white,
   },
   subtitle: {
     fontSize: 14,
-    color: '#E0E0E0',
-    marginTop: 4,
+    color: COLORS.greyLight,
+    marginTop: 2,
   },
   headerButtons: {
     flexDirection: 'row',
-    marginTop: 16,
+    marginTop: SIZES.md,
   },
   headerButton: {
-    backgroundColor: '#4A90E2',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 8,
-    marginRight: 12,
+    backgroundColor: COLORS.secondary,
+    paddingHorizontal: SIZES.lg,
+    paddingVertical: SIZES.sm,
+    borderRadius: SIZES.xs,
+    marginRight: SIZES.sm,
   },
   headerButtonText: {
-    color: '#FFFFFF',
+    color: COLORS.white,
     fontWeight: '600',
     fontSize: 14,
   },
   statsContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    backgroundColor: '#FFFFFF',
+    paddingHorizontal: SIZES.md,
+    paddingVertical: SIZES.md,
+    backgroundColor: COLORS.white,
     marginBottom: 1,
   },
   statCard: {
@@ -867,232 +1012,242 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   statValue: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '700',
-    color: '#1A237E',
-    marginBottom: 4,
+    color: COLORS.primary,
+    marginBottom: 2,
   },
   statLabel: {
-    fontSize: 12,
-    color: '#666666',
+    fontSize: 11,
+    color: COLORS.textLight,
     textAlign: 'center',
   },
   tabContainer: {
     flexDirection: 'row',
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    backgroundColor: COLORS.white,
+    paddingHorizontal: SIZES.md,
+    paddingVertical: SIZES.xs,
     borderBottomWidth: 1,
-    borderBottomColor: '#E0E0E0',
+    borderBottomColor: COLORS.border,
   },
   tab: {
     flex: 1,
-    paddingVertical: 12,
+    paddingVertical: SIZES.sm,
     alignItems: 'center',
     marginHorizontal: 4,
-    borderRadius: 8,
+    borderRadius: SIZES.xs,
   },
   tabActive: {
-    backgroundColor: '#4A90E2',
+    backgroundColor: COLORS.secondary,
   },
   tabText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#666666',
+    color: COLORS.textLight,
   },
   tabTextActive: {
-    color: '#FFFFFF',
+    color: COLORS.white,
   },
   listContainer: {
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 16,
+    paddingHorizontal: SIZES.md,
+    paddingTop: SIZES.md,
+    paddingBottom: SIZES.lg,
   },
   sectionTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#1A237E',
-    marginBottom: 16,
-    marginTop: 8,
+    color: COLORS.primary,
+    marginBottom: SIZES.md,
+    marginTop: SIZES.xs,
   },
   tripCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    backgroundColor: COLORS.white,
+    borderRadius: SIZES.md,
+    padding: SIZES.md,
+    marginBottom: SIZES.sm,
   },
   tripHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 12,
+    marginBottom: SIZES.sm,
   },
   tripRoute: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '700',
-    color: '#1A237E',
+    color: COLORS.primary,
   },
   tripCode: {
-    fontSize: 14,
-    color: '#666666',
+    fontSize: 13,
+    color: COLORS.textLight,
     marginTop: 2,
   },
   statusBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
+    paddingHorizontal: SIZES.sm,
+    paddingVertical: 4,
+    borderRadius: 16,
   },
   statusText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
-    color: '#FFFFFF',
+    color: COLORS.white,
   },
   tripDetails: {
-    marginBottom: 12,
+    marginBottom: SIZES.sm,
   },
   detailRow: {
     flexDirection: 'row',
-    marginBottom: 8,
+    marginBottom: 6,
   },
   detailLabel: {
-    fontSize: 14,
-    color: '#666666',
-    width: 80,
+    fontSize: 13,
+    color: COLORS.textLight,
+    width: 70,
   },
   detailValue: {
-    fontSize: 14,
-    color: '#333333',
+    fontSize: 13,
+    color: COLORS.text,
     fontWeight: '500',
     flex: 1,
   },
   tripFooter: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingTop: 12,
+    paddingTop: SIZES.sm,
     borderTopWidth: 1,
-    borderTopColor: '#E0E0E0',
-    marginBottom: 12,
+    borderTopColor: COLORS.border,
+    marginBottom: SIZES.sm,
   },
   footerItem: {
     alignItems: 'center',
     flex: 1,
   },
   footerLabel: {
-    fontSize: 12,
-    color: '#666666',
-    marginBottom: 4,
+    fontSize: 11,
+    color: COLORS.textLight,
+    marginBottom: 2,
   },
   footerValue: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '700',
-    color: '#1A237E',
+    color: COLORS.primary,
   },
   tripActions: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    flexWrap: 'wrap',
   },
   actionButton: {
     flex: 1,
-    paddingVertical: 10,
+    paddingVertical: SIZES.xs,
     alignItems: 'center',
-    marginHorizontal: 4,
-    borderRadius: 8,
-    backgroundColor: '#F0F0F0',
+    marginHorizontal: 2,
+    borderRadius: SIZES.xs,
+    backgroundColor: COLORS.greyLight,
+    minWidth: 70,
   },
   actionButtonText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
-    color: '#1A237E',
+    color: COLORS.primary,
+  },
+  completeButton: {
+    backgroundColor: '#E8F5E9',
+  },
+  completeButtonText: {
+    color: COLORS.success,
+  },
+  cancelActionButton: {
+    backgroundColor: '#FFEBEE',
+  },
+  cancelButtonText: {
+    color: COLORS.danger,
   },
   routeCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    backgroundColor: COLORS.white,
+    borderRadius: SIZES.md,
+    padding: SIZES.md,
+    marginBottom: SIZES.sm,
   },
   routeHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: SIZES.xs,
   },
   routeCode: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#1A237E',
+    color: COLORS.primary,
   },
   routeFare: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '700',
-    color: '#4CAF50',
+    color: COLORS.success,
   },
   routeName: {
-    fontSize: 16,
-    color: '#333333',
-    marginBottom: 12,
+    fontSize: 15,
+    color: COLORS.text,
+    marginBottom: 2,
+  },
+  routePath: {
+    fontSize: 13,
+    color: COLORS.textLight,
+    marginBottom: SIZES.sm,
   },
   routeDetails: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 12,
+    marginBottom: SIZES.md,
   },
   routeDetail: {
     alignItems: 'center',
     flex: 1,
   },
   routeDetailIcon: {
-    fontSize: 20,
-    marginBottom: 4,
+    fontSize: 18,
+    marginBottom: 2,
   },
   routeDetailText: {
-    fontSize: 12,
-    color: '#666666',
+    fontSize: 11,
+    color: COLORS.textLight,
     textAlign: 'center',
   },
   useRouteButton: {
-    backgroundColor: '#4A90E2',
-    paddingVertical: 12,
-    borderRadius: 8,
+    backgroundColor: COLORS.secondary,
+    paddingVertical: SIZES.sm,
+    borderRadius: SIZES.xs,
     alignItems: 'center',
   },
   useRouteButtonText: {
-    color: '#FFFFFF',
+    color: COLORS.white,
     fontWeight: '600',
-    fontSize: 14,
+    fontSize: 13,
   },
   emptyState: {
     alignItems: 'center',
-    padding: 40,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    padding: SIZES.xxxl,
+    backgroundColor: COLORS.white,
+    borderRadius: SIZES.md,
   },
   emptyStateIcon: {
     fontSize: 48,
-    marginBottom: 16,
+    marginBottom: SIZES.md,
   },
   emptyStateText: {
     fontSize: 16,
-    color: '#666666',
+    color: COLORS.textLight,
     textAlign: 'center',
-    marginBottom: 20,
+    marginBottom: SIZES.lg,
+  },
+  emptyStateButton: {
+    backgroundColor: COLORS.secondary,
+    paddingHorizontal: SIZES.xl,
+    paddingVertical: SIZES.sm,
+    borderRadius: SIZES.xs,
   },
   emptyStateButtonText: {
-    color: '#4A90E2',
+    color: COLORS.white,
     fontWeight: '600',
     fontSize: 14,
   },
@@ -1103,9 +1258,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   modalContainer: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 24,
+    backgroundColor: COLORS.white,
+    borderRadius: SIZES.md,
+    padding: SIZES.lg,
     width: '90%',
     maxWidth: 400,
     maxHeight: '80%',
@@ -1113,55 +1268,19 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 20,
     fontWeight: '700',
-    color: '#1A237E',
-    marginBottom: 20,
+    color: COLORS.primary,
+    marginBottom: SIZES.lg,
     textAlign: 'center',
-  },
-  modalLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333333',
-    marginBottom: 8,
-    marginTop: 16,
-  },
-  pickerContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginBottom: 8,
-  },
-  pickerOption: {
-    padding: 12,
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
-    borderRadius: 8,
-    marginRight: 8,
-    marginBottom: 8,
-    minWidth: 100,
-  },
-  pickerOptionSelected: {
-    backgroundColor: '#E3F2FD',
-    borderColor: '#4A90E2',
-  },
-  pickerOptionText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#333333',
-    marginBottom: 4,
-  },
-  pickerOptionTextSelected: {
-    color: '#1A237E',
-  },
-  pickerOptionSubtext: {
-    fontSize: 12,
-    color: '#666666',
   },
   input: {
     borderWidth: 1,
-    borderColor: '#E0E0E0',
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 16,
-    marginBottom: 16,
+    borderColor: COLORS.border,
+    borderRadius: SIZES.xs,
+    padding: SIZES.sm,
+    fontSize: 15,
+    marginBottom: SIZES.sm,
+    backgroundColor: COLORS.white,
+    color: COLORS.text,
   },
   rowInputs: {
     flexDirection: 'row',
@@ -1170,70 +1289,33 @@ const styles = StyleSheet.create({
   halfInput: {
     width: '48%',
   },
-  daysContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-  },
-  dayButton: {
-    width: '14%',
-    aspectRatio: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
-    borderRadius: 8,
-    marginBottom: 8,
-  },
-  dayButtonSelected: {
-    backgroundColor: '#4A90E2',
-    borderColor: '#4A90E2',
-  },
-  dayButtonText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#666666',
-  },
-  dayButtonTextSelected: {
-    color: '#FFFFFF',
-  },
-  selectAllButton: {
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  selectAllText: {
-    color: '#4A90E2',
-    fontWeight: '600',
-    fontSize: 14,
-  },
   modalButtons: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 8,
+    marginTop: SIZES.sm,
   },
   modalButton: {
     flex: 1,
-    paddingVertical: 12,
-    borderRadius: 8,
+    paddingVertical: SIZES.sm,
+    borderRadius: SIZES.xs,
     alignItems: 'center',
-    marginHorizontal: 8,
+    marginHorizontal: SIZES.xs,
   },
   cancelButton: {
-    backgroundColor: '#F0F0F0',
+    backgroundColor: COLORS.greyLight,
   },
   saveButton: {
-    backgroundColor: '#4A90E2',
+    backgroundColor: COLORS.secondary,
   },
   cancelButtonText: {
-    color: '#666666',
+    color: COLORS.textLight,
     fontWeight: '600',
-    fontSize: 16,
+    fontSize: 15,
   },
   saveButtonText: {
-    color: '#FFFFFF',
+    color: COLORS.white,
     fontWeight: '600',
-    fontSize: 16,
+    fontSize: 15,
   },
 });
 

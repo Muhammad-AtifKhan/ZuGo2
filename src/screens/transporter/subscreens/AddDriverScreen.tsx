@@ -1,5 +1,5 @@
-// AddDriverScreen.tsx - WITH REQUIRED EMAIL FIELD
-import React, { useState } from 'react';
+// src/screens/transporter/subscreens/AddDriverScreen.tsx
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -11,14 +11,27 @@ import {
   Alert,
   Platform,
   Modal,
+  ActivityIndicator,
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import firestore from '@react-native-firebase/firestore';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import auth from '@react-native-firebase/auth';
+import firestore from '@react-native-firebase/firestore';
 
-const AddDriverScreen = ({ navigation, route }: any) => {
-  const mode = route.params?.mode || 'add';
-  const existingDriver = route.params?.driver || null;
+// Types
+import { Driver } from '../../../types/driver.types';
+
+// Constants
+import { COLORS, SIZES, SHADOWS } from '../../../constants/theme';
+
+const AddDriverScreen = () => {
+  const navigation = useNavigation();
+  const route = useRoute();
+  const { mode, driver, transporterId } = route.params as {
+    mode: 'add' | 'edit';
+    driver?: Driver;
+    transporterId?: string;
+  };
 
   // Date picker states
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -28,25 +41,70 @@ const AddDriverScreen = ({ navigation, route }: any) => {
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [transporterName, setTransporterName] = useState('');
 
   const [formData, setFormData] = useState({
-    fullName: existingDriver?.fullName || '',
-    contactNumber: existingDriver?.contactNumber || '',
-    email: existingDriver?.email || '', // ← Now REQUIRED
-    cnic: existingDriver?.cnic || '',
-    licenseNumber: existingDriver?.licenseNumber || '',
-    licenseType: existingDriver?.licenseType || 'heavy',
-    licenseExpiry: existingDriver?.licenseExpiry || '',
-    address: existingDriver?.address || '',
-    emergencyContact: existingDriver?.emergencyContact || '',
-    joiningDate: existingDriver?.joiningDate || '',
-    salary: existingDriver?.salary || '',
-    employmentType: existingDriver?.employmentType || 'fulltime',
-    vehicleAssigned: existingDriver?.vehicleAssigned || '',
-    status: existingDriver?.status || 'active',
+    fullName: '',
+    contactNumber: '',
+    email: '',
+    cnic: '',
+    licenseNumber: '',
+    licenseType: 'heavy',
+    licenseExpiry: '',
+    address: '',
+    emergencyContact: '',
+    joiningDate: '',
+    salary: '',
+    employmentType: 'fulltime',
+    vehicleAssigned: '',
+    status: 'active',
     password: '',
     confirmPassword: '',
   });
+
+  // Load existing driver data if in edit mode
+  useEffect(() => {
+    if (mode === 'edit' && driver) {
+      setFormData({
+        fullName: driver.fullName || '',
+        contactNumber: driver.contactNumber || '',
+        email: driver.email || '',
+        cnic: driver.cnic || '',
+        licenseNumber: driver.licenseNumber || '',
+        licenseType: driver.licenseType || 'heavy',
+        licenseExpiry: driver.licenseExpiry || '',
+        address: driver.address || '',
+        emergencyContact: driver.emergencyContact || '',
+        joiningDate: driver.joiningDate || '',
+        salary: driver.salary?.toString() || '',
+        employmentType: driver.employmentType || 'fulltime',
+        vehicleAssigned: driver.vehicleAssigned || '',
+        status: driver.status || 'active',
+        password: '',
+        confirmPassword: '',
+      });
+    }
+  }, [mode, driver]);
+
+  // Fetch transporter name
+  useEffect(() => {
+    const user = auth().currentUser;
+    if (!user) return;
+
+    const unsubscribe = firestore()
+      .collection('users')
+      .doc(user.uid)
+      .onSnapshot(
+        (doc) => {
+          if (doc.exists) {
+            setTransporterName(doc.data()?.fullName || 'Transporter');
+          }
+        },
+        (error) => console.error('Error fetching user:', error)
+      );
+
+    return () => unsubscribe();
+  }, []);
 
   const licenseTypes = [
     { id: 'light', label: 'Light Vehicle', icon: '🚗' },
@@ -191,40 +249,37 @@ const AddDriverScreen = ({ navigation, route }: any) => {
       // Use the password provided by transporter
       const driverPassword = driverData.password;
 
-      // ✅ Use ACTUAL EMAIL provided by transporter (not random)
+      // ✅ Use ACTUAL EMAIL provided by transporter
       const driverEmail = driverData.email.trim().toLowerCase();
 
       console.log('Creating driver account with:', {
         email: driverEmail,
-        password: driverPassword
       });
 
       // Create driver user account in Firebase Auth
       const userCredential = await auth().createUserWithEmailAndPassword(
-        driverEmail, // ← ACTUAL EMAIL FROM FORM
+        driverEmail,
         driverPassword
       );
 
       const driverId = userCredential.user.uid;
 
-      // Update user profile with driver role
+      // Update user profile with driver name
       await userCredential.user.updateProfile({
         displayName: driverData.fullName,
       });
 
       console.log('Driver account created successfully:', driverId);
 
-      // Return driver info with ACTUAL EMAIL
       return {
         driverId,
-        email: driverEmail, // ← ACTUAL EMAIL
+        email: driverEmail,
         password: driverPassword
       };
 
     } catch (error: any) {
       console.error('Driver account creation error:', error);
 
-      // If email already exists, ask transporter to use different email
       if (error.code === 'auth/email-already-in-use') {
         Alert.alert(
           'Email Already Exists',
@@ -237,14 +292,31 @@ const AddDriverScreen = ({ navigation, route }: any) => {
     }
   };
 
-  const saveDriverToFirestore = async (driverId: string, driverData: any, transporterId: string, password: string) => {
+  const saveDriverToFirestore = async (
+    driverId: string,
+    driverData: any,
+    transporterId: string,
+    password: string
+  ) => {
     // ✅ Store ACTUAL EMAIL in Firestore
     const driverEmail = driverData.email.trim().toLowerCase();
 
     const driverDataWithMeta = {
-      ...driverData,
+      fullName: driverData.fullName,
+      contactNumber: driverData.contactNumber,
+      email: driverEmail,
+      cnic: driverData.cnic,
+      licenseNumber: driverData.licenseNumber,
+      licenseType: driverData.licenseType,
+      licenseExpiry: driverData.licenseExpiry,
+      address: driverData.address,
+      emergencyContact: driverData.emergencyContact,
+      joiningDate: driverData.joiningDate || new Date().toISOString().split('T')[0],
+      salary: parseInt(driverData.salary) || 0,
+      employmentType: driverData.employmentType,
+      vehicleAssigned: driverData.vehicleAssigned || '',
+      status: driverData.status,
       uid: driverId,
-      email: driverEmail, // ← ACTUAL EMAIL
       transporterId: transporterId,
       passwordSetByTransporter: true,
       passwordSetDate: new Date().toISOString(),
@@ -265,9 +337,6 @@ const AddDriverScreen = ({ navigation, route }: any) => {
       currentLocation: null,
     };
 
-    // Remove password from Firestore data (for security)
-    const { password: _, confirmPassword: __, ...firestoreData } = driverDataWithMeta;
-
     console.log('Saving driver to Firestore:', {
       driverId,
       email: driverEmail,
@@ -278,7 +347,7 @@ const AddDriverScreen = ({ navigation, route }: any) => {
     await firestore()
       .collection('drivers')
       .doc(driverId)
-      .set(firestoreData);
+      .set(driverDataWithMeta);
 
     // Also add to users collection for unified querying
     await firestore()
@@ -287,7 +356,7 @@ const AddDriverScreen = ({ navigation, route }: any) => {
       .set({
         uid: driverId,
         fullName: driverData.fullName,
-        email: driverEmail, // ← ACTUAL EMAIL
+        email: driverEmail,
         phone: `+92${driverData.contactNumber.replace(/\D/g, '').slice(1)}`,
         userType: 'driver',
         transporterId: transporterId,
@@ -303,7 +372,7 @@ const AddDriverScreen = ({ navigation, route }: any) => {
       .set({
         driverId,
         transporterId,
-        email: driverEmail, // ← ACTUAL EMAIL
+        email: driverEmail,
         password: password,
         driverName: driverData.fullName,
         phone: driverData.contactNumber,
@@ -311,22 +380,44 @@ const AddDriverScreen = ({ navigation, route }: any) => {
         accessAllowed: [transporterId],
       });
 
-    // Update transporter's drivers list
-    await firestore()
-      .collection('transporters')
-      .doc(transporterId)
-      .update({
+    // Update transporter's drivers count
+    const transporterRef = firestore().collection('transporters').doc(transporterId);
+    const transporterDoc = await transporterRef.get();
+
+    if (transporterDoc.exists) {
+      await transporterRef.update({
         driversCount: firestore.FieldValue.increment(1),
         updatedAt: firestore.FieldValue.serverTimestamp(),
       });
+    } else {
+      await transporterRef.set({
+        transporterId,
+        driversCount: 1,
+        createdAt: firestore.FieldValue.serverTimestamp(),
+        updatedAt: firestore.FieldValue.serverTimestamp(),
+      });
+    }
 
     console.log('Driver saved to Firestore successfully');
     return driverDataWithMeta;
   };
 
   const updateDriverInFirestore = async (driverId: string, driverData: any) => {
-    const { password: _, confirmPassword: __, ...updateData } = {
-      ...driverData,
+    const updateData = {
+      fullName: driverData.fullName,
+      contactNumber: driverData.contactNumber,
+      email: driverData.email.trim().toLowerCase(),
+      cnic: driverData.cnic,
+      licenseNumber: driverData.licenseNumber,
+      licenseType: driverData.licenseType,
+      licenseExpiry: driverData.licenseExpiry,
+      address: driverData.address,
+      emergencyContact: driverData.emergencyContact,
+      joiningDate: driverData.joiningDate,
+      salary: parseInt(driverData.salary) || 0,
+      employmentType: driverData.employmentType,
+      vehicleAssigned: driverData.vehicleAssigned || '',
+      status: driverData.status,
       updatedAt: firestore.FieldValue.serverTimestamp(),
     };
 
@@ -371,73 +462,64 @@ const AddDriverScreen = ({ navigation, route }: any) => {
 
       const transporterId = currentUser.uid;
 
-      // Prepare driver data
-      const driverData = {
-        ...formData,
-        phone: `+92${formData.contactNumber.replace(/\D/g, '').slice(1)}`,
-        phoneLocal: formData.contactNumber,
-      };
-
-      let driverAccount;
-      let successMessage = '';
-
       if (mode === 'add') {
         // Create new driver with transporter-provided email and password
-        driverAccount = await createDriverAccount(driverData);
-        await saveDriverToFirestore(driverAccount.driverId, driverData, transporterId, driverAccount.password);
+        const driverAccount = await createDriverAccount(formData);
+        await saveDriverToFirestore(
+          driverAccount.driverId,
+          formData,
+          transporterId,
+          driverAccount.password
+        );
 
-        successMessage = `✅ Driver Added Successfully!\n\n📋 Driver Login Credentials:\n\n📧 Email: ${driverAccount.email}\n🔑 Password: ${driverAccount.password}\n\n⚠️ Important Instructions:\n1. Share these EXACT credentials with the driver\n2. Driver must use this EXACT email to login\n3. Save this information securely\n4. Driver can login immediately`;
+        const successMessage = `✅ Driver Added Successfully!\n\n📋 Driver Login Credentials:\n\n📧 Email: ${driverAccount.email}\n🔑 Password: ${driverAccount.password}\n\n⚠️ Important Instructions:\n1. Share these EXACT credentials with the driver\n2. Driver must use this EXACT email to login\n3. Save this information securely\n4. Driver can login immediately`;
+
+        Alert.alert(
+          'Success',
+          successMessage,
+          [
+            {
+              text: 'OK',
+              onPress: () => navigation.goBack()
+            },
+            {
+              text: '📋 Show Credentials',
+              onPress: () => {
+                Alert.alert(
+                  'Driver Credentials',
+                  `Email: ${driverAccount.email}\nPassword: ${driverAccount.password}`,
+                  [
+                    { text: 'OK' },
+                    {
+                      text: 'Copy',
+                      onPress: () => {
+                        // You can add copy functionality here
+                        Alert.alert('Copied', 'Credentials copied to clipboard');
+                      }
+                    }
+                  ]
+                );
+              }
+            }
+          ]
+        );
 
       } else {
         // Update existing driver
-        const driverId = existingDriver.uid;
-        await updateDriverInFirestore(driverId, driverData);
-        successMessage = 'Driver updated successfully!';
+        if (!driver?.id) {
+          Alert.alert('Error', 'Driver ID not found');
+          setLoading(false);
+          return;
+        }
+
+        await updateDriverInFirestore(driver.id, formData);
+
+        Alert.alert(
+          'Success',
+          'Driver updated successfully!',
+          [{ text: 'OK', onPress: () => navigation.goBack() }]
+        );
       }
-
-      setLoading(false);
-
-      // Show success with clear instructions
-      Alert.alert(
-        'Success',
-        successMessage,
-        [
-          {
-            text: 'OK',
-            onPress: () => {
-              navigation.goBack();
-            }
-          },
-          mode === 'add' && {
-            text: '📋 Show Credentials Again',
-            onPress: () => {
-              Alert.alert(
-                'Driver Credentials',
-                `Email: ${driverAccount.email}\nPassword: ${driverAccount.password}`,
-                [
-                  { text: 'OK' },
-                  {
-                    text: 'Email to Driver',
-                    onPress: () => {
-                      Alert.alert(
-                        'Send Email',
-                        `Send credentials to driver via email?\n\nEmail: ${driverAccount.email}`,
-                        [
-                          { text: 'Cancel', style: 'cancel' },
-                          { text: 'Send', onPress: () => {
-                            // Here you would implement email sending
-                            Alert.alert('Info', 'Email functionality will be added in next update');
-                          }}
-                        ]
-                      );
-                    }
-                  }
-                ]
-              );
-            }
-          }
-        ].filter(Boolean) as { text: string; onPress: () => void }[]
-      );
 
     } catch (error: any) {
       setLoading(false);
@@ -471,6 +553,21 @@ const AddDriverScreen = ({ navigation, route }: any) => {
     }
   };
 
+  // Generate random password
+  const generateRandomPassword = () => {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%';
+    let password = '';
+    for (let i = 0; i < 10; i++) {
+      password += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    setFormData({
+      ...formData,
+      password: password,
+      confirmPassword: password
+    });
+    Alert.alert('Password Generated', `Generated: ${password}`);
+  };
+
   // ========== RENDER FUNCTIONS ==========
   const renderStatusOptions = () => {
     return (
@@ -498,20 +595,14 @@ const AddDriverScreen = ({ navigation, route }: any) => {
     );
   };
 
-  // Generate random password
-  const generateRandomPassword = () => {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%';
-    let password = '';
-    for (let i = 0; i < 10; i++) {
-      password += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    setFormData({
-      ...formData,
-      password: password,
-      confirmPassword: password
-    });
-    Alert.alert('Password Generated', `Generated: ${password}`);
-  };
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color={COLORS.primary} />
+        <Text style={styles.loadingText}>Saving driver...</Text>
+      </View>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -560,7 +651,7 @@ const AddDriverScreen = ({ navigation, route }: any) => {
               />
             </View>
             <View style={[styles.inputGroup, { flex: 1, marginLeft: 8 }]}>
-              <Text style={styles.label}>Email Address *</Text> {/* ← NOW REQUIRED */}
+              <Text style={styles.label}>Email Address *</Text>
               <TextInput
                 style={styles.input}
                 placeholder="driver@email.com"
@@ -756,7 +847,7 @@ const AddDriverScreen = ({ navigation, route }: any) => {
 
           <View style={styles.row}>
             <View style={[styles.inputGroup, { flex: 1, marginRight: 8 }]}>
-              <Text style={styles.label}>Monthly Salary (₹)</Text>
+              <Text style={styles.label}>Monthly Salary (PKR)</Text>
               <TextInput
                 style={styles.input}
                 placeholder="45000"
@@ -830,9 +921,13 @@ const AddDriverScreen = ({ navigation, route }: any) => {
               onPress={handleSubmit}
               disabled={loading}
             >
-              <Text style={styles.submitButtonText}>
-                {loading ? 'Saving...' : mode === 'add' ? 'Add Driver' : 'Update Driver'}
-              </Text>
+              {loading ? (
+                <ActivityIndicator color={COLORS.white} />
+              ) : (
+                <Text style={styles.submitButtonText}>
+                  {mode === 'add' ? 'Add Driver' : 'Update Driver'}
+                </Text>
+              )}
             </TouchableOpacity>
           </View>
 
@@ -847,60 +942,50 @@ const AddDriverScreen = ({ navigation, route }: any) => {
             </Text>
           </View>
         </View>
+      </ScrollView>
 
-        {/* Date Picker Modal for iOS */}
-        {showDatePicker && Platform.OS === 'ios' && (
-          <Modal
-            transparent={true}
-            animationType="slide"
-            visible={showDatePicker}
-            onRequestClose={() => setShowDatePicker(false)}
-          >
-            <View style={styles.modalOverlay}>
-              <View style={styles.modalContainer}>
-                <View style={styles.modalHeader}>
-                  <Text style={styles.modalTitle}>Select Date</Text>
-                  <TouchableOpacity onPress={() => setShowDatePicker(false)}>
-                    <Text style={styles.modalClose}>Done</Text>
+      {/* Date Picker Modal */}
+      {showDatePicker && (
+        <Modal
+          transparent={true}
+          animationType="slide"
+          visible={showDatePicker}
+          onRequestClose={() => setShowDatePicker(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContainer}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Select Date</Text>
+                <TouchableOpacity onPress={() => setShowDatePicker(false)}>
+                  <Text style={styles.modalClose}>Done</Text>
+                </TouchableOpacity>
+              </View>
+              <DateTimePicker
+                value={selectedDate}
+                mode="date"
+                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                onChange={handleDateChange}
+              />
+              {Platform.OS === 'android' && (
+                <View style={styles.androidButtons}>
+                  <TouchableOpacity
+                    style={styles.androidButtonCancel}
+                    onPress={() => setShowDatePicker(false)}
+                  >
+                    <Text style={styles.androidButtonText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.androidButtonConfirm}
+                    onPress={handleAndroidDateConfirm}
+                  >
+                    <Text style={[styles.androidButtonText, styles.confirmButtonText]}>OK</Text>
                   </TouchableOpacity>
                 </View>
-                <DateTimePicker
-                  value={selectedDate}
-                  mode="date"
-                  display="spinner"
-                  onChange={handleDateChange}
-                />
-              </View>
-            </View>
-          </Modal>
-        )}
-
-        {/* Android Date Picker */}
-        {showDatePicker && Platform.OS === 'android' && (
-          <View style={styles.androidDatePickerContainer}>
-            <DateTimePicker
-              value={selectedDate}
-              mode="date"
-              display="default"
-              onChange={handleDateChange}
-            />
-            <View style={styles.androidButtons}>
-              <TouchableOpacity
-                style={styles.androidButtonCancel}
-                onPress={() => setShowDatePicker(false)}
-              >
-                <Text style={styles.androidButtonText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.androidButtonConfirm}
-                onPress={handleAndroidDateConfirm}
-              >
-                <Text style={[styles.androidButtonText, styles.confirmButtonText]}>OK</Text>
-              </TouchableOpacity>
+              )}
             </View>
           </View>
-        )}
-      </ScrollView>
+        </Modal>
+      )}
     </SafeAreaView>
   );
 };
@@ -908,7 +993,18 @@ const AddDriverScreen = ({ navigation, route }: any) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F8F9FA',
+    backgroundColor: COLORS.background,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: COLORS.background,
+  },
+  loadingText: {
+    marginTop: SIZES.sm,
+    fontSize: 16,
+    color: COLORS.primary,
   },
   scrollContent: {
     flexGrow: 1,
@@ -917,53 +1013,54 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 20,
-    backgroundColor: '#1A237E',
+    paddingHorizontal: SIZES.md,
+    paddingVertical: SIZES.lg,
+    backgroundColor: COLORS.primary,
   },
   backButton: {
     fontSize: 24,
-    color: '#FFFFFF',
+    color: COLORS.white,
     fontWeight: '700',
   },
   title: {
     fontSize: 20,
     fontWeight: '700',
-    color: '#FFFFFF',
+    color: COLORS.white,
   },
   headerRight: {
     width: 24,
   },
   formContainer: {
-    padding: 16,
+    padding: SIZES.md,
     paddingBottom: 30,
   },
   sectionTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#1A237E',
-    marginTop: 24,
-    marginBottom: 16,
+    color: COLORS.primary,
+    marginTop: SIZES.xl,
+    marginBottom: SIZES.md,
   },
   inputGroup: {
-    marginBottom: 16,
+    marginBottom: SIZES.md,
   },
   label: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#333333',
-    marginBottom: 8,
+    color: COLORS.text,
+    marginBottom: SIZES.xs,
   },
   input: {
     borderWidth: 1,
-    borderColor: '#E0E0E0',
-    borderRadius: 8,
-    padding: 12,
+    borderColor: COLORS.border,
+    borderRadius: SIZES.xs,
+    padding: SIZES.sm,
     fontSize: 16,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: COLORS.white,
+    color: COLORS.text,
   },
   disabledInput: {
-    backgroundColor: '#F5F5F5',
+    backgroundColor: COLORS.greyLight,
     opacity: 0.7,
   },
   textArea: {
@@ -982,51 +1079,51 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#E0E0E0',
-    borderRadius: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    borderColor: COLORS.border,
+    borderRadius: SIZES.xs,
+    paddingHorizontal: SIZES.md,
+    paddingVertical: SIZES.sm,
     margin: 4,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: COLORS.white,
     minWidth: 120,
   },
   optionButtonSelected: {
-    backgroundColor: '#E3F2FD',
-    borderColor: '#4A90E2',
+    backgroundColor: COLORS.infoLight,
+    borderColor: COLORS.secondary,
   },
   optionIcon: {
     fontSize: 20,
-    marginRight: 8,
+    marginRight: SIZES.xs,
   },
   optionLabel: {
     fontSize: 14,
-    color: '#333333',
+    color: COLORS.text,
   },
   optionLabelSelected: {
-    color: '#1A237E',
+    color: COLORS.primary,
     fontWeight: '600',
   },
   dateInput: {
     borderWidth: 1,
-    borderColor: '#E0E0E0',
-    borderRadius: 8,
-    padding: 12,
-    backgroundColor: '#FFFFFF',
+    borderColor: COLORS.border,
+    borderRadius: SIZES.xs,
+    padding: SIZES.sm,
+    backgroundColor: COLORS.white,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
   dateSelectedText: {
     fontSize: 16,
-    color: '#333333',
+    color: COLORS.text,
   },
   datePlaceholderText: {
     fontSize: 16,
-    color: '#999999',
+    color: COLORS.textLighter,
   },
   calendarIcon: {
     fontSize: 20,
-    color: '#4A90E2',
+    color: COLORS.secondary,
   },
   employmentOptions: {
     flexDirection: 'row',
@@ -1034,23 +1131,23 @@ const styles = StyleSheet.create({
   employmentButton: {
     flex: 1,
     borderWidth: 1,
-    borderColor: '#E0E0E0',
-    borderRadius: 6,
-    paddingVertical: 8,
+    borderColor: COLORS.border,
+    borderRadius: SIZES.xs,
+    paddingVertical: SIZES.xs,
     marginHorizontal: 2,
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: COLORS.white,
   },
   employmentButtonSelected: {
-    backgroundColor: '#4A90E2',
-    borderColor: '#4A90E2',
+    backgroundColor: COLORS.secondary,
+    borderColor: COLORS.secondary,
   },
   employmentLabel: {
     fontSize: 12,
-    color: '#666666',
+    color: COLORS.textLight,
   },
   employmentLabelSelected: {
-    color: '#FFFFFF',
+    color: COLORS.white,
     fontWeight: '600',
   },
   statusOptionsContainer: {
@@ -1063,10 +1160,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
     borderRadius: 20,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: SIZES.sm,
+    paddingVertical: SIZES.xs,
     margin: 4,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: COLORS.white,
   },
   statusDot: {
     width: 8,
@@ -1076,7 +1173,7 @@ const styles = StyleSheet.create({
   },
   statusLabel: {
     fontSize: 12,
-    color: '#333333',
+    color: COLORS.text,
     fontWeight: '500',
   },
   // Password section styles
@@ -1084,10 +1181,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: SIZES.xs,
   },
   generatePasswordText: {
-    color: '#4A90E2',
+    color: COLORS.secondary,
     fontSize: 14,
     fontWeight: '600',
   },
@@ -1109,15 +1206,15 @@ const styles = StyleSheet.create({
   },
   passwordHint: {
     fontSize: 12,
-    color: '#666',
+    color: COLORS.textLight,
     marginTop: 4,
     fontStyle: 'italic',
   },
   passwordInfo: {
     backgroundColor: '#FFF3E0',
-    padding: 16,
-    borderRadius: 8,
-    marginBottom: 20,
+    padding: SIZES.md,
+    borderRadius: SIZES.xs,
+    marginBottom: SIZES.lg,
     borderLeftWidth: 4,
     borderLeftColor: '#FFB300',
   },
@@ -1125,7 +1222,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: 'bold',
     color: '#E65100',
-    marginBottom: 8,
+    marginBottom: SIZES.xs,
   },
   passwordInfoText: {
     fontSize: 12,
@@ -1135,58 +1232,58 @@ const styles = StyleSheet.create({
   // Input note for email
   inputNote: {
     fontSize: 11,
-    color: '#666',
+    color: COLORS.textLight,
     marginTop: 4,
     fontStyle: 'italic',
   },
   actionButtons: {
     flexDirection: 'row',
-    marginTop: 32,
-    marginBottom: 20,
+    marginTop: SIZES.xxxl,
+    marginBottom: SIZES.lg,
   },
   actionButton: {
     flex: 1,
-    paddingVertical: 16,
-    borderRadius: 8,
+    paddingVertical: SIZES.md,
+    borderRadius: SIZES.xs,
     alignItems: 'center',
-    marginHorizontal: 8,
+    marginHorizontal: SIZES.xs,
   },
   cancelButton: {
-    backgroundColor: '#F0F0F0',
+    backgroundColor: COLORS.greyLight,
   },
   submitButton: {
-    backgroundColor: '#4A90E2',
+    backgroundColor: COLORS.secondary,
   },
   buttonDisabled: {
-    backgroundColor: '#6c8bc7',
+    backgroundColor: COLORS.grey,
   },
   cancelButtonText: {
-    color: '#666666',
+    color: COLORS.textLight,
     fontWeight: '600',
     fontSize: 16,
   },
   submitButtonText: {
-    color: '#FFFFFF',
+    color: COLORS.white,
     fontWeight: '600',
     fontSize: 16,
   },
   infoNote: {
     backgroundColor: '#E8F0FE',
-    padding: 16,
-    borderRadius: 8,
-    marginTop: 16,
+    padding: SIZES.md,
+    borderRadius: SIZES.xs,
+    marginTop: SIZES.md,
     borderLeftWidth: 4,
-    borderLeftColor: '#1a73e8',
+    borderLeftColor: COLORS.primary,
   },
   infoNoteTitle: {
     fontSize: 14,
     fontWeight: 'bold',
-    color: '#1a73e8',
-    marginBottom: 8,
+    color: COLORS.primary,
+    marginBottom: SIZES.xs,
   },
   infoNoteText: {
     fontSize: 12,
-    color: '#1a73e8',
+    color: COLORS.primary,
     lineHeight: 18,
   },
   // Modal styles
@@ -1196,60 +1293,52 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   modalContainer: {
-    backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingBottom: 20,
+    backgroundColor: COLORS.white,
+    borderTopLeftRadius: SIZES.lg,
+    borderTopRightRadius: SIZES.lg,
+    paddingBottom: SIZES.lg,
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 16,
+    padding: SIZES.md,
     borderBottomWidth: 1,
-    borderBottomColor: '#E0E0E0',
+    borderBottomColor: COLORS.border,
   },
   modalTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#333333',
+    color: COLORS.text,
   },
   modalClose: {
     fontSize: 16,
-    color: '#4A90E2',
+    color: COLORS.secondary,
     fontWeight: '600',
-  },
-  // Android date picker styles
-  androidDatePickerContainer: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: '#FFFFFF',
-    padding: 16,
   },
   androidButtons: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
-    marginTop: 16,
+    paddingHorizontal: SIZES.md,
+    paddingTop: SIZES.sm,
   },
   androidButtonCancel: {
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    marginRight: 10,
+    paddingHorizontal: SIZES.lg,
+    paddingVertical: SIZES.sm,
+    marginRight: SIZES.sm,
   },
   androidButtonConfirm: {
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    backgroundColor: '#4A90E2',
-    borderRadius: 6,
+    paddingHorizontal: SIZES.lg,
+    paddingVertical: SIZES.sm,
+    backgroundColor: COLORS.secondary,
+    borderRadius: SIZES.xs,
   },
   androidButtonText: {
     fontSize: 16,
-    color: '#333333',
+    color: COLORS.text,
   },
   confirmButtonText: {
-    color: '#FFFFFF',
+    color: COLORS.white,
     fontWeight: '600',
   },
 });

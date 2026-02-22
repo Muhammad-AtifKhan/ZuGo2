@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+// src/screens/transporter/ReportsProfileScreen.tsx
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -11,62 +12,90 @@ import {
   Alert,
   Switch,
   Dimensions,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
+import auth from '@react-native-firebase/auth';
+import firestore from '@react-native-firebase/firestore';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+
+// Constants
+import { COLORS, SIZES, SHADOWS } from '../../constants/theme';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-// Mock data for reports
-const mockReports = {
-  dailyRevenue: [
-    { day: 'Mon', revenue: 12000 },
-    { day: 'Tue', revenue: 13500 },
-    { day: 'Wed', revenue: 11000 },
-    { day: 'Thu', revenue: 15000 },
-    { day: 'Fri', revenue: 18000 },
-    { day: 'Sat', revenue: 22000 },
-    { day: 'Sun', revenue: 19000 },
-  ],
-  monthlyRevenue: [
-    { month: 'Jan', revenue: 350000 },
-    { month: 'Feb', revenue: 320000 },
-    { month: 'Mar', revenue: 380000 },
-    { month: 'Apr', revenue: 400000 },
-    { month: 'May', revenue: 420000 },
-    { month: 'Jun', revenue: 450000 },
-  ],
-  busPerformance: [
-    { bus: 'B-001', trips: 45, revenue: 180000, rating: 4.5 },
-    { bus: 'B-002', trips: 38, revenue: 152000, rating: 4.2 },
-    { bus: 'B-003', trips: 52, revenue: 208000, rating: 4.7 },
-    { bus: 'B-004', trips: 30, revenue: 120000, rating: 4.0 },
-    { bus: 'B-005', trips: 48, revenue: 192000, rating: 4.6 },
-  ],
-  driverPerformance: [
-    { driver: 'Ali Ahmed', trips: 120, rating: 4.5, revenue: 480000 },
-    { driver: 'Ahmed Khan', trips: 95, rating: 4.2, revenue: 380000 },
-    { driver: 'Sara Ali', trips: 150, rating: 4.8, revenue: 600000 },
-    { driver: 'Usman Khan', trips: 80, rating: 4.0, revenue: 320000 },
-    { driver: 'Bilal Raza', trips: 200, rating: 4.7, revenue: 800000 },
-  ],
+// Define navigation types
+type RootStackParamList = {
+  Login: undefined;
+  RoleSelection: undefined;
 };
 
-// Company profile data
-const companyProfile = {
-  name: 'City Transport Co.',
-  registration: 'TRP-2023-001',
-  email: 'info@citytransport.com',
-  phone: '+92 42 1234567',
-  address: '123 Main Street, Lahore, Pakistan',
-  taxNumber: 'TXN-123456789',
-  established: '2020-01-15',
-  totalBuses: 12,
-  totalDrivers: 8,
-  activeSince: '3 years',
+type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
+
+// Simple types
+type ReportStats = {
+  totalRevenue: number;
+  avgDailyRevenue: number;
+  totalTrips: number;
+  avgRating: number;
+  activeBuses: number;
+  activeDrivers: number;
+  completedTrips: number;
+  cancelledTrips: number;
+};
+
+type DailyRevenue = {
+  day: string;
+  revenue: number;
+};
+
+type MonthlyRevenue = {
+  month: string;
+  revenue: number;
+};
+
+type BusPerformance = {
+  busNumber: string;
+  trips: number;
+  revenue: number;
+  rating: number;
+};
+
+type DriverPerformance = {
+  driverName: string;
+  trips: number;
+  rating: number;
+  revenue: number;
 };
 
 const ReportsProfileScreen = () => {
+  const navigation = useNavigation<NavigationProp>();
   const [activeTab, setActiveTab] = useState('reports'); // reports, profile, settings
-  const [reportType, setReportType] = useState('daily'); // daily, weekly, monthly
+  const [reportType, setReportType] = useState('daily'); // daily, monthly
+  const [loading, setLoading] = useState(true);
+  const [settingsLoading, setSettingsLoading] = useState(false); // 👈 NEW
+  const [refreshing, setRefreshing] = useState(false);
+  const [logoutLoading, setLogoutLoading] = useState(false);
+
+  // Firebase data states
+  const [dailyRevenue, setDailyRevenue] = useState<DailyRevenue[]>([]);
+  const [monthlyRevenue, setMonthlyRevenue] = useState<MonthlyRevenue[]>([]);
+  const [busPerformance, setBusPerformance] = useState<BusPerformance[]>([]);
+  const [driverPerformance, setDriverPerformance] = useState<DriverPerformance[]>([]);
+
+  const [stats, setStats] = useState<ReportStats>({
+    totalRevenue: 0,
+    avgDailyRevenue: 0,
+    totalTrips: 0,
+    avgRating: 0,
+    activeBuses: 0,
+    activeDrivers: 0,
+    completedTrips: 0,
+    cancelledTrips: 0,
+  });
+
+  // Settings state - with default values
   const [settings, setSettings] = useState({
     notifications: true,
     emailReports: true,
@@ -74,60 +103,347 @@ const ReportsProfileScreen = () => {
     maintenanceReminders: true,
     autoGenerateReports: false,
   });
+
+  // Profile state
   const [profileModalVisible, setProfileModalVisible] = useState(false);
-  const [companyInfo, setCompanyInfo] = useState(companyProfile);
-  const [newStaff, setNewStaff] = useState({
-    name: '',
+  const [companyInfo, setCompanyInfo] = useState({
+    name: 'ZUGO Transport',
+    registration: '',
     email: '',
-    role: 'manager',
-    permissions: ['view'],
+    phone: '',
+    address: '',
+    taxNumber: '',
+    established: '',
+    totalBuses: 0,
+    totalDrivers: 0,
   });
 
-  // Staff members
-  const [staffMembers, setStaffMembers] = useState([
-    { id: '1', name: 'Ali Manager', email: 'ali@company.com', role: 'admin', permissions: ['all'] },
-    { id: '2', name: 'Ahmed Dispatcher', email: 'ahmed@company.com', role: 'dispatcher', permissions: ['operations'] },
-    { id: '3', name: 'Sara Accountant', email: 'sara@company.com', role: 'accountant', permissions: ['finance'] },
-  ]);
+  const user = auth().currentUser;
 
-  // Calculate stats
-  const stats = {
-    totalRevenue: mockReports.monthlyRevenue.reduce((sum, item) => sum + item.revenue, 0),
-    avgDailyRevenue: Math.round(mockReports.dailyRevenue.reduce((sum, item) => sum + item.revenue, 0) / 7),
-    totalTrips: mockReports.busPerformance.reduce((sum, item) => sum + item.trips, 0),
-    avgRating: (mockReports.driverPerformance.reduce((sum, item) => sum + item.rating, 0) / mockReports.driverPerformance.length).toFixed(1),
-  };
+  // ========== LOAD SETTINGS SPECIFICALLY ==========
+  const loadSettings = useCallback(async () => {
+    if (!user) return;
 
-  const toggleSetting = (key: keyof typeof settings) => {
-    setSettings({ ...settings, [key]: !settings[key] });
-  };
+    setSettingsLoading(true);
+    try {
+      const settingsDoc = await firestore()
+        .collection('settings')
+        .doc(user.uid)
+        .get();
 
-  const handleUpdateProfile = () => {
-    Alert.alert('Success', 'Company profile updated successfully');
-    setProfileModalVisible(false);
-  };
-
-  const handleAddStaff = () => {
-    if (!newStaff.name || !newStaff.email) {
-      Alert.alert('Error', 'Please fill all fields');
-      return;
+      if (settingsDoc.exists) {
+        setSettings(settingsDoc.data() as typeof settings);
+      }
+    } catch (error) {
+      console.error('Error loading settings:', error);
+    } finally {
+      setSettingsLoading(false);
     }
+  }, [user]);
 
-    const newStaffMember = {
-      id: (staffMembers.length + 1).toString(),
-      name: newStaff.name,
-      email: newStaff.email,
-      role: newStaff.role,
-      permissions: newStaff.permissions,
-    };
+  // Load settings when settings tab is opened
+  useEffect(() => {
+    if (activeTab === 'settings') {
+      loadSettings();
+    }
+  }, [activeTab, loadSettings]);
 
-    setStaffMembers([...staffMembers, newStaffMember]);
-    setNewStaff({ name: '', email: '', role: 'manager', permissions: ['view'] });
-    Alert.alert('Success', 'Staff member added successfully');
+  // ========== FETCH DATA FROM FIREBASE ==========
+  const fetchAllData = useCallback(async () => {
+    if (!user) return;
+
+    setLoading(true);
+
+    try {
+      // Fetch company profile
+      const companyDoc = await firestore()
+        .collection('transporters')
+        .doc(user.uid)
+        .get();
+
+      if (companyDoc.exists) {
+        const data = companyDoc.data();
+        setCompanyInfo({
+          name: data?.companyName || 'ZUGO Transport',
+          registration: data?.registration || '',
+          email: data?.email || user.email || '',
+          phone: data?.phone || '',
+          address: data?.address || '',
+          taxNumber: data?.taxNumber || '',
+          established: data?.established || '',
+          totalBuses: data?.totalBuses || 0,
+          totalDrivers: data?.totalDrivers || 0,
+        });
+      }
+
+      // Fetch buses for stats
+      const busesSnapshot = await firestore()
+        .collection('buses')
+        .where('transporterId', '==', user.uid)
+        .get();
+
+      const buses = busesSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+
+      // Fetch drivers for stats
+      const driversSnapshot = await firestore()
+        .collection('drivers')
+        .where('transporterId', '==', user.uid)
+        .get();
+
+      const drivers = driversSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+
+      // Fetch trips for stats
+      const tripsSnapshot = await firestore()
+        .collection('trips')
+        .where('transporterId', '==', user.uid)
+        .orderBy('createdAt', 'desc')
+        .limit(100)
+        .get();
+
+      const trips = tripsSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+
+      // Calculate stats
+      const activeBuses = buses.filter(b => b.status === 'active').length;
+      const activeDrivers = drivers.filter(d => d.status === 'active' || d.status === 'on-duty').length;
+      const completedTrips = trips.filter(t => t.status === 'completed').length;
+      const cancelledTrips = trips.filter(t => t.status === 'cancelled').length;
+
+      let totalRevenue = 0;
+      let totalTrips = trips.length;
+      let totalRating = 0;
+      let driversWithRating = 0;
+
+      trips.forEach(trip => {
+        const passengers = (trip.totalSeats || 0) - (trip.availableSeats || 0);
+        const revenue = passengers * (trip.fare || 0);
+        totalRevenue += revenue;
+      });
+
+      drivers.forEach(driver => {
+        if (driver.rating) {
+          totalRating += driver.rating;
+          driversWithRating++;
+        }
+      });
+
+      const avgRating = driversWithRating > 0 ? totalRating / driversWithRating : 0;
+
+      setStats({
+        totalRevenue,
+        avgDailyRevenue: Math.round(totalRevenue / 30), // Approx daily average
+        totalTrips,
+        avgRating: parseFloat(avgRating.toFixed(1)),
+        activeBuses,
+        activeDrivers,
+        completedTrips,
+        cancelledTrips,
+      });
+
+      // Generate daily revenue (last 7 days)
+      const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+      const dailyRev: DailyRevenue[] = [];
+
+      for (let i = 6; i >= 0; i--) {
+        const date = new Date();
+        date.setDate(date.getDate() - i);
+        const dayName = days[date.getDay()];
+
+        // Filter trips for this date
+        const dayTrips = trips.filter(trip => {
+          const tripDate = trip.startDate ? new Date(trip.startDate) : null;
+          return tripDate && tripDate.toDateString() === date.toDateString();
+        });
+
+        const dayRevenue = dayTrips.reduce((sum, trip) => {
+          const passengers = (trip.totalSeats || 0) - (trip.availableSeats || 0);
+          return sum + (passengers * (trip.fare || 0));
+        }, 0);
+
+        dailyRev.push({
+          day: dayName,
+          revenue: dayRevenue,
+        });
+      }
+      setDailyRevenue(dailyRev);
+
+      // Generate monthly revenue (last 6 months)
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const monthlyRev: MonthlyRevenue[] = [];
+
+      for (let i = 5; i >= 0; i--) {
+        const date = new Date();
+        date.setMonth(date.getMonth() - i);
+        const monthName = months[date.getMonth()];
+
+        // Filter trips for this month
+        const monthTrips = trips.filter(trip => {
+          const tripDate = trip.startDate ? new Date(trip.startDate) : null;
+          return tripDate &&
+                 tripDate.getMonth() === date.getMonth() &&
+                 tripDate.getFullYear() === date.getFullYear();
+        });
+
+        const monthRevenue = monthTrips.reduce((sum, trip) => {
+          const passengers = (trip.totalSeats || 0) - (trip.availableSeats || 0);
+          return sum + (passengers * (trip.fare || 0));
+        }, 0);
+
+        monthlyRev.push({
+          month: monthName,
+          revenue: monthRevenue,
+        });
+      }
+      setMonthlyRevenue(monthlyRev);
+
+      // Generate bus performance (top 5)
+      const busPerf: BusPerformance[] = buses.map(bus => {
+        const busTrips = trips.filter(t => t.busId === bus.id);
+        const busRevenue = busTrips.reduce((sum, trip) => {
+          const passengers = (trip.totalSeats || 0) - (trip.availableSeats || 0);
+          return sum + (passengers * (trip.fare || 0));
+        }, 0);
+
+        return {
+          busNumber: bus.busNumber || 'Unknown',
+          trips: busTrips.length,
+          revenue: busRevenue,
+          rating: bus.rating || 4.5,
+        };
+      }).sort((a, b) => b.revenue - a.revenue).slice(0, 5);
+      setBusPerformance(busPerf);
+
+      // Generate driver performance (top 5)
+      const driverPerf: DriverPerformance[] = drivers.map(driver => {
+        const driverTrips = trips.filter(t => t.driverId === driver.id);
+        const driverRevenue = driverTrips.reduce((sum, trip) => {
+          const passengers = (trip.totalSeats || 0) - (trip.availableSeats || 0);
+          return sum + (passengers * (trip.fare || 0));
+        }, 0);
+
+        return {
+          driverName: driver.fullName || 'Unknown',
+          trips: driverTrips.length,
+          rating: driver.rating || 4.0,
+          revenue: driverRevenue,
+        };
+      }).sort((a, b) => b.revenue - a.revenue).slice(0, 5);
+      setDriverPerformance(driverPerf);
+
+    } catch (error) {
+      console.error('Error fetching data:', error);
+      Alert.alert('Error', 'Failed to load data. Please try again.');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [user]);
+
+  // Initial data fetch
+  useEffect(() => {
+    fetchAllData();
+  }, [fetchAllData]);
+
+  // Manual refresh
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    fetchAllData();
+  }, [fetchAllData]);
+
+  // ========== SETTINGS FUNCTIONS ==========
+  const toggleSetting = async (key: keyof typeof settings) => {
+    const newSettings = { ...settings, [key]: !settings[key] };
+    setSettings(newSettings);
+
+    if (!user) return;
+
+    try {
+      await firestore()
+        .collection('settings')
+        .doc(user.uid)
+        .set(newSettings, { merge: true });
+    } catch (error) {
+      console.error('Error saving settings:', error);
+      Alert.alert('Error', 'Failed to save settings');
+    }
   };
 
-  const renderBarChart = (data: any[], maxValue: number, color: string) => {
+  // ========== PROFILE FUNCTIONS ==========
+  const handleUpdateProfile = async () => {
+    if (!user) return;
+
+    try {
+      await firestore()
+        .collection('transporters')
+        .doc(user.uid)
+        .update({
+          companyName: companyInfo.name,
+          registration: companyInfo.registration,
+          email: companyInfo.email,
+          phone: companyInfo.phone,
+          address: companyInfo.address,
+          taxNumber: companyInfo.taxNumber,
+          established: companyInfo.established,
+          updatedAt: firestore.FieldValue.serverTimestamp(),
+        });
+
+      Alert.alert('Success', 'Company profile updated successfully');
+      setProfileModalVisible(false);
+    } catch (error) {
+      console.error('Error updating profile:', error);
+      Alert.alert('Error', 'Failed to update profile');
+    }
+  };
+
+  // ========== LOGOUT FUNCTION ==========
+  const handleLogout = () => {
+    Alert.alert(
+      'Logout',
+      'Are you sure you want to logout?',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Logout',
+          style: 'destructive',
+          onPress: async () => {
+            setLogoutLoading(true);
+            try {
+              await auth().signOut();
+              navigation.reset({
+                index: 0,
+                routes: [{ name: 'Login' }],
+              });
+            } catch (error) {
+              console.error('Logout error:', error);
+              Alert.alert('Error', 'Failed to logout. Please try again.');
+            } finally {
+              setLogoutLoading(false);
+            }
+          },
+        },
+      ],
+      { cancelable: true }
+    );
+  };
+
+  // ========== RENDER FUNCTIONS ==========
+  const renderBarChart = (data: any[], maxValue: number, color: string, label: string) => {
     const chartHeight = 100;
+
+    if (data.length === 0) {
+      return <Text style={styles.emptyText}>No data available</Text>;
+    }
 
     return (
       <View style={styles.chartContainer}>
@@ -136,24 +452,24 @@ const ReportsProfileScreen = () => {
             const barHeight = (item.revenue / maxValue) * chartHeight;
             return (
               <View key={index} style={styles.barColumn}>
-                <View style={[styles.bar, { height: barHeight, backgroundColor: color }]} />
+                <View style={[styles.bar, { height: Math.max(barHeight, 2), backgroundColor: color }]} />
                 <Text style={styles.barLabel}>{item.day || item.month}</Text>
+                <Text style={styles.barValue}>PKR {item.revenue.toLocaleString()}</Text>
               </View>
             );
           })}
-        </View>
-        <View style={styles.chartLegend}>
-          <View style={styles.legendItem}>
-            <View style={[styles.legendColor, { backgroundColor: color }]} />
-            <Text style={styles.legendText}>Revenue (in thousands)</Text>
-          </View>
         </View>
       </View>
     );
   };
 
   const renderReportSection = () => (
-    <ScrollView showsVerticalScrollIndicator={false}>
+    <ScrollView
+      showsVerticalScrollIndicator={false}
+      refreshControl={
+        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+      }
+    >
       {/* Report Type Toggle */}
       <View style={styles.reportTypeContainer}>
         <TouchableOpacity
@@ -162,14 +478,6 @@ const ReportsProfileScreen = () => {
         >
           <Text style={[styles.reportTypeText, reportType === 'daily' && styles.reportTypeTextActive]}>
             Daily
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.reportTypeButton, reportType === 'weekly' && styles.reportTypeActive]}
-          onPress={() => setReportType('weekly')}
-        >
-          <Text style={[styles.reportTypeText, reportType === 'weekly' && styles.reportTypeTextActive]}>
-            Weekly
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
@@ -184,22 +492,22 @@ const ReportsProfileScreen = () => {
 
       {/* Quick Stats */}
       <View style={styles.quickStatsContainer}>
-        <View style={styles.quickStatCard}>
+        <View style={[styles.quickStatCard, SHADOWS.small]}>
           <Text style={styles.quickStatIcon}>💰</Text>
-          <Text style={styles.quickStatValue}>₹{stats.totalRevenue.toLocaleString()}</Text>
+          <Text style={styles.quickStatValue}>PKR {stats.totalRevenue.toLocaleString()}</Text>
           <Text style={styles.quickStatLabel}>Total Revenue</Text>
         </View>
-        <View style={styles.quickStatCard}>
+        <View style={[styles.quickStatCard, SHADOWS.small]}>
           <Text style={styles.quickStatIcon}>📊</Text>
-          <Text style={styles.quickStatValue}>₹{stats.avgDailyRevenue}</Text>
+          <Text style={styles.quickStatValue}>PKR {stats.avgDailyRevenue.toLocaleString()}</Text>
           <Text style={styles.quickStatLabel}>Avg Daily</Text>
         </View>
-        <View style={styles.quickStatCard}>
+        <View style={[styles.quickStatCard, SHADOWS.small]}>
           <Text style={styles.quickStatIcon}>🚌</Text>
           <Text style={styles.quickStatValue}>{stats.totalTrips}</Text>
           <Text style={styles.quickStatLabel}>Total Trips</Text>
         </View>
-        <View style={styles.quickStatCard}>
+        <View style={[styles.quickStatCard, SHADOWS.small]}>
           <Text style={styles.quickStatIcon}>⭐</Text>
           <Text style={styles.quickStatValue}>{stats.avgRating}</Text>
           <Text style={styles.quickStatLabel}>Avg Rating</Text>
@@ -207,108 +515,96 @@ const ReportsProfileScreen = () => {
       </View>
 
       {/* Revenue Chart */}
-      <View style={styles.sectionCard}>
+      <View style={[styles.sectionCard, SHADOWS.medium]}>
         <Text style={styles.sectionTitle}>Revenue Trend</Text>
-        {reportType === 'daily' && renderBarChart(mockReports.dailyRevenue, 25000, '#4A90E2')}
-        {reportType === 'monthly' && renderBarChart(mockReports.monthlyRevenue, 500000, '#4CAF50')}
-        <TouchableOpacity style={styles.exportButton}>
-          <Text style={styles.exportButtonText}>📥 Export as PDF</Text>
-        </TouchableOpacity>
+        {reportType === 'daily' && renderBarChart(
+          dailyRevenue,
+          Math.max(...dailyRevenue.map(d => d.revenue), 1),
+          COLORS.secondary,
+          'Daily Revenue'
+        )}
+        {reportType === 'monthly' && renderBarChart(
+          monthlyRevenue,
+          Math.max(...monthlyRevenue.map(m => m.revenue), 1),
+          COLORS.success,
+          'Monthly Revenue'
+        )}
       </View>
 
       {/* Bus Performance */}
-      <View style={styles.sectionCard}>
-        <Text style={styles.sectionTitle}>Bus Performance</Text>
-        {mockReports.busPerformance.map((bus, index) => (
-          <View key={index} style={styles.performanceItem}>
-            <View style={styles.performanceHeader}>
-              <Text style={styles.performanceName}>🚌 {bus.bus}</Text>
-              <Text style={styles.performanceRating}>⭐ {bus.rating}</Text>
+      <View style={[styles.sectionCard, SHADOWS.medium]}>
+        <Text style={styles.sectionTitle}>Top Buses</Text>
+        {busPerformance.length === 0 ? (
+          <Text style={styles.emptyText}>No bus data available</Text>
+        ) : (
+          busPerformance.map((bus, index) => (
+            <View key={index} style={styles.performanceItem}>
+              <View style={styles.performanceHeader}>
+                <Text style={styles.performanceName}>🚌 {bus.busNumber}</Text>
+                <Text style={styles.performanceRating}>⭐ {bus.rating.toFixed(1)}</Text>
+              </View>
+              <View style={styles.performanceDetails}>
+                <View style={styles.performanceDetail}>
+                  <Text style={styles.detailLabel}>Trips:</Text>
+                  <Text style={styles.detailValue}>{bus.trips}</Text>
+                </View>
+                <View style={styles.performanceDetail}>
+                  <Text style={styles.detailLabel}>Revenue:</Text>
+                  <Text style={styles.detailValue}>PKR {bus.revenue.toLocaleString()}</Text>
+                </View>
+              </View>
             </View>
-            <View style={styles.performanceDetails}>
-              <View style={styles.performanceDetail}>
-                <Text style={styles.detailLabel}>Trips:</Text>
-                <Text style={styles.detailValue}>{bus.trips}</Text>
-              </View>
-              <View style={styles.performanceDetail}>
-                <Text style={styles.detailLabel}>Revenue:</Text>
-                <Text style={styles.detailValue}>₹{bus.revenue.toLocaleString()}</Text>
-              </View>
-              <View style={styles.performanceDetail}>
-                <Text style={styles.detailLabel}>Status:</Text>
-                <Text style={[styles.detailValue, { color: '#4CAF50' }]}>Active</Text>
-              </View>
-            </View>
-          </View>
-        ))}
+          ))
+        )}
       </View>
 
       {/* Driver Performance */}
-      <View style={styles.sectionCard}>
-        <Text style={styles.sectionTitle}>Driver Performance</Text>
-        {mockReports.driverPerformance.map((driver, index) => (
-          <View key={index} style={styles.performanceItem}>
-            <View style={styles.performanceHeader}>
-              <Text style={styles.performanceName}>👤 {driver.driver}</Text>
-              <Text style={styles.performanceRating}>⭐ {driver.rating}</Text>
+      <View style={[styles.sectionCard, SHADOWS.medium]}>
+        <Text style={styles.sectionTitle}>Top Drivers</Text>
+        {driverPerformance.length === 0 ? (
+          <Text style={styles.emptyText}>No driver data available</Text>
+        ) : (
+          driverPerformance.map((driver, index) => (
+            <View key={index} style={styles.performanceItem}>
+              <View style={styles.performanceHeader}>
+                <Text style={styles.performanceName}>👤 {driver.driverName}</Text>
+                <Text style={styles.performanceRating}>⭐ {driver.rating.toFixed(1)}</Text>
+              </View>
+              <View style={styles.performanceDetails}>
+                <View style={styles.performanceDetail}>
+                  <Text style={styles.detailLabel}>Trips:</Text>
+                  <Text style={styles.detailValue}>{driver.trips}</Text>
+                </View>
+                <View style={styles.performanceDetail}>
+                  <Text style={styles.detailLabel}>Revenue:</Text>
+                  <Text style={styles.detailValue}>PKR {driver.revenue.toLocaleString()}</Text>
+                </View>
+                <View style={styles.performanceDetail}>
+                  <Text style={styles.detailLabel}>Rank:</Text>
+                  <Text style={[styles.detailValue, { color: index === 0 ? '#FFD700' : COLORS.secondary }]}>
+                    #{index + 1}
+                  </Text>
+                </View>
+              </View>
             </View>
-            <View style={styles.performanceDetails}>
-              <View style={styles.performanceDetail}>
-                <Text style={styles.detailLabel}>Trips:</Text>
-                <Text style={styles.detailValue}>{driver.trips}</Text>
-              </View>
-              <View style={styles.performanceDetail}>
-                <Text style={styles.detailLabel}>Revenue:</Text>
-                <Text style={styles.detailValue}>₹{driver.revenue.toLocaleString()}</Text>
-              </View>
-              <View style={styles.performanceDetail}>
-                <Text style={styles.detailLabel}>Rank:</Text>
-                <Text style={[styles.detailValue, { color: index === 0 ? '#FFD700' : '#4A90E2' }]}>
-                  #{index + 1}
-                </Text>
-              </View>
-            </View>
-          </View>
-        ))}
-      </View>
-
-      {/* Custom Report Generator */}
-      <View style={styles.sectionCard}>
-        <Text style={styles.sectionTitle}>Custom Report</Text>
-        <View style={styles.customReportForm}>
-          <View style={styles.formRow}>
-            <Text style={styles.formLabel}>Start Date:</Text>
-            <TouchableOpacity style={styles.dateInput}>
-              <Text style={styles.dateInputText}>2024-01-01</Text>
-            </TouchableOpacity>
-          </View>
-          <View style={styles.formRow}>
-            <Text style={styles.formLabel}>End Date:</Text>
-            <TouchableOpacity style={styles.dateInput}>
-              <Text style={styles.dateInputText}>2024-01-31</Text>
-            </TouchableOpacity>
-          </View>
-          <View style={styles.formRow}>
-            <Text style={styles.formLabel}>Report Type:</Text>
-            <TouchableOpacity style={styles.dropdown}>
-              <Text style={styles.dropdownText}>Financial Summary</Text>
-            </TouchableOpacity>
-          </View>
-          <TouchableOpacity style={styles.generateButton}>
-            <Text style={styles.generateButtonText}>Generate Report</Text>
-          </TouchableOpacity>
-        </View>
+          ))
+        )}
       </View>
     </ScrollView>
   );
 
   const renderProfileSection = () => (
-    <ScrollView showsVerticalScrollIndicator={false}>
+    <ScrollView
+      showsVerticalScrollIndicator={false}
+      refreshControl={
+        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+      }
+    >
       {/* Company Profile Card */}
-      <View style={styles.profileCard}>
+      <View style={[styles.profileCard, SHADOWS.medium]}>
         <View style={styles.companyHeader}>
           <View style={styles.companyLogo}>
-            <Text style={styles.logoText}>CT</Text>
+            <Text style={styles.logoText}>{companyInfo.name.substring(0, 2).toUpperCase()}</Text>
           </View>
           <View style={styles.companyInfo}>
             <Text style={styles.companyName}>{companyInfo.name}</Text>
@@ -317,29 +613,25 @@ const ReportsProfileScreen = () => {
         </View>
 
         <View style={styles.profileDetails}>
-          <View style={styles.detailItem}>
+          <View style={styles.detailRow}>
             <Text style={styles.detailLabel}>📧 Email:</Text>
-            <Text style={styles.detailValue}>{companyInfo.email}</Text>
+            <Text style={styles.detailValue}>{companyInfo.email || user?.email || 'Not set'}</Text>
           </View>
-          <View style={styles.detailItem}>
+          <View style={styles.detailRow}>
             <Text style={styles.detailLabel}>📞 Phone:</Text>
-            <Text style={styles.detailValue}>{companyInfo.phone}</Text>
+            <Text style={styles.detailValue}>{companyInfo.phone || 'Not set'}</Text>
           </View>
-          <View style={styles.detailItem}>
+          <View style={styles.detailRow}>
             <Text style={styles.detailLabel}>🏢 Address:</Text>
-            <Text style={styles.detailValue}>{companyInfo.address}</Text>
+            <Text style={styles.detailValue}>{companyInfo.address || 'Not set'}</Text>
           </View>
-          <View style={styles.detailItem}>
+          <View style={styles.detailRow}>
             <Text style={styles.detailLabel}>📝 Registration:</Text>
-            <Text style={styles.detailValue}>{companyInfo.registration}</Text>
+            <Text style={styles.detailValue}>{companyInfo.registration || 'Not set'}</Text>
           </View>
-          <View style={styles.detailItem}>
-            <Text style={styles.detailLabel}>🧾 Tax Number:</Text>
-            <Text style={styles.detailValue}>{companyInfo.taxNumber}</Text>
-          </View>
-          <View style={styles.detailItem}>
+          <View style={styles.detailRow}>
             <Text style={styles.detailLabel}>📅 Established:</Text>
-            <Text style={styles.detailValue}>{companyInfo.established}</Text>
+            <Text style={styles.detailValue}>{companyInfo.established || 'Not set'}</Text>
           </View>
         </View>
 
@@ -352,261 +644,161 @@ const ReportsProfileScreen = () => {
       </View>
 
       {/* Business Stats */}
-      <View style={styles.statsCard}>
+      <View style={[styles.statsCard, SHADOWS.medium]}>
         <Text style={styles.statsTitle}>Business Statistics</Text>
         <View style={styles.businessStats}>
           <View style={styles.businessStat}>
             <Text style={styles.businessStatIcon}>🚌</Text>
-            <Text style={styles.businessStatValue}>{companyInfo.totalBuses}</Text>
-            <Text style={styles.businessStatLabel}>Total Buses</Text>
+            <Text style={styles.businessStatValue}>{stats.activeBuses}</Text>
+            <Text style={styles.businessStatLabel}>Active Buses</Text>
           </View>
           <View style={styles.businessStat}>
             <Text style={styles.businessStatIcon}>👤</Text>
-            <Text style={styles.businessStatValue}>{companyInfo.totalDrivers}</Text>
-            <Text style={styles.businessStatLabel}>Drivers</Text>
+            <Text style={styles.businessStatValue}>{stats.activeDrivers}</Text>
+            <Text style={styles.businessStatLabel}>Active Drivers</Text>
           </View>
           <View style={styles.businessStat}>
-            <Text style={styles.businessStatIcon}>⏱️</Text>
-            <Text style={styles.businessStatValue}>{companyInfo.activeSince}</Text>
-            <Text style={styles.businessStatLabel}>Active Since</Text>
+            <Text style={styles.businessStatIcon}>✅</Text>
+            <Text style={styles.businessStatValue}>{stats.completedTrips}</Text>
+            <Text style={styles.businessStatLabel}>Completed</Text>
           </View>
           <View style={styles.businessStat}>
-            <Text style={styles.businessStatIcon}>⭐</Text>
-            <Text style={styles.businessStatValue}>4.5</Text>
-            <Text style={styles.businessStatLabel}>Rating</Text>
+            <Text style={styles.businessStatIcon}>❌</Text>
+            <Text style={styles.businessStatValue}>{stats.cancelledTrips}</Text>
+            <Text style={styles.businessStatLabel}>Cancelled</Text>
           </View>
-        </View>
-      </View>
-
-      {/* Staff Management */}
-      <View style={styles.sectionCard}>
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>👥 Staff Management</Text>
-          <TouchableOpacity
-            style={styles.addButton}
-            onPress={() => Alert.alert('Add Staff', 'Add new staff member')}
-          >
-            <Text style={styles.addButtonText}>+ Add</Text>
-          </TouchableOpacity>
-        </View>
-
-        {staffMembers.map((staff) => (
-          <View key={staff.id} style={styles.staffCard}>
-            <View style={styles.staffInfo}>
-              <Text style={styles.staffName}>{staff.name}</Text>
-              <Text style={styles.staffRole}>{staff.role.toUpperCase()}</Text>
-            </View>
-            <Text style={styles.staffEmail}>{staff.email}</Text>
-            <View style={styles.staffActions}>
-              <TouchableOpacity style={styles.staffActionButton}>
-                <Text style={styles.staffActionText}>Edit</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.staffActionButton, styles.removeButton]}>
-                <Text style={[styles.staffActionText, styles.removeText]}>Remove</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        ))}
-      </View>
-
-      {/* Bank Details */}
-      <View style={styles.sectionCard}>
-        <Text style={styles.sectionTitle}>🏦 Bank Details</Text>
-        <View style={styles.bankDetails}>
-          <View style={styles.detailItem}>
-            <Text style={styles.detailLabel}>Bank Name:</Text>
-            <Text style={styles.detailValue}>Habib Bank Limited</Text>
-          </View>
-          <View style={styles.detailItem}>
-            <Text style={styles.detailLabel}>Account Title:</Text>
-            <Text style={styles.detailValue}>City Transport Co.</Text>
-          </View>
-          <View style={styles.detailItem}>
-            <Text style={styles.detailLabel}>Account Number:</Text>
-            <Text style={styles.detailValue}>0123456789012</Text>
-          </View>
-          <View style={styles.detailItem}>
-            <Text style={styles.detailLabel}>IBAN:</Text>
-            <Text style={styles.detailValue}>PK36HABB0000123456789012</Text>
-          </View>
-          <TouchableOpacity style={styles.editButton}>
-            <Text style={styles.editButtonText}>Edit Bank Details</Text>
-          </TouchableOpacity>
         </View>
       </View>
     </ScrollView>
   );
 
-  const renderSettingsSection = () => (
-    <ScrollView showsVerticalScrollIndicator={false}>
-      {/* Notification Settings */}
-      <View style={styles.sectionCard}>
-        <Text style={styles.sectionTitle}>🔔 Notifications</Text>
+  const renderSettingsSection = () => {
+    // 👇 AGAR SETTINGS LOAD HO RAHI HAIN TO LOADER DIKHAO
+    if (settingsLoading) {
+      return (
+        <View style={styles.centerContainer}>
+          <ActivityIndicator size="large" color={COLORS.primary} />
+          <Text style={styles.loadingText}>Loading settings...</Text>
+        </View>
+      );
+    }
 
-        <View style={styles.settingItem}>
-          <View style={styles.settingInfo}>
-            <Text style={styles.settingLabel}>Push Notifications</Text>
-            <Text style={styles.settingDescription}>Receive alerts on your device</Text>
+    // 👇 SETTINGS AVAILABLE HAIN TO RENDER KARO
+    return (
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+      >
+        {/* Notification Settings */}
+        <View style={[styles.sectionCard, SHADOWS.medium]}>
+          <Text style={styles.sectionTitle}>🔔 Notification Settings</Text>
+
+          <View style={styles.settingItem}>
+            <View style={styles.settingInfo}>
+              <Text style={styles.settingLabel}>Push Notifications</Text>
+              <Text style={styles.settingDescription}>Receive alerts on your device</Text>
+            </View>
+            <Switch
+              value={settings?.notifications ?? true}
+              onValueChange={() => toggleSetting('notifications')}
+              trackColor={{ false: COLORS.border, true: COLORS.secondary }}
+            />
           </View>
-          <Switch
-            value={settings.notifications}
-            onValueChange={() => toggleSetting('notifications')}
-            trackColor={{ false: '#E0E0E0', true: '#4A90E2' }}
-          />
+
+          <View style={styles.settingItem}>
+            <View style={styles.settingInfo}>
+              <Text style={styles.settingLabel}>Email Reports</Text>
+              <Text style={styles.settingDescription}>Daily/weekly reports via email</Text>
+            </View>
+            <Switch
+              value={settings?.emailReports ?? true}
+              onValueChange={() => toggleSetting('emailReports')}
+              trackColor={{ false: COLORS.border, true: COLORS.secondary }}
+            />
+          </View>
+
+          <View style={styles.settingItem}>
+            <View style={styles.settingInfo}>
+              <Text style={styles.settingLabel}>Low Bus Alert</Text>
+              <Text style={styles.settingDescription}>Alert when bus count is low</Text>
+            </View>
+            <Switch
+              value={settings?.lowBusAlert ?? true}
+              onValueChange={() => toggleSetting('lowBusAlert')}
+              trackColor={{ false: COLORS.border, true: COLORS.secondary }}
+            />
+          </View>
+
+          <View style={styles.settingItem}>
+            <View style={styles.settingInfo}>
+              <Text style={styles.settingLabel}>Maintenance Reminders</Text>
+              <Text style={styles.settingDescription}>Remind for bus maintenance</Text>
+            </View>
+            <Switch
+              value={settings?.maintenanceReminders ?? true}
+              onValueChange={() => toggleSetting('maintenanceReminders')}
+              trackColor={{ false: COLORS.border, true: COLORS.secondary }}
+            />
+          </View>
         </View>
 
-        <View style={styles.settingItem}>
-          <View style={styles.settingInfo}>
-            <Text style={styles.settingLabel}>Email Reports</Text>
-            <Text style={styles.settingDescription}>Daily/weekly reports via email</Text>
+        {/* App Settings */}
+        <View style={[styles.sectionCard, SHADOWS.medium]}>
+          <Text style={styles.sectionTitle}>📱 App Settings</Text>
+
+          <View style={styles.settingItem}>
+            <Text style={styles.settingLabel}>App Version</Text>
+            <Text style={styles.settingValue}>1.0.0</Text>
           </View>
-          <Switch
-            value={settings.emailReports}
-            onValueChange={() => toggleSetting('emailReports')}
-            trackColor={{ false: '#E0E0E0', true: '#4A90E2' }}
-          />
         </View>
 
-        <View style={styles.settingItem}>
-          <View style={styles.settingInfo}>
-            <Text style={styles.settingLabel}>Low Bus Alert</Text>
-            <Text style={styles.settingDescription}>Alert when bus count is low</Text>
-          </View>
-          <Switch
-            value={settings.lowBusAlert}
-            onValueChange={() => toggleSetting('lowBusAlert')}
-            trackColor={{ false: '#E0E0E0', true: '#4A90E2' }}
-          />
+        {/* Help & Support */}
+        <View style={[styles.sectionCard, SHADOWS.medium]}>
+          <Text style={styles.sectionTitle}>🆘 Help & Support</Text>
+
+          <TouchableOpacity style={styles.helpItem}>
+            <Text style={styles.helpItemText}>📚 FAQ & Guides</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.helpItem}>
+            <Text style={styles.helpItemText}>📞 Contact Support</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.helpItem}>
+            <Text style={styles.helpItemText}>📖 Terms & Conditions</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.helpItem}>
+            <Text style={styles.helpItemText}>🔒 Privacy Policy</Text>
+          </TouchableOpacity>
         </View>
 
-        <View style={styles.settingItem}>
-          <View style={styles.settingInfo}>
-            <Text style={styles.settingLabel}>Maintenance Reminders</Text>
-            <Text style={styles.settingDescription}>Remind for bus maintenance</Text>
-          </View>
-          <Switch
-            value={settings.maintenanceReminders}
-            onValueChange={() => toggleSetting('maintenanceReminders')}
-            trackColor={{ false: '#E0E0E0', true: '#4A90E2' }}
-          />
-        </View>
+        {/* Logout Button */}
+        <TouchableOpacity
+          style={[styles.logoutButton, logoutLoading && styles.buttonDisabled]}
+          onPress={handleLogout}
+          disabled={logoutLoading}
+        >
+          {logoutLoading ? (
+            <Text style={styles.logoutButtonText}>Logging out...</Text>
+          ) : (
+            <Text style={styles.logoutButtonText}>🚪 Logout</Text>
+          )}
+        </TouchableOpacity>
+      </ScrollView>
+    );
+  };
 
-        <View style={styles.settingItem}>
-          <View style={styles.settingInfo}>
-            <Text style={styles.settingLabel}>Auto Generate Reports</Text>
-            <Text style={styles.settingDescription}>Generate reports automatically</Text>
-          </View>
-          <Switch
-            value={settings.autoGenerateReports}
-            onValueChange={() => toggleSetting('autoGenerateReports')}
-            trackColor={{ false: '#E0E0E0', true: '#4A90E2' }}
-          />
-        </View>
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color={COLORS.primary} />
+        <Text style={styles.loadingText}>Loading reports data...</Text>
       </View>
-
-      {/* Business Settings */}
-      <View style={styles.sectionCard}>
-        <Text style={styles.sectionTitle}>⚙️ Business Settings</Text>
-
-        <View style={styles.formRow}>
-          <Text style={styles.formLabel}>Operating Hours:</Text>
-          <TouchableOpacity style={styles.settingInput}>
-            <Text style={styles.settingInputText}>06:00 AM - 11:00 PM</Text>
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.formRow}>
-          <Text style={styles.formLabel}>Cancellation Policy:</Text>
-          <TouchableOpacity style={styles.settingInput}>
-            <Text style={styles.settingInputText}>24 hours before departure</Text>
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.formRow}>
-          <Text style={styles.formLabel}>Refund Policy:</Text>
-          <TouchableOpacity style={styles.settingInput}>
-            <Text style={styles.settingInputText}>90% refund if cancelled 24h before</Text>
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.formRow}>
-          <Text style={styles.formLabel}>Peak Hours:</Text>
-          <TouchableOpacity style={styles.settingInput}>
-            <Text style={styles.settingInputText}>08:00-10:00 AM, 05:00-08:00 PM</Text>
-          </TouchableOpacity>
-        </View>
-
-        <TouchableOpacity style={styles.saveSettingsButton}>
-          <Text style={styles.saveSettingsButtonText}>Save Settings</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* App Settings */}
-      <View style={styles.sectionCard}>
-        <Text style={styles.sectionTitle}>📱 App Settings</Text>
-
-        <View style={styles.settingItem}>
-          <Text style={styles.settingLabel}>Theme</Text>
-          <TouchableOpacity style={styles.themeOption}>
-            <Text style={styles.themeOptionText}>Light</Text>
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.settingItem}>
-          <Text style={styles.settingLabel}>Language</Text>
-          <TouchableOpacity style={styles.themeOption}>
-            <Text style={styles.themeOptionText}>English</Text>
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.settingItem}>
-          <Text style={styles.settingLabel}>Currency</Text>
-          <TouchableOpacity style={styles.themeOption}>
-            <Text style={styles.themeOptionText}>PKR (₹)</Text>
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.settingItem}>
-          <Text style={styles.settingLabel}>App Version</Text>
-          <Text style={styles.settingValue}>1.0.0</Text>
-        </View>
-      </View>
-
-      {/* Help & Support */}
-      <View style={styles.sectionCard}>
-        <Text style={styles.sectionTitle}>🆘 Help & Support</Text>
-
-        <TouchableOpacity style={styles.helpItem}>
-          <Text style={styles.helpItemText}>📚 FAQ & Guides</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.helpItem}>
-          <Text style={styles.helpItemText}>📞 Contact Support</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.helpItem}>
-          <Text style={styles.helpItemText}>💬 Send Feedback</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.helpItem}>
-          <Text style={styles.helpItemText}>📖 Terms & Conditions</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.helpItem}>
-          <Text style={styles.helpItemText}>🔒 Privacy Policy</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={[styles.helpItem, styles.deleteAccount]}>
-          <Text style={[styles.helpItemText, styles.deleteAccountText]}>🗑️ Delete Account</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Logout Button */}
-      <TouchableOpacity style={styles.logoutButton}>
-        <Text style={styles.logoutButtonText}>🚪 Logout</Text>
-      </TouchableOpacity>
-    </ScrollView>
-  );
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -673,6 +865,13 @@ const ReportsProfileScreen = () => {
 
             <TextInput
               style={styles.input}
+              placeholder="Registration Number"
+              value={companyInfo.registration}
+              onChangeText={(text) => setCompanyInfo({...companyInfo, registration: text})}
+            />
+
+            <TextInput
+              style={styles.input}
               placeholder="Email"
               value={companyInfo.email}
               onChangeText={(text) => setCompanyInfo({...companyInfo, email: text})}
@@ -702,6 +901,13 @@ const ReportsProfileScreen = () => {
               onChangeText={(text) => setCompanyInfo({...companyInfo, taxNumber: text})}
             />
 
+            <TextInput
+              style={styles.input}
+              placeholder="Established Date (YYYY-MM-DD)"
+              value={companyInfo.established}
+              onChangeText={(text) => setCompanyInfo({...companyInfo, established: text})}
+            />
+
             <View style={styles.modalButtons}>
               <TouchableOpacity
                 style={[styles.modalButton, styles.cancelButton]}
@@ -727,208 +933,190 @@ const ReportsProfileScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F8F9FA',
+    backgroundColor: COLORS.background,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: COLORS.background,
+  },
+  centerContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingTop: 50,
+  },
+  loadingText: {
+    marginTop: SIZES.sm,
+    fontSize: 16,
+    color: COLORS.primary,
   },
   header: {
-    paddingHorizontal: 16,
-    paddingVertical: 20,
-    backgroundColor: '#1A237E',
+    paddingHorizontal: SIZES.md,
+    paddingVertical: SIZES.lg,
+    backgroundColor: COLORS.primary,
   },
   title: {
     fontSize: 20,
     fontWeight: '700',
-    color: '#FFFFFF',
+    color: COLORS.white,
   },
   subtitle: {
     fontSize: 14,
-    color: '#E0E0E0',
+    color: COLORS.greyLight,
     marginTop: 4,
   },
   tabContainer: {
     flexDirection: 'row',
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    backgroundColor: COLORS.white,
+    paddingHorizontal: SIZES.md,
+    paddingVertical: SIZES.xs,
     borderBottomWidth: 1,
-    borderBottomColor: '#E0E0E0',
+    borderBottomColor: COLORS.border,
   },
   tab: {
     flex: 1,
-    paddingVertical: 12,
+    paddingVertical: SIZES.sm,
     alignItems: 'center',
     marginHorizontal: 4,
-    borderRadius: 8,
+    borderRadius: SIZES.xs,
   },
   tabActive: {
-    backgroundColor: '#4A90E2',
+    backgroundColor: COLORS.secondary,
   },
   tabText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#666666',
+    color: COLORS.textLight,
   },
   tabTextActive: {
-    color: '#FFFFFF',
+    color: COLORS.white,
   },
   contentContainer: {
     flex: 1,
-    paddingBottom: 20,
+    paddingBottom: SIZES.lg,
   },
   reportTypeContainer: {
     flexDirection: 'row',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 8,
-    margin: 16,
-    marginBottom: 8,
+    backgroundColor: COLORS.white,
+    borderRadius: SIZES.md,
+    padding: SIZES.xs,
+    margin: SIZES.md,
+    marginBottom: SIZES.xs,
   },
   reportTypeButton: {
     flex: 1,
-    paddingVertical: 10,
+    paddingVertical: SIZES.xs,
     alignItems: 'center',
-    borderRadius: 8,
+    borderRadius: SIZES.xs,
   },
   reportTypeActive: {
-    backgroundColor: '#4A90E2',
+    backgroundColor: COLORS.secondary,
   },
   reportTypeText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#666666',
+    color: COLORS.textLight,
   },
   reportTypeTextActive: {
-    color: '#FFFFFF',
+    color: COLORS.white,
   },
   quickStatsContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    paddingHorizontal: 16,
-    marginBottom: 16,
+    paddingHorizontal: SIZES.md,
+    marginBottom: SIZES.md,
   },
   quickStatCard: {
     width: '48%',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
+    backgroundColor: COLORS.white,
+    borderRadius: SIZES.md,
+    padding: SIZES.md,
+    marginBottom: SIZES.sm,
     marginHorizontal: '1%',
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
   },
   quickStatIcon: {
     fontSize: 24,
-    marginBottom: 8,
+    marginBottom: SIZES.xs,
   },
   quickStatValue: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '700',
-    color: '#1A237E',
-    marginBottom: 4,
+    color: COLORS.primary,
+    marginBottom: 2,
   },
   quickStatLabel: {
     fontSize: 12,
-    color: '#666666',
+    color: COLORS.textLight,
   },
   sectionCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 16,
-    marginHorizontal: 16,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
+    backgroundColor: COLORS.white,
+    borderRadius: SIZES.md,
+    padding: SIZES.md,
+    marginHorizontal: SIZES.md,
+    marginBottom: SIZES.md,
   },
   sectionTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#1A237E',
-    marginBottom: 16,
+    color: COLORS.primary,
+    marginBottom: SIZES.md,
+  },
+  emptyText: {
+    textAlign: 'center',
+    color: COLORS.textLight,
+    padding: SIZES.lg,
   },
   chartContainer: {
-    marginBottom: 20,
+    marginBottom: SIZES.lg,
   },
   chartBars: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-end',
-    height: 100,
-    marginBottom: 20,
+    height: 120,
+    marginBottom: SIZES.md,
   },
   barColumn: {
     alignItems: 'center',
     width: `${100 / 7}%`,
   },
   bar: {
-    width: 16,
+    width: 20,
     borderRadius: 4,
-    marginBottom: 8,
+    marginBottom: SIZES.xs,
   },
   barLabel: {
     fontSize: 10,
-    color: '#666666',
+    color: COLORS.textLight,
+    marginBottom: 2,
   },
-  chartLegend: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-  },
-  legendItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  legendColor: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    marginRight: 8,
-  },
-  legendText: {
-    fontSize: 12,
-    color: '#666666',
-  },
-  exportButton: {
-    backgroundColor: '#4A90E2',
-    paddingVertical: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  exportButtonText: {
-    color: '#FFFFFF',
-    fontWeight: '600',
-    fontSize: 14,
+  barValue: {
+    fontSize: 9,
+    color: COLORS.textLighter,
   },
   performanceItem: {
-    marginBottom: 16,
-    paddingBottom: 16,
+    marginBottom: SIZES.md,
+    paddingBottom: SIZES.sm,
     borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
+    borderBottomColor: COLORS.border,
   },
   performanceHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: SIZES.xs,
   },
   performanceName: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#333333',
+    color: COLORS.text,
   },
   performanceRating: {
     fontSize: 14,
-    color: '#FF9800',
+    color: COLORS.warning,
     fontWeight: '600',
   },
   performanceDetails: {
@@ -939,139 +1127,85 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   detailLabel: {
-    fontSize: 12,
-    color: '#666666',
+    fontSize: 11,
+    color: COLORS.textLight,
     marginBottom: 2,
   },
   detailValue: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
-    color: '#333333',
-  },
-  customReportForm: {
-    marginTop: 8,
-  },
-  formRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  formLabel: {
-    width: 100,
-    fontSize: 14,
-    color: '#666666',
-  },
-  dateInput: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
-    borderRadius: 8,
-    padding: 10,
-    backgroundColor: '#F8F9FA',
-  },
-  dateInputText: {
-    fontSize: 14,
-    color: '#333333',
-  },
-  dropdown: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
-    borderRadius: 8,
-    padding: 10,
-    backgroundColor: '#F8F9FA',
-  },
-  dropdownText: {
-    fontSize: 14,
-    color: '#333333',
-  },
-  generateButton: {
-    backgroundColor: '#4CAF50',
-    paddingVertical: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginTop: 16,
-  },
-  generateButtonText: {
-    color: '#FFFFFF',
-    fontWeight: '600',
-    fontSize: 14,
+    color: COLORS.text,
   },
   profileCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 20,
-    margin: 16,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    backgroundColor: COLORS.white,
+    borderRadius: SIZES.md,
+    padding: SIZES.lg,
+    margin: SIZES.md,
+    marginBottom: SIZES.md,
   },
   companyHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: SIZES.lg,
   },
   companyLogo: {
     width: 60,
     height: 60,
     borderRadius: 30,
-    backgroundColor: '#4A90E2',
+    backgroundColor: COLORS.secondary,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 16,
+    marginRight: SIZES.md,
   },
   logoText: {
     fontSize: 24,
     fontWeight: '700',
-    color: '#FFFFFF',
+    color: COLORS.white,
   },
   companyInfo: {
     flex: 1,
   },
   companyName: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '700',
-    color: '#1A237E',
-    marginBottom: 4,
+    color: COLORS.primary,
+    marginBottom: 2,
   },
   companyTag: {
-    fontSize: 14,
-    color: '#666666',
+    fontSize: 12,
+    color: COLORS.textLight,
   },
   profileDetails: {
-    marginBottom: 20,
+    marginBottom: SIZES.lg,
+  },
+  detailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: SIZES.xs,
   },
   editProfileButton: {
-    backgroundColor: '#4A90E2',
-    paddingVertical: 12,
-    borderRadius: 8,
+    backgroundColor: COLORS.secondary,
+    paddingVertical: SIZES.sm,
+    borderRadius: SIZES.xs,
     alignItems: 'center',
   },
   editProfileButtonText: {
-    color: '#FFFFFF',
+    color: COLORS.white,
     fontWeight: '600',
     fontSize: 14,
   },
   statsCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 20,
-    marginHorizontal: 16,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    backgroundColor: COLORS.white,
+    borderRadius: SIZES.md,
+    padding: SIZES.lg,
+    marginHorizontal: SIZES.md,
+    marginBottom: SIZES.md,
   },
   statsTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '600',
-    color: '#1A237E',
-    marginBottom: 20,
+    color: COLORS.primary,
+    marginBottom: SIZES.md,
   },
   businessStats: {
     flexDirection: 'row',
@@ -1081,105 +1215,27 @@ const styles = StyleSheet.create({
   businessStat: {
     width: '48%',
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: SIZES.md,
   },
   businessStatIcon: {
     fontSize: 24,
-    marginBottom: 8,
+    marginBottom: SIZES.xs,
   },
   businessStatValue: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '700',
-    color: '#1A237E',
-    marginBottom: 4,
+    color: COLORS.primary,
+    marginBottom: 2,
   },
   businessStatLabel: {
-    fontSize: 12,
-    color: '#666666',
-  },
-  addButton: {
-    backgroundColor: '#4A90E2',
-    paddingHorizontal: 16,
-    paddingVertical: 6,
-    borderRadius: 8,
-  },
-  addButtonText: {
-    color: '#FFFFFF',
-    fontWeight: '600',
-    fontSize: 12,
-  },
-  staffCard: {
-    marginBottom: 12,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
-  },
-  staffInfo: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  staffName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333333',
-  },
-  staffRole: {
-    fontSize: 12,
-    color: '#4A90E2',
-    fontWeight: '600',
-    backgroundColor: '#E3F2FD',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  staffEmail: {
-    fontSize: 14,
-    color: '#666666',
-    marginBottom: 8,
-  },
-  staffActions: {
-    flexDirection: 'row',
-  },
-  staffActionButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 6,
-    backgroundColor: '#F0F0F0',
-    marginRight: 8,
-  },
-  staffActionText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#666666',
-  },
-  removeButton: {
-    backgroundColor: '#FFEBEE',
-  },
-  removeText: {
-    color: '#F44336',
-  },
-  bankDetails: {
-    marginTop: 8,
-  },
-  editButton: {
-    backgroundColor: '#4A90E2',
-    paddingVertical: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginTop: 16,
-  },
-  editButtonText: {
-    color: '#FFFFFF',
-    fontWeight: '600',
-    fontSize: 14,
+    fontSize: 11,
+    color: COLORS.textLight,
   },
   settingItem: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: SIZES.lg,
   },
   settingInfo: {
     flex: 1,
@@ -1187,80 +1243,42 @@ const styles = StyleSheet.create({
   settingLabel: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#333333',
-    marginBottom: 4,
+    color: COLORS.text,
+    marginBottom: 2,
   },
   settingDescription: {
     fontSize: 12,
-    color: '#666666',
+    color: COLORS.textLight,
   },
   settingValue: {
     fontSize: 14,
-    color: '#666666',
-  },
-  settingInput: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
-    borderRadius: 8,
-    padding: 10,
-    backgroundColor: '#F8F9FA',
-  },
-  settingInputText: {
-    fontSize: 14,
-    color: '#333333',
-  },
-  saveSettingsButton: {
-    backgroundColor: '#4CAF50',
-    paddingVertical: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginTop: 16,
-  },
-  saveSettingsButtonText: {
-    color: '#FFFFFF',
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  themeOption: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
-    borderRadius: 8,
-  },
-  themeOptionText: {
-    fontSize: 14,
-    color: '#333333',
+    color: COLORS.textLight,
   },
   helpItem: {
-    paddingVertical: 12,
+    paddingVertical: SIZES.sm,
     borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
+    borderBottomColor: COLORS.border,
   },
   helpItemText: {
-    fontSize: 16,
-    color: '#333333',
-  },
-  deleteAccount: {
-    borderBottomWidth: 0,
-    marginTop: 8,
-  },
-  deleteAccountText: {
-    color: '#F44336',
+    fontSize: 15,
+    color: COLORS.text,
   },
   logoutButton: {
-    backgroundColor: '#F44336',
-    marginHorizontal: 16,
-    marginTop: 16,
-    paddingVertical: 14,
-    borderRadius: 8,
+    backgroundColor: COLORS.danger,
+    marginHorizontal: SIZES.md,
+    marginTop: SIZES.md,
+    marginBottom: SIZES.xxxl,
+    paddingVertical: SIZES.md,
+    borderRadius: SIZES.xs,
     alignItems: 'center',
   },
   logoutButtonText: {
-    color: '#FFFFFF',
+    color: COLORS.white,
     fontWeight: '700',
     fontSize: 16,
+  },
+  buttonDisabled: {
+    backgroundColor: COLORS.grey,
   },
   modalOverlay: {
     flex: 1,
@@ -1269,9 +1287,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   modalContainer: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 24,
+    backgroundColor: COLORS.white,
+    borderRadius: SIZES.md,
+    padding: SIZES.lg,
     width: '90%',
     maxWidth: 400,
     maxHeight: '80%',
@@ -1279,43 +1297,44 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 20,
     fontWeight: '700',
-    color: '#1A237E',
-    marginBottom: 20,
+    color: COLORS.primary,
+    marginBottom: SIZES.lg,
     textAlign: 'center',
   },
   input: {
     borderWidth: 1,
-    borderColor: '#E0E0E0',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 16,
+    borderColor: COLORS.border,
+    borderRadius: SIZES.xs,
+    padding: SIZES.sm,
+    marginBottom: SIZES.md,
     fontSize: 16,
+    color: COLORS.text,
   },
   modalButtons: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 8,
+    marginTop: SIZES.xs,
   },
   modalButton: {
     flex: 1,
-    paddingVertical: 12,
-    borderRadius: 8,
+    paddingVertical: SIZES.sm,
+    borderRadius: SIZES.xs,
     alignItems: 'center',
-    marginHorizontal: 8,
+    marginHorizontal: SIZES.xs,
   },
   cancelButton: {
-    backgroundColor: '#F0F0F0',
+    backgroundColor: COLORS.greyLight,
   },
   saveButton: {
-    backgroundColor: '#4A90E2',
+    backgroundColor: COLORS.secondary,
   },
   cancelButtonText: {
-    color: '#666666',
+    color: COLORS.textLight,
     fontWeight: '600',
     fontSize: 16,
   },
   saveButtonText: {
-    color: '#FFFFFF',
+    color: COLORS.white,
     fontWeight: '600',
     fontSize: 16,
   },

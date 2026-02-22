@@ -1,7 +1,14 @@
+// src/navigation/TransporterNavigator.tsx
 import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { View, Text, StyleSheet } from 'react-native';
+
+// Import types
+import { Bus } from '../types/fleet.types';
+import { Driver } from '../types/driver.types';
+import { Route, Trip } from '../types/operations.types';
+import { Notification } from '../types/notifications.types';
 
 // Import Main Screens
 import DashboardScreen from '../screens/transporter/DashboardScreen';
@@ -16,14 +23,45 @@ import AddBusScreen from '../screens/transporter/subscreens/AddBusScreen';
 import AddDriverScreen from '../screens/transporter/subscreens/AddDriverScreen';
 import ScheduleTripScreen from '../screens/transporter/subscreens/ScheduleTripScreen';
 
-// Create Stack Navigators for each tab
-const DashboardStack = createNativeStackNavigator();
-const FleetStack = createNativeStackNavigator();
-const DriversStack = createNativeStackNavigator();
-const OperationsStack = createNativeStackNavigator();
-const ReportsStack = createNativeStackNavigator();
+// ========== TYPE DEFINITIONS ==========
+export type TransporterStackParamList = {
+  // Main Screens
+  DashboardMain: undefined;
+  FleetMain: undefined;
+  DriversMain: undefined;
+  OperationsMain: undefined;
+  ReportsMain: undefined;
+  Notifications: undefined;
 
-// Dashboard Stack Navigator - IMPORTANT: headerShown: true for main screen
+  // Sub Screens
+  Notifications: undefined;
+
+  // Fleet Module
+  AddBusScreen: {
+    mode: 'add' | 'edit';
+    bus?: Bus;
+    transporterId?: string;
+  };
+
+  // Drivers Module
+  AddDriverScreen: {
+    mode: 'add' | 'edit';
+    driver?: Driver;
+    transporterId?: string;
+  };
+
+  // Operations Module - 👇 YEH ADD KARO
+  ScheduleTripScreen: {
+    mode: 'add' | 'edit' | 'view';
+    trip?: Trip;
+    preSelectedRoute?: string;
+    transporterId?: string;
+  };
+};
+
+// ========== DASHBOARD STACK ==========
+const DashboardStack = createNativeStackNavigator<TransporterStackParamList>();
+
 const DashboardStackNavigator = () => (
   <DashboardStack.Navigator>
     <DashboardStack.Screen
@@ -51,7 +89,9 @@ const DashboardStackNavigator = () => (
   </DashboardStack.Navigator>
 );
 
-// Fleet Stack Navigator
+// ========== FLEET STACK ==========
+const FleetStack = createNativeStackNavigator<TransporterStackParamList>();
+
 const FleetStackNavigator = () => (
   <FleetStack.Navigator>
     <FleetStack.Screen
@@ -68,7 +108,7 @@ const FleetStackNavigator = () => (
     <FleetStack.Screen
       name="AddBusScreen"
       component={AddBusScreen}
-      options={({ route }: any) => ({
+      options={({ route }) => ({
         headerShown: true,
         headerTitle: route.params?.mode === 'edit' ? 'Edit Bus' : 'Add New Bus',
         headerStyle: styles.header,
@@ -79,7 +119,9 @@ const FleetStackNavigator = () => (
   </FleetStack.Navigator>
 );
 
-// Drivers Stack Navigator
+// ========== DRIVERS STACK ==========
+const DriversStack = createNativeStackNavigator<TransporterStackParamList>();
+
 const DriversStackNavigator = () => (
   <DriversStack.Navigator>
     <DriversStack.Screen
@@ -96,7 +138,7 @@ const DriversStackNavigator = () => (
     <DriversStack.Screen
       name="AddDriverScreen"
       component={AddDriverScreen}
-      options={({ route }: any) => ({
+      options={({ route }) => ({
         headerShown: true,
         headerTitle: route.params?.mode === 'edit' ? 'Edit Driver' : 'Add New Driver',
         headerStyle: styles.header,
@@ -107,7 +149,9 @@ const DriversStackNavigator = () => (
   </DriversStack.Navigator>
 );
 
-// Operations Stack Navigator
+// ========== OPERATIONS STACK ==========
+const OperationsStack = createNativeStackNavigator<TransporterStackParamList>();
+
 const OperationsStackNavigator = () => (
   <OperationsStack.Navigator>
     <OperationsStack.Screen
@@ -124,9 +168,12 @@ const OperationsStackNavigator = () => (
     <OperationsStack.Screen
       name="ScheduleTripScreen"
       component={ScheduleTripScreen}
-      options={({ route }: any) => ({
+      options={({ route }) => ({
         headerShown: true,
-        headerTitle: route.params?.mode === 'edit' ? 'Edit Trip' : 'Schedule Trip',
+        headerTitle:
+          route.params?.mode === 'add' ? 'Schedule Trip' :
+          route.params?.mode === 'edit' ? 'Edit Trip' :
+          'Trip Details',
         headerStyle: styles.header,
         headerTintColor: '#FFFFFF',
         headerTitleStyle: styles.headerTitle,
@@ -135,7 +182,9 @@ const OperationsStackNavigator = () => (
   </OperationsStack.Navigator>
 );
 
-// Reports Stack Navigator
+// ========== REPORTS STACK ==========
+const ReportsStack = createNativeStackNavigator<TransporterStackParamList>();
+
 const ReportsStackNavigator = () => (
   <ReportsStack.Navigator>
     <ReportsStack.Screen
@@ -152,7 +201,7 @@ const ReportsStackNavigator = () => (
   </ReportsStack.Navigator>
 );
 
-// Main Tab Navigator
+// ========== MAIN TAB NAVIGATOR ==========
 export type TransporterTabParamList = {
   Dashboard: undefined;
   Fleet: undefined;
@@ -170,7 +219,7 @@ const TransporterNavigator = () => {
         tabBarActiveTintColor: '#4A90E2',
         tabBarInactiveTintColor: '#666666',
         tabBarStyle: styles.tabBar,
-        headerShown: false, // Tab level pe header hide
+        headerShown: false,
       }}
     >
       <Tab.Screen

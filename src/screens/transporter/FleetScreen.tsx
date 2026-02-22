@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+// src/screens/transporter/FleetScreen.tsx
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -7,85 +8,152 @@ import {
   TouchableOpacity,
   SafeAreaView,
   Alert,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
+import auth from '@react-native-firebase/auth';
+import firestore from '@react-native-firebase/firestore';
+import { StackNavigationProp } from '@react-navigation/stack';
+import { TransporterStackParamList } from '../../navigation/TransporterNavigator';
 
-// Mock data
-const mockBuses = [
-  { id: '1', number: 'B-001', registration: 'ABC-123', capacity: 40, status: 'active', driver: 'Ali Ahmed', lastMaintenance: '2024-01-10', nextMaintenance: '2024-02-10' },
-  { id: '2', number: 'B-002', registration: 'XYZ-789', capacity: 35, status: 'maintenance', driver: null, lastMaintenance: '2024-01-05', nextMaintenance: '2024-01-25' },
-  { id: '3', number: 'B-003', registration: 'DEF-456', capacity: 45, status: 'active', driver: 'Ahmed Khan', lastMaintenance: '2024-01-12', nextMaintenance: '2024-02-12' },
-  { id: '4', number: 'B-004', registration: 'GHI-789', capacity: 30, status: 'inactive', driver: null, lastMaintenance: '2023-12-20', nextMaintenance: '2024-01-20' },
-  { id: '5', number: 'B-005', registration: 'JKL-012', capacity: 50, status: 'active', driver: 'Sara Ali', lastMaintenance: '2024-01-08', nextMaintenance: '2024-02-08' },
-  { id: '6', number: 'B-006', registration: 'MNO-345', capacity: 40, status: 'active', driver: 'Usman Khan', lastMaintenance: '2024-01-15', nextMaintenance: '2024-02-15' },
-  { id: '7', number: 'B-007', registration: 'PQR-678', capacity: 38, status: 'active', driver: 'Bilal Raza', lastMaintenance: '2024-01-18', nextMaintenance: '2024-02-18' },
-  { id: '8', number: 'B-008', registration: 'STU-901', capacity: 42, status: 'maintenance', driver: null, lastMaintenance: '2024-01-03', nextMaintenance: '2024-01-30' },
-];
+// Types
+import { Bus, BusStatus } from '../../types/fleet.types';
+
+// Constants
+import { COLORS, SIZES, SHADOWS } from '../../constants/theme';
+
+type FleetScreenNavigationProp = StackNavigationProp<TransporterStackParamList, 'Fleet'>;
 
 const FleetScreen = () => {
-  const navigation = useNavigation<any>();
+  const navigation = useNavigation<FleetScreenNavigationProp>();
   const route = useRoute();
-  const [buses, setBuses] = useState(mockBuses);
-  const [filter, setFilter] = useState('all'); // all, active, maintenance, inactive
+  const [buses, setBuses] = useState<Bus[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [filter, setFilter] = useState<BusStatus | 'all'>('all');
+  const [transporterName, setTransporterName] = useState('');
+
+  const user = auth().currentUser;
 
   // 🔥 IMPORTANT: useEffect for opening AddBusScreen automatically
-  useEffect(() => {
-    if (route.params?.openAddBus) {
-      handleAddBus();
-      // IMPORTANT: param clear karo
-      navigation.setParams({ openAddBus: false });
-    }
-  }, [route.params?.openAddBus]);
+  useFocusEffect(
+    useCallback(() => {
+      const params = route.params as any;
+      if (params?.openAddBus) {
+        handleAddBus();
+        // IMPORTANT: param clear karo
+        navigation.setParams({ openAddBus: false });
+      }
+    }, [route.params])
+  );
 
-  // Add Bus button handler - Now navigates to AddBusScreen
+  // Fetch transporter name
+  useEffect(() => {
+    if (!user) return;
+
+    const unsubscribe = firestore()
+      .collection('users')
+      .doc(user.uid)
+      .onSnapshot(
+        (doc) => {
+          if (doc.exists) {
+            setTransporterName(doc.data()?.fullName || 'Transporter');
+          }
+        },
+        (error) => console.error('Error fetching user:', error)
+      );
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // 🔥 REAL-TIME BUSES LISTENER
+  useEffect(() => {
+    if (!user) return;
+
+    setLoading(true);
+
+    const unsubscribe = firestore()
+      .collection('buses')
+      .where('transporterId', '==', user.uid)
+      .orderBy('createdAt', 'desc')
+      .onSnapshot(
+        (snapshot) => {
+          const busesList = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data(),
+          })) as Bus[];
+
+          setBuses(busesList);
+          setLoading(false);
+          setRefreshing(false);
+        },
+        (error) => {
+          console.error('Error fetching buses:', error);
+          Alert.alert('Error', 'Failed to load buses. Please try again.');
+          setLoading(false);
+          setRefreshing(false);
+        }
+      );
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // Manual refresh
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    // Listener will auto-update
+  }, []);
+
+  // Stats calculation
+  const stats = useMemo(() => ({
+    total: buses.length,
+    active: buses.filter(b => b.status === 'active').length,
+    maintenance: buses.filter(b => b.status === 'maintenance').length,
+    inactive: buses.filter(b => b.status === 'inactive').length,
+  }), [buses]);
+
+  // Filtered buses
+  const filteredBuses = useMemo(() => {
+    if (filter === 'all') return buses;
+    return buses.filter(bus => bus.status === filter);
+  }, [buses, filter]);
+
+  // Add Bus button handler
   const handleAddBus = () => {
     navigation.navigate('AddBusScreen', {
       mode: 'add',
-      onSave: (busData: any) => {
-        // Callback function for when bus is saved in AddBusScreen
-        const newBusObj = {
-          id: (buses.length + 1).toString(),
-          number: busData.number,
-          registration: busData.registration,
-          capacity: parseInt(busData.capacity),
-          status: 'active',
-          driver: null,
-          lastMaintenance: new Date().toISOString().split('T')[0],
-          nextMaintenance: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-        };
-
-        setBuses([...buses, newBusObj]);
-        Alert.alert('Success', 'Bus added successfully');
-      }
+      transporterId: user?.uid,
     });
   };
 
-  // Bus detail handler - Navigates to AddBusScreen in edit mode
-  const handleBusPress = (bus: any) => {
+  // Bus press handler - Navigate to AddBusScreen in edit mode
+  const handleBusPress = (bus: Bus) => {
     navigation.navigate('AddBusScreen', {
       mode: 'edit',
       bus: bus,
-      onSave: (updatedBusData: any) => {
-        // Update bus in local state
-        setBuses(buses.map(b =>
-          b.id === bus.id ? { ...b, ...updatedBusData } : b
-        ));
-        Alert.alert('Success', 'Bus updated successfully');
-      }
     });
   };
 
   // 📋 DETAILS BUTTON FUNCTIONALITY
-  const handleViewDetails = (bus: any) => {
+  const handleViewDetails = (bus: Bus) => {
+    const formatDate = (dateStr: string) => {
+      if (!dateStr) return 'N/A';
+      return dateStr;
+    };
+
     Alert.alert(
       '🚌 Bus Details',
-      `Bus Number: ${bus.number}\n` +
-      `Registration: ${bus.registration}\n` +
+      `Bus Number: ${bus.busNumber}\n` +
+      `Registration: ${bus.registrationNumber}\n` +
+      `Make/Model: ${bus.make || 'N/A'} ${bus.model || 'N/A'}\n` +
+      `Year: ${bus.year || 'N/A'}\n` +
       `Capacity: ${bus.capacity} seats\n` +
+      `Fuel Type: ${bus.fuelType || 'N/A'}\n` +
       `Status: ${bus.status.toUpperCase()}\n` +
-      `Driver: ${bus.driver || 'Not assigned'}\n` +
-      `Last Maintenance: ${bus.lastMaintenance}\n` +
-      `Next Maintenance: ${bus.nextMaintenance}`,
+      `Driver: ${bus.driverName || 'Not assigned'}\n` +
+      `Insurance Expiry: ${formatDate(bus.insuranceExpiry)}\n` +
+      `Fitness Expiry: ${formatDate(bus.fitnessExpiry)}`,
       [
         { text: 'OK', style: 'default' },
         { text: 'Edit Details', onPress: () => handleBusPress(bus) },
@@ -95,19 +163,19 @@ const FleetScreen = () => {
   };
 
   // 🔧 MAINTENANCE BUTTON FUNCTIONALITY
-  const handleMaintenance = (bus: any) => {
+  const handleMaintenance = (bus: Bus) => {
     Alert.alert(
       '🔧 Maintenance Options',
-      `Select maintenance action for ${bus.number}:`,
+      `Select maintenance action for ${bus.busNumber}:`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Schedule Maintenance',
-          onPress: () => scheduleMaintenance(bus.id)
+          onPress: () => scheduleMaintenance(bus)
         },
         {
           text: 'Log Maintenance Done',
-          onPress: () => logMaintenanceDone(bus.id)
+          onPress: () => logMaintenanceDone(bus)
         },
         {
           text: 'View Maintenance History',
@@ -117,7 +185,7 @@ const FleetScreen = () => {
     );
   };
 
-  const scheduleMaintenance = (busId: string) => {
+  const scheduleMaintenance = (bus: Bus) => {
     Alert.prompt(
       '📅 Schedule Maintenance',
       'Enter number of days from now:',
@@ -125,23 +193,43 @@ const FleetScreen = () => {
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Schedule',
-          onPress: (days) => {
+          onPress: async (days) => {
+            if (!user) return;
+
             if (days && !isNaN(parseInt(days))) {
               const daysNum = parseInt(days);
-              const nextDate = new Date(Date.now() + daysNum * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
-              setBuses(buses.map(bus =>
-                bus.id === busId ? {
-                  ...bus,
-                  status: 'maintenance',
-                  nextMaintenance: nextDate
-                } : bus
-              ));
+              try {
+                // Update bus status to maintenance
+                await firestore()
+                  .collection('buses')
+                  .doc(bus.id)
+                  .update({
+                    status: 'maintenance',
+                    updatedAt: firestore.FieldValue.serverTimestamp(),
+                  });
 
-              Alert.alert(
-                '✅ Scheduled',
-                `Maintenance scheduled for ${days} days from now\nNext maintenance: ${nextDate}`
-              );
+                // Create maintenance record
+                await firestore()
+                  .collection('maintenance')
+                  .add({
+                    busId: bus.id,
+                    busNumber: bus.busNumber,
+                    date: firestore.FieldValue.serverTimestamp(),
+                    type: 'routine',
+                    description: `Scheduled maintenance for ${daysNum} days from now`,
+                    transporterId: user.uid,
+                    createdAt: firestore.FieldValue.serverTimestamp(),
+                  });
+
+                Alert.alert(
+                  '✅ Scheduled',
+                  `Maintenance scheduled for ${daysNum} days from now\nBus status changed to MAINTENANCE`
+                );
+              } catch (error) {
+                console.error('Error scheduling maintenance:', error);
+                Alert.alert('Error', 'Failed to schedule maintenance');
+              }
             }
           }
         }
@@ -151,88 +239,143 @@ const FleetScreen = () => {
     );
   };
 
-  const logMaintenanceDone = (busId: string) => {
-    setBuses(buses.map(bus =>
-      bus.id === busId ? {
-        ...bus,
-        status: 'active',
-        lastMaintenance: new Date().toISOString().split('T')[0],
-        nextMaintenance: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
-      } : bus
-    ));
+  const logMaintenanceDone = (bus: Bus) => {
+    if (!user) return;
 
     Alert.alert(
-      '✅ Maintenance Completed',
-      'Maintenance logged successfully!\nBus status changed to ACTIVE\nNext maintenance scheduled for 30 days from now.'
+      '✅ Log Maintenance',
+      'Confirm maintenance completion?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Confirm',
+          onPress: async () => {
+            try {
+              // Update bus status back to active
+              await firestore()
+                .collection('buses')
+                .doc(bus.id)
+                .update({
+                  status: 'active',
+                  updatedAt: firestore.FieldValue.serverTimestamp(),
+                });
+
+              // Create maintenance record
+              await firestore()
+                .collection('maintenance')
+                .add({
+                  busId: bus.id,
+                  busNumber: bus.busNumber,
+                  date: firestore.FieldValue.serverTimestamp(),
+                  type: 'routine',
+                  description: 'Regular maintenance completed',
+                  transporterId: user.uid,
+                  createdAt: firestore.FieldValue.serverTimestamp(),
+                });
+
+              Alert.alert(
+                '✅ Maintenance Completed',
+                'Bus is now ACTIVE and ready for service.'
+              );
+            } catch (error) {
+              console.error('Error logging maintenance:', error);
+              Alert.alert('Error', 'Failed to log maintenance');
+            }
+          }
+        }
+      ]
     );
   };
 
-  const viewMaintenanceHistory = (busId: string) => {
-    const bus = buses.find(b => b.id === busId);
-    if (bus) {
-      Alert.alert(
-        '📋 Maintenance History',
-        `Bus: ${bus.number}\n` +
-        `Last Maintenance: ${bus.lastMaintenance}\n` +
-        `Next Maintenance: ${bus.nextMaintenance}\n\n` +
-        'Recent Maintenance History:\n' +
-        '• 2024-01-10: Oil change, tire rotation\n' +
-        '• 2023-12-15: Brake system check\n' +
-        '• 2023-11-20: Engine service\n' +
-        '• 2023-10-25: General inspection'
-      );
+  const viewMaintenanceHistory = async (busId: string) => {
+    if (!user) return;
+
+    try {
+      const snapshot = await firestore()
+        .collection('maintenance')
+        .where('busId', '==', busId)
+        .orderBy('date', 'desc')
+        .limit(5)
+        .get();
+
+      if (snapshot.empty) {
+        Alert.alert('📋 Maintenance History', 'No maintenance records found.');
+        return;
+      }
+
+      let historyText = 'Recent Maintenance:\n\n';
+      snapshot.docs.forEach((doc, index) => {
+        const record = doc.data();
+        const date = record.date?.toDate?.().toLocaleDateString('en-PK') || 'N/A';
+        historyText += `${index + 1}. ${date}: ${record.description}\n`;
+      });
+
+      Alert.alert('📋 Maintenance History', historyText);
+    } catch (error) {
+      console.error('Error fetching maintenance history:', error);
+      Alert.alert('Error', 'Failed to load maintenance history');
     }
   };
 
   // ▶️ ACTIVATE/DEACTIVATE BUTTON FUNCTIONALITY
-  const handleChangeStatus = (busId: string, currentStatus: string) => {
-    const bus = buses.find(b => b.id === busId);
-    if (!bus) return;
+  const handleChangeStatus = (bus: Bus) => {
+    if (!user) return;
 
-    if (currentStatus === 'active') {
-      // Deactivate karna hai
+    if (bus.status === 'active') {
+      // Deactivate
       Alert.alert(
         '⏸️ Deactivate Bus',
-        `Are you sure you want to deactivate ${bus.number}?\n\n` +
-        'This will:\n' +
-        '• Remove from active service\n' +
-        '• Unassign driver (if any)\n' +
-        '• Mark as inactive in system',
+        `Are you sure you want to deactivate ${bus.busNumber}?`,
         [
           { text: 'Cancel', style: 'cancel' },
           {
             text: 'Deactivate',
             style: 'destructive',
-            onPress: () => {
-              setBuses(buses.map(b =>
-                b.id === busId ? {
-                  ...b,
-                  status: 'inactive',
-                  driver: null
-                } : b
-              ));
-              Alert.alert('✅ Deactivated', `${bus.number} has been deactivated`);
+            onPress: async () => {
+              try {
+                await firestore()
+                  .collection('buses')
+                  .doc(bus.id)
+                  .update({
+                    status: 'inactive',
+                    driverId: null,
+                    driverName: null,
+                    updatedAt: firestore.FieldValue.serverTimestamp(),
+                  });
+
+                Alert.alert('✅ Deactivated', `${bus.busNumber} has been deactivated`);
+              } catch (error) {
+                console.error('Error deactivating bus:', error);
+                Alert.alert('Error', 'Failed to deactivate bus');
+              }
             }
           }
         ]
       );
     } else {
-      // Activate karna hai
+      // Activate
       Alert.alert(
         '▶️ Activate Bus',
-        `Activate ${bus.number} back to service?`,
+        `Activate ${bus.busNumber} back to service?`,
         [
           { text: 'Cancel', style: 'cancel' },
           {
             text: 'Activate',
-            onPress: () => {
-              setBuses(buses.map(b =>
-                b.id === busId ? {
-                  ...b,
-                  status: 'active'
-                } : b
-              ));
-              Alert.alert('✅ Activated', `${bus.number} is now active and available for service`);
+            onPress: async () => {
+              try {
+                await firestore()
+                  .collection('buses')
+                  .doc(bus.id)
+                  .update({
+                    status: 'active',
+                    updatedAt: firestore.FieldValue.serverTimestamp(),
+                  });
+
+                Alert.alert('✅ Activated', `${bus.busNumber} is now active`);
+              } catch (error) {
+                console.error('Error activating bus:', error);
+                Alert.alert('Error', 'Failed to activate bus');
+              }
             }
           }
         ]
@@ -241,48 +384,112 @@ const FleetScreen = () => {
   };
 
   // 👤 ASSIGN DRIVER FUNCTION
-  const handleAssignDriver = (bus: any) => {
-    const availableDrivers = ['Ali Ahmed', 'Ahmed Khan', 'Sara Ali', 'Usman Khan', 'Bilal Raza'];
+  const handleAssignDriver = async (bus: Bus) => {
+    if (!user) return;
 
-    Alert.alert(
-      '👤 Assign Driver',
-      `Assign driver to ${bus.number}:`,
-      [
-        ...availableDrivers.map(driver => ({
-          text: driver,
-          onPress: () => {
-            setBuses(buses.map(b =>
-              b.id === bus.id ? { ...b, driver: driver } : b
-            ));
-            Alert.alert('✅ Driver Assigned', `${driver} assigned to ${bus.number}`);
+    try {
+      // Fetch available drivers
+      const driversSnapshot = await firestore()
+        .collection('drivers')
+        .where('transporterId', '==', user.uid)
+        .where('status', 'in', ['online', 'on-duty'])
+        .get();
+
+      if (driversSnapshot.empty) {
+        Alert.alert('No Drivers', 'No available drivers found.');
+        return;
+      }
+
+      const drivers = driversSnapshot.docs.map(doc => ({
+        id: doc.id,
+        name: doc.data().fullName,
+        status: doc.data().status,
+      }));
+
+      // Create alert options
+      const alertOptions = drivers.map(driver => ({
+        text: `${driver.name} (${driver.status})`,
+        onPress: async () => {
+          try {
+            await firestore()
+              .collection('buses')
+              .doc(bus.id)
+              .update({
+                driverId: driver.id,
+                driverName: driver.name,
+                updatedAt: firestore.FieldValue.serverTimestamp(),
+              });
+
+            // Also update driver's assigned bus
+            await firestore()
+              .collection('drivers')
+              .doc(driver.id)
+              .update({
+                busAssignedId: bus.id,
+                busNumber: bus.busNumber,
+                updatedAt: firestore.FieldValue.serverTimestamp(),
+              });
+
+            Alert.alert('✅ Driver Assigned', `${driver.name} assigned to ${bus.busNumber}`);
+          } catch (error) {
+            console.error('Error assigning driver:', error);
+            Alert.alert('Error', 'Failed to assign driver');
           }
-        })),
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Unassign Driver',
-          onPress: () => {
-            setBuses(buses.map(b =>
-              b.id === bus.id ? { ...b, driver: null } : b
-            ));
-            Alert.alert('✅ Driver Unassigned', 'Driver removed from bus');
-          },
-          style: 'destructive'
         }
-      ]
-    );
+      }));
+
+      Alert.alert(
+        '👤 Assign Driver',
+        `Select driver for ${bus.busNumber}:`,
+        [
+          ...alertOptions,
+          { text: 'Cancel', style: 'cancel' },
+          ...(bus.driverId ? [{
+            text: 'Unassign Driver',
+            onPress: async () => {
+              try {
+                await firestore()
+                  .collection('buses')
+                  .doc(bus.id)
+                  .update({
+                    driverId: null,
+                    driverName: null,
+                    updatedAt: firestore.FieldValue.serverTimestamp(),
+                  });
+
+                // Update driver's assigned bus
+                await firestore()
+                  .collection('drivers')
+                  .doc(bus.driverId!)
+                  .update({
+                    busAssignedId: null,
+                    busNumber: null,
+                    updatedAt: firestore.FieldValue.serverTimestamp(),
+                  });
+
+                Alert.alert('✅ Driver Unassigned', 'Driver removed from bus');
+              } catch (error) {
+                console.error('Error unassigning driver:', error);
+                Alert.alert('Error', 'Failed to unassign driver');
+              }
+            },
+            style: 'destructive'
+          }] : [])
+        ]
+      );
+    } catch (error) {
+      console.error('Error fetching drivers:', error);
+      Alert.alert('Error', 'Failed to load drivers');
+    }
   };
 
-  const filteredBuses = buses.filter(bus => {
-    if (filter === 'all') return true;
-    return bus.status === filter;
-  });
-
+  // Status color helper
   const getStatusColor = (status: string) => {
     switch(status) {
-      case 'active': return '#4CAF50';
-      case 'maintenance': return '#FF9800';
-      case 'inactive': return '#F44336';
-      default: return '#666666';
+      case 'active': return COLORS.success;
+      case 'maintenance': return COLORS.warning;
+      case 'inactive': return COLORS.danger;
+      default: return COLORS.textLight;
     }
   };
 
@@ -295,20 +502,27 @@ const FleetScreen = () => {
     }
   };
 
-  const stats = {
-    total: buses.length,
-    active: buses.filter(b => b.status === 'active').length,
-    maintenance: buses.filter(b => b.status === 'maintenance').length,
-    inactive: buses.filter(b => b.status === 'inactive').length,
+  const formatDate = (dateStr: string) => {
+    if (!dateStr) return 'N/A';
+    return dateStr;
   };
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color={COLORS.primary} />
+        <Text style={styles.loadingText}>Loading fleet data...</Text>
+      </View>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Header - Fixed */}
+      {/* Header */}
       <View style={styles.header}>
         <View>
           <Text style={styles.title}>🚌 Fleet Management</Text>
-          <Text style={styles.subtitle}>Manage your bus fleet</Text>
+          <Text style={styles.subtitle}>{transporterName}</Text>
         </View>
         <TouchableOpacity
           style={styles.addButton}
@@ -318,10 +532,10 @@ const FleetScreen = () => {
         </TouchableOpacity>
       </View>
 
-      {/* Stats - Fixed Height */}
+      {/* Stats */}
       <View style={styles.statsContainer}>
         <TouchableOpacity
-          style={[styles.statCard, filter === 'all' && styles.statCardActive]}
+          style={[styles.statCard, SHADOWS.small, filter === 'all' && styles.statCardActive]}
           onPress={() => setFilter('all')}
           activeOpacity={0.7}
         >
@@ -330,101 +544,142 @@ const FleetScreen = () => {
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.statCard, { backgroundColor: '#E8F5E8' }, filter === 'active' && styles.statCardActive]}
+          style={[styles.statCard, { backgroundColor: '#E8F5E8' }, SHADOWS.small, filter === 'active' && styles.statCardActive]}
           onPress={() => setFilter('active')}
           activeOpacity={0.7}
         >
-          <Text style={[styles.statValue, { color: '#4CAF50' }]}>{stats.active}</Text>
+          <Text style={[styles.statValue, { color: COLORS.success }]}>{stats.active}</Text>
           <Text style={styles.statLabel}>Active</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.statCard, { backgroundColor: '#FFF3E0' }, filter === 'maintenance' && styles.statCardActive]}
+          style={[styles.statCard, { backgroundColor: '#FFF3E0' }, SHADOWS.small, filter === 'maintenance' && styles.statCardActive]}
           onPress={() => setFilter('maintenance')}
           activeOpacity={0.7}
         >
-          <Text style={[styles.statValue, { color: '#FF9800' }]}>{stats.maintenance}</Text>
+          <Text style={[styles.statValue, { color: COLORS.warning }]}>{stats.maintenance}</Text>
           <Text style={styles.statLabel}>Maintenance</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.statCard, { backgroundColor: '#FFEBEE' }, filter === 'inactive' && styles.statCardActive]}
+          style={[styles.statCard, { backgroundColor: '#FFEBEE' }, SHADOWS.small, filter === 'inactive' && styles.statCardActive]}
           onPress={() => setFilter('inactive')}
           activeOpacity={0.7}
         >
-          <Text style={[styles.statValue, { color: '#F44336' }]}>{stats.inactive}</Text>
+          <Text style={[styles.statValue, { color: COLORS.danger }]}>{stats.inactive}</Text>
           <Text style={styles.statLabel}>Inactive</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Bus List - Scrollable */}
+      {/* Bus List */}
       <ScrollView
         style={styles.listContainer}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
         contentContainerStyle={styles.listContent}
       >
-        {filteredBuses.map((bus) => (
-          <View key={bus.id} style={styles.busCard}>
+        {filteredBuses.length === 0 ? (
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyIcon}>🚌</Text>
+            <Text style={styles.emptyTitle}>No Buses Found</Text>
+            <Text style={styles.emptyText}>
+              {filter === 'all'
+                ? 'Add your first bus to get started'
+                : `No ${filter} buses available`}
+            </Text>
             <TouchableOpacity
-              style={styles.busInfoSection}
-              onPress={() => handleBusPress(bus)}
-              activeOpacity={0.7}
+              style={styles.emptyButton}
+              onPress={handleAddBus}
             >
-              <View style={styles.busHeader}>
-                <View style={styles.busInfo}>
-                  <Text style={styles.busNumber}>{bus.number}</Text>
-                  <Text style={styles.busRegistration}>{bus.registration}</Text>
-                </View>
-                <View style={[styles.statusBadge, { backgroundColor: getStatusColor(bus.status) }]}>
-                  <Text style={styles.statusText}>
-                    {getStatusIcon(bus.status)} {bus.status.toUpperCase()}
-                  </Text>
-                </View>
-              </View>
-
-              <View style={styles.busDetails}>
-                <View style={styles.detailItem}>
-                  <Text style={styles.detailLabel}>Capacity:</Text>
-                  <Text style={styles.detailValue}>{bus.capacity} seats</Text>
-                </View>
-                <View style={styles.detailItem}>
-                  <Text style={styles.detailLabel}>Driver:</Text>
-                  <Text style={styles.detailValue}>{bus.driver || 'Not assigned'}</Text>
-                </View>
-                <View style={styles.detailItem}>
-                  <Text style={styles.detailLabel}>Next Maintenance:</Text>
-                  <Text style={styles.detailValue}>{bus.nextMaintenance}</Text>
-                </View>
-              </View>
+              <Text style={styles.emptyButtonText}>Add Bus</Text>
             </TouchableOpacity>
-
-            {/* Action Buttons */}
-            <View style={styles.actionButtons}>
-              <TouchableOpacity
-                style={styles.actionButton}
-                onPress={() => handleViewDetails(bus)}
-              >
-                <Text style={styles.actionButtonText}>📋 Details</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.actionButton}
-                onPress={() => handleMaintenance(bus)}
-              >
-                <Text style={styles.actionButtonText}>🔧 Maintain</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.actionButton}
-                onPress={() => handleChangeStatus(bus.id, bus.status)}
-              >
-                <Text style={styles.actionButtonText}>
-                  {bus.status === 'active' ? '⏸️ Deactivate' : '▶️ Activate'}
-                </Text>
-              </TouchableOpacity>
-            </View>
           </View>
-        ))}
+        ) : (
+          filteredBuses.map((bus) => (
+            <View key={bus.id} style={[styles.busCard, SHADOWS.medium]}>
+              <TouchableOpacity
+                style={styles.busInfoSection}
+                onPress={() => handleBusPress(bus)}
+                activeOpacity={0.7}
+              >
+                <View style={styles.busHeader}>
+                  <View style={styles.busInfo}>
+                    <Text style={styles.busNumber}>{bus.busNumber}</Text>
+                    <Text style={styles.busRegistration}>{bus.registrationNumber}</Text>
+                  </View>
+                  <View style={[styles.statusBadge, { backgroundColor: getStatusColor(bus.status) }]}>
+                    <Text style={styles.statusText}>
+                      {getStatusIcon(bus.status)} {bus.status.toUpperCase()}
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.busDetails}>
+                  <View style={styles.detailItem}>
+                    <Text style={styles.detailLabel}>Capacity:</Text>
+                    <Text style={styles.detailValue}>{bus.capacity} seats</Text>
+                  </View>
+                  <View style={styles.detailItem}>
+                    <Text style={styles.detailLabel}>Driver:</Text>
+                    <Text style={styles.detailValue}>{bus.driverName || 'Not assigned'}</Text>
+                  </View>
+                  <View style={styles.detailItem}>
+                    <Text style={styles.detailLabel}>Insurance:</Text>
+                    <Text style={[
+                      styles.detailValue,
+                      bus.insuranceExpiry && new Date(bus.insuranceExpiry) < new Date() ? styles.overdueText : null
+                    ]}>
+                      {formatDate(bus.insuranceExpiry)}
+                    </Text>
+                  </View>
+                  <View style={styles.detailItem}>
+                    <Text style={styles.detailLabel}>Fitness:</Text>
+                    <Text style={[
+                      styles.detailValue,
+                      bus.fitnessExpiry && new Date(bus.fitnessExpiry) < new Date() ? styles.overdueText : null
+                    ]}>
+                      {formatDate(bus.fitnessExpiry)}
+                    </Text>
+                  </View>
+                </View>
+              </TouchableOpacity>
+
+              {/* Action Buttons */}
+              <View style={styles.actionButtons}>
+                <TouchableOpacity
+                  style={styles.actionButton}
+                  onPress={() => handleViewDetails(bus)}
+                >
+                  <Text style={styles.actionButtonText}>📋 Details</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.actionButton}
+                  onPress={() => handleMaintenance(bus)}
+                >
+                  <Text style={styles.actionButtonText}>🔧 Maintain</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.actionButton,
+                    bus.status === 'active' ? styles.deactivateButton : styles.activateButton
+                  ]}
+                  onPress={() => handleChangeStatus(bus)}
+                >
+                  <Text style={[
+                    styles.actionButtonText,
+                    bus.status === 'active' ? styles.deactivateText : styles.activateText
+                  ]}>
+                    {bus.status === 'active' ? '⏸️ Deactivate' : '▶️ Activate'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ))
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -433,103 +688,136 @@ const FleetScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F8F9FA',
+    backgroundColor: COLORS.background,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: COLORS.background,
+  },
+  loadingText: {
+    marginTop: SIZES.sm,
+    fontSize: 16,
+    color: COLORS.primary,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 20,
-    backgroundColor: '#1A237E',
+    paddingHorizontal: SIZES.md,
+    paddingVertical: SIZES.lg,
+    backgroundColor: COLORS.primary,
     zIndex: 10,
   },
   title: {
     fontSize: 20,
     fontWeight: '700',
-    color: '#FFFFFF',
+    color: COLORS.white,
   },
   subtitle: {
     fontSize: 14,
-    color: '#E0E0E0',
-    marginTop: 4,
+    color: COLORS.greyLight,
+    marginTop: 2,
   },
   addButton: {
-    backgroundColor: '#4A90E2',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 8,
+    backgroundColor: COLORS.secondary,
+    paddingHorizontal: SIZES.lg,
+    paddingVertical: SIZES.sm,
+    borderRadius: SIZES.xs,
   },
   addButtonText: {
-    color: '#FFFFFF',
+    color: COLORS.white,
     fontWeight: '600',
     fontSize: 14,
   },
   statsContainer: {
     flexDirection: 'row',
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    backgroundColor: '#FFFFFF',
+    paddingHorizontal: SIZES.md,
+    paddingVertical: SIZES.md,
+    backgroundColor: COLORS.white,
     borderBottomWidth: 1,
-    borderBottomColor: '#E0E0E0',
+    borderBottomColor: COLORS.border,
     zIndex: 5,
     maxHeight: 100,
   },
   statCard: {
     flex: 1,
-    borderRadius: 12,
-    padding: 12,
+    borderRadius: SIZES.md,
+    padding: SIZES.sm,
     marginHorizontal: 4,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
     minHeight: 70,
   },
   statCardActive: {
     borderWidth: 2,
-    borderColor: '#4A90E2',
+    borderColor: COLORS.secondary,
   },
   statValue: {
     fontSize: 20,
     fontWeight: '700',
-    color: '#1A237E',
-    marginBottom: 4,
+    color: COLORS.primary,
+    marginBottom: 2,
   },
   statLabel: {
     fontSize: 12,
-    color: '#666666',
+    color: COLORS.textLight,
     textAlign: 'center',
   },
   listContainer: {
     flex: 1,
   },
   listContent: {
-    paddingHorizontal: 16,
-    paddingVertical: 16,
+    paddingHorizontal: SIZES.md,
+    paddingVertical: SIZES.md,
     paddingBottom: 30,
   },
+  emptyContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 60,
+  },
+  emptyIcon: {
+    fontSize: 60,
+    marginBottom: SIZES.md,
+  },
+  emptyTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: COLORS.text,
+    marginBottom: SIZES.xs,
+  },
+  emptyText: {
+    fontSize: 14,
+    color: COLORS.textLight,
+    textAlign: 'center',
+    marginBottom: SIZES.lg,
+  },
+  emptyButton: {
+    backgroundColor: COLORS.secondary,
+    paddingHorizontal: SIZES.xl,
+    paddingVertical: SIZES.md,
+    borderRadius: SIZES.xs,
+  },
+  emptyButtonText: {
+    color: COLORS.white,
+    fontWeight: '600',
+    fontSize: 16,
+  },
   busCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    marginBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    backgroundColor: COLORS.white,
+    borderRadius: SIZES.md,
+    marginBottom: SIZES.sm,
   },
   busInfoSection: {
-    padding: 16,
+    padding: SIZES.md,
   },
   busHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: SIZES.sm,
   },
   busInfo: {
     flex: 1,
@@ -537,61 +825,77 @@ const styles = StyleSheet.create({
   busNumber: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#1A237E',
-    marginBottom: 4,
+    color: COLORS.primary,
+    marginBottom: 2,
   },
   busRegistration: {
     fontSize: 14,
-    color: '#666666',
+    color: COLORS.textLight,
   },
   statusBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingHorizontal: SIZES.sm,
+    paddingVertical: SIZES.xs,
     borderRadius: 20,
   },
   statusText: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#FFFFFF',
+    color: COLORS.white,
   },
   busDetails: {
-    marginBottom: 8,
+    marginBottom: SIZES.xs,
   },
   detailItem: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 8,
+    marginBottom: SIZES.xs,
   },
   detailLabel: {
     fontSize: 14,
-    color: '#666666',
+    color: COLORS.textLight,
   },
   detailValue: {
     fontSize: 14,
-    color: '#333333',
+    color: COLORS.text,
     fontWeight: '500',
+  },
+  overdueText: {
+    color: COLORS.danger,
+    fontWeight: '700',
   },
   actionButtons: {
     flexDirection: 'row',
     borderTopWidth: 1,
-    borderTopColor: '#E0E0E0',
-    paddingTop: 12,
-    marginTop: 8,
-    paddingHorizontal: 16,
-    paddingBottom: 16,
+    borderTopColor: COLORS.border,
+    paddingTop: SIZES.sm,
+    marginTop: SIZES.xs,
+    paddingHorizontal: SIZES.md,
+    paddingBottom: SIZES.md,
   },
   actionButton: {
     flex: 1,
-    paddingVertical: 10,
+    paddingVertical: SIZES.xs,
     alignItems: 'center',
     marginHorizontal: 4,
-    borderRadius: 8,
-    backgroundColor: '#F0F0F0',
+    borderRadius: SIZES.xs,
+    backgroundColor: COLORS.greyLight,
   },
   actionButtonText: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#1A237E',
+    color: COLORS.primary,
+  },
+  deactivateButton: {
+    backgroundColor: '#FFEBEE',
+  },
+  activateButton: {
+    backgroundColor: '#E8F5E9',
+  },
+  deactivateText: {
+    color: COLORS.danger,
+  },
+  activateText: {
+    color: COLORS.success,
   },
 });
 

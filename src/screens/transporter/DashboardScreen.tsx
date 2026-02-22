@@ -1,577 +1,765 @@
-import React, { useState, useEffect } from 'react';
+// screens/transporter/DashboardScreen.tsx
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
   TouchableOpacity,
   SafeAreaView,
   Alert,
   RefreshControl,
   Modal,
   TextInput,
+  ActivityIndicator,
+  FlatList,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import auth from '@react-native-firebase/auth';
+import firestore from '@react-native-firebase/firestore';
+import { StackNavigationProp } from '@react-navigation/stack';
 
 // Types
-type Bus = {
-  id: string;
-  number: string;
-  registration: string;
-  status: 'active' | 'maintenance' | 'inactive';
-  driver?: string;
-  lastMaintenance: string;
-};
+import {
+  Bus,
+  Driver,
+  Trip,
+  Notification,
+  Alert as AlertType,
+  DashboardStats
+} from '../../types/transporter.types';
+import { TransporterStackParamList } from '../../navigation/TransporterNavigator';
 
-type Driver = {
-  id: string;
-  name: string;
-  contact: string;
-  status: 'on-duty' | 'online' | 'offline';
-  busAssigned?: string;
-  rating: number;
-};
+// Components
+import { StatCard } from '../../components/transporter/StatCard';
+import { TripCard } from '../../components/transporter/TripCard';
+import { NotificationDropdown } from '../../components/transporter/NotificationDropdown';
 
-type Trip = {
-  id: string;
-  time: string;
-  route: string;
-  bus: string;
-  driver: string;
-  status: 'on-time' | 'delayed' | 'upcoming' | 'completed';
-  passengers: number;
-};
+// Constants
+import { COLORS, SIZES, FONTS, SHADOWS } from '../../constants/theme';
 
-type AlertType = {
-  id: string;
-  message: string;
-  type: 'success' | 'warning' | 'error' | 'info';
-  timestamp: string;
-};
+type DashboardScreenNavigationProp = StackNavigationProp<TransporterStackParamList, 'Dashboard'>;
 
-type Notification = {
-  id: string;
-  type: 'maintenance' | 'success' | 'warning' | 'info' | 'emergency';
-  message: string;
-  time: string;
-  read: boolean;
-};
-
-// Mock Data
-const mockBuses: Bus[] = [
-  { id: '1', number: 'B-001', registration: 'ABC-123', status: 'active', driver: 'Ali Ahmed', lastMaintenance: '2024-01-10' },
-  { id: '2', number: 'B-002', registration: 'XYZ-789', status: 'maintenance', driver: undefined, lastMaintenance: '2024-01-05' },
-  { id: '3', number: 'B-003', registration: 'DEF-456', status: 'active', driver: 'Ahmed Khan', lastMaintenance: '2024-01-12' },
-  { id: '4', number: 'B-004', registration: 'GHI-789', status: 'inactive', driver: undefined, lastMaintenance: '2023-12-20' },
-];
-
-const mockDrivers: Driver[] = [
-  { id: '1', name: 'Ali Ahmed', contact: '+92 300 1234567', status: 'on-duty', busAssigned: 'B-001', rating: 4.5 },
-  { id: '2', name: 'Ahmed Khan', contact: '+92 300 7654321', status: 'online', busAssigned: 'B-003', rating: 4.2 },
-  { id: '3', name: 'Sara Ali', contact: '+92 300 9876543', status: 'offline', busAssigned: undefined, rating: 4.8 },
-  { id: '4', name: 'Usman Khan', contact: '+92 300 4567890', status: 'on-duty', busAssigned: 'B-005', rating: 4.0 },
-];
-
-const mockTrips: Trip[] = [
-  { id: '1', time: '08:00 AM', route: 'Downtown Express', bus: 'B-001', driver: 'Ali Ahmed', status: 'on-time', passengers: 32 },
-  { id: '2', time: '09:30 AM', route: 'University Shuttle', bus: 'B-003', driver: 'Ahmed Khan', status: 'delayed', passengers: 28 },
-  { id: '3', time: '11:00 AM', route: 'Mall Route', bus: 'B-005', driver: 'Usman Khan', status: 'upcoming', passengers: 0 },
-  { id: '4', time: '02:00 PM', route: 'Airport Express', bus: 'B-002', driver: 'Sara Ali', status: 'completed', passengers: 40 },
-];
-
-const mockAlerts: AlertType[] = [
-  { id: '1', message: 'Bus B-005 maintenance due tomorrow', type: 'warning', timestamp: '2 hours ago' },
-  { id: '2', message: 'Driver Ahmed Khan completed 50 trips today', type: 'success', timestamp: '4 hours ago' },
-  { id: '3', message: 'Route R-003 delayed by 15 minutes', type: 'error', timestamp: '1 hour ago' },
-  { id: '4', message: 'Monthly revenue target achieved', type: 'success', timestamp: '1 day ago' },
+// Quick Actions Data
+const QUICK_ACTIONS = [
+  { id: 'addBus', icon: '🚌', label: 'Add Bus', color: COLORS.secondary, action: 'Add Bus' },
+  { id: 'addDriver', icon: '👤', label: 'Add Driver', color: COLORS.success, action: 'Add Driver' },
+  { id: 'schedule', icon: '📅', label: 'Schedule', color: COLORS.warning, action: 'Schedule Trip' },
+  { id: 'announce', icon: '📢', label: 'Announce', color: COLORS.purple, action: 'Send Announcement' },
+  { id: 'report', icon: '📊', label: 'Report', color: COLORS.grey, action: 'Generate Report' },
 ];
 
 const DashboardScreen = () => {
-  const navigation = useNavigation();
+  const navigation = useNavigation<DashboardScreenNavigationProp>();
+  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [announceModalVisible, setAnnounceModalVisible] = useState(false);
   const [announcementText, setAnnouncementText] = useState('');
+  const [transporterName, setTransporterName] = useState('');
 
-  const [stats, setStats] = useState({
+  // Data states
+  const [stats, setStats] = useState<DashboardStats>({
     totalBuses: 0,
     activeBuses: 0,
+    maintenanceBuses: 0,
+    inactiveBuses: 0,
+    totalDrivers: 0,
     activeDrivers: 0,
+    onlineDrivers: 0,
+    offlineDrivers: 0,
     todayRevenue: 0,
     todayTrips: 0,
+    completedTrips: 0,
+    delayedTrips: 0,
+    upcomingTrips: 0,
     onTimePerformance: 0,
+    averageRating: 0,
   });
 
-  const [notifications, setNotifications] = useState<Notification[]>([
-    { id: '1', type: 'maintenance', message: 'Bus B-005 maintenance due tomorrow', time: '2 hours ago', read: false },
-    { id: '2', type: 'success', message: 'Driver Ahmed Khan completed 50 trips', time: '4 hours ago', read: false },
-    { id: '3', type: 'warning', message: 'Route R-003 delayed by 15 minutes', time: '1 hour ago', read: true },
-    { id: '4', type: 'info', message: 'Monthly revenue target achieved', time: '1 day ago', read: true },
-    { id: '5', type: 'emergency', message: 'Bus B-001 needs immediate attention', time: '30 mins ago', read: false },
-  ]);
+  const [recentTrips, setRecentTrips] = useState<Trip[]>([]);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [alerts, setAlerts] = useState<AlertType[]>([]);
+  const [liveStats, setLiveStats] = useState({
+    activeTrips: 0,
+    delayedTrips: 0,
+    upcomingTrips: 0,
+    todayRevenue: 0,
+  });
 
-  useEffect(() => {
-    calculateStats();
+  const user = auth().currentUser;
+
+  // Helper functions (memoized)
+  const formatTime = useCallback((date: Date) => {
+    return date.toLocaleTimeString('en-PK', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    });
   }, []);
 
-  const calculateStats = () => {
-    const totalBuses = mockBuses.length;
-    const activeBuses = mockBuses.filter(bus => bus.status === 'active').length;
-    const activeDrivers = mockDrivers.filter(driver => driver.status === 'online' || driver.status === 'on-duty').length;
-    const todayTrips = mockTrips.length;
-    const onTimeTrips = mockTrips.filter(trip => trip.status === 'on-time').length;
+  const formatCurrency = useCallback((amount: number) => {
+    return `PKR ${amount.toLocaleString('en-PK')}`;
+  }, []);
 
-    setStats({
-      totalBuses,
-      activeBuses,
-      activeDrivers,
-      todayRevenue: 125000,
-      todayTrips,
-      onTimePerformance: todayTrips > 0 ? Math.round((onTimeTrips / todayTrips) * 100) : 0,
-    });
+  const getTimeAgo = useCallback((date: Date) => {
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMins / 60);
+    const diffDays = Math.floor(diffHours / 24);
+
+    if (diffMins < 1) return 'just now';
+    if (diffMins < 60) return `${diffMins} min ago`;
+    if (diffHours < 24) return `${diffHours} hour ago`;
+    return `${diffDays} day ago`;
+  }, []);
+
+  const getStatusIcon = useCallback((status: string) => {
+    switch (status) {
+      case 'active':
+      case 'on-time':
+        return '🟢';
+      case 'maintenance':
+      case 'delayed':
+        return '🟡';
+      case 'inactive':
+      case 'completed':
+        return '🔵';
+      case 'upcoming':
+        return '⚪';
+      default:
+        return '⚫';
+    }
+  }, []);
+
+  const getStatusColor = useCallback((status: string) => {
+    switch (status) {
+      case 'active':
+      case 'on-time':
+        return COLORS.success;
+      case 'maintenance':
+      case 'delayed':
+        return COLORS.warning;
+      case 'inactive':
+      case 'completed':
+        return COLORS.info;
+      case 'upcoming':
+        return COLORS.purple;
+      default:
+        return COLORS.textLight;
+    }
+  }, []);
+
+  // Fetch transporter name
+  useEffect(() => {
+    if (!user) return;
+
+    const unsubscribe = firestore()
+      .collection('users')
+      .doc(user.uid)
+      .onSnapshot(
+        (doc) => {
+          if (doc.exists) {
+            const data = doc.data();
+            setTransporterName(data?.fullName || data?.name || 'Transporter');
+          }
+        },
+        (error) => {
+          console.error('Error fetching user data:', error);
+        }
+      );
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // Setup all listeners
+  useEffect(() => {
+    if (!user) return;
+
+    setLoading(true);
+
+    const unsubscribers = [
+      setupBusesListener(),
+      setupDriversListener(),
+      setupTripsListener(),
+      setupNotificationsListener(),
+      setupAlertsListener(),
+    ];
+
+    return () => {
+      unsubscribers.forEach(unsubscribe => unsubscribe());
+    };
+  }, [user]);
+
+  // Listener functions
+  const setupBusesListener = () => {
+    if (!user) return () => {};
+
+    return firestore()
+      .collection('buses')
+      .where('transporterId', '==', user.uid)
+      .onSnapshot(
+        (snapshot) => {
+          const buses = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+          })) as Bus[];
+
+          setStats(prev => ({
+            ...prev,
+            totalBuses: buses.length,
+            activeBuses: buses.filter(b => b.status === 'active').length,
+            maintenanceBuses: buses.filter(b => b.status === 'maintenance').length,
+            inactiveBuses: buses.filter(b => b.status === 'inactive').length,
+          }));
+        },
+        (error) => console.error('Buses listener error:', error)
+      );
   };
 
-  const onRefresh = () => {
+  const setupDriversListener = () => {
+    if (!user) return () => {};
+
+    return firestore()
+      .collection('drivers')
+      .where('transporterId', '==', user.uid)
+      .onSnapshot(
+        (snapshot) => {
+          const drivers = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+          })) as Driver[];
+
+          const avgRating = drivers.length > 0
+            ? drivers.reduce((sum, d) => sum + (d.rating || 0), 0) / drivers.length
+            : 0;
+
+          setStats(prev => ({
+            ...prev,
+            totalDrivers: drivers.length,
+            activeDrivers: drivers.filter(d => d.status === 'on-duty').length,
+            onlineDrivers: drivers.filter(d => d.status === 'online').length,
+            offlineDrivers: drivers.filter(d => d.status === 'offline').length,
+            averageRating: Math.round(avgRating * 10) / 10,
+          }));
+        },
+        (error) => console.error('Drivers listener error:', error)
+      );
+  };
+
+  const setupTripsListener = () => {
+    if (!user) return () => {};
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    return firestore()
+      .collection('trips')
+      .where('transporterId', '==', user.uid)
+      .where('date', '>=', today)
+      .where('date', '<', tomorrow)
+      .orderBy('date', 'asc')
+      .onSnapshot(
+        (snapshot) => {
+          const trips = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data(),
+          })) as Trip[];
+
+          // Sort trips for display
+          const sortedTrips = [...trips].sort((a, b) => {
+            if (a.status === 'upcoming' && b.status !== 'upcoming') return -1;
+            if (a.status !== 'upcoming' && b.status === 'upcoming') return 1;
+            const timeA = a.time?.toDate?.() || new Date();
+            const timeB = b.time?.toDate?.() || new Date();
+            return timeA.getTime() - timeB.getTime();
+          });
+
+          setRecentTrips(sortedTrips.slice(0, 5));
+
+          // Calculate stats
+          const todayTrips = trips.length;
+          const completedTrips = trips.filter(t => t.status === 'completed').length;
+          const delayedTrips = trips.filter(t => t.status === 'delayed').length;
+          const upcomingTrips = trips.filter(t => t.status === 'upcoming').length;
+          const onTimeTrips = trips.filter(t => t.status === 'on-time').length;
+          const todayRevenue = trips.reduce((sum, t) => sum + (t.revenue || 0), 0);
+          const activeTrips = trips.filter(t =>
+            t.status === 'on-time' || t.status === 'delayed'
+          ).length;
+
+          setStats(prev => ({
+            ...prev,
+            todayTrips,
+            completedTrips,
+            delayedTrips,
+            upcomingTrips,
+            todayRevenue,
+            onTimePerformance: todayTrips > 0
+              ? Math.round(((onTimeTrips + completedTrips) / todayTrips) * 100)
+              : 0,
+          }));
+
+          setLiveStats({
+            activeTrips,
+            delayedTrips,
+            upcomingTrips,
+            todayRevenue,
+          });
+
+          setLoading(false);
+        },
+        (error) => {
+          console.error('Trips listener error:', error);
+          setLoading(false);
+        }
+      );
+  };
+
+  const setupNotificationsListener = () => {
+    if (!user) return () => {};
+
+    return firestore()
+      .collection('notifications')
+      .where('transporterId', '==', user.uid)
+      .orderBy('time', 'desc')
+      .limit(20)
+      .onSnapshot(
+        (snapshot) => {
+          const notifs = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data(),
+          })) as Notification[];
+          setNotifications(notifs);
+        },
+        (error) => console.error('Notifications listener error:', error)
+      );
+  };
+
+  const setupAlertsListener = () => {
+    if (!user) return () => {};
+
+    return firestore()
+      .collection('alerts')
+      .where('transporterId', '==', user.uid)
+      .where('acknowledged', '==', false)
+      .orderBy('timestamp', 'desc')
+      .limit(10)
+      .onSnapshot(
+        (snapshot) => {
+          const alertsList = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data(),
+          })) as AlertType[];
+          setAlerts(alertsList);
+        },
+        (error) => console.error('Alerts listener error:', error)
+      );
+  };
+
+  // Manual refresh (re-fetch)
+  const onRefresh = useCallback(() => {
     setRefreshing(true);
-    setTimeout(() => {
-      calculateStats();
-      setRefreshing(false);
-      Alert.alert('Refreshed', 'Dashboard data updated');
-    }, 1000);
-  };
+    // Listeners automatically update, just add small delay for UX
+    setTimeout(() => setRefreshing(false), 1000);
+  }, []);
 
-  // QUICK ACTIONS FUNCTIONS
-  const handleQuickAction = (action: string) => {
-    switch(action) {
+  // Quick Actions
+  const handleQuickAction = useCallback((action: string) => {
+    switch (action) {
       case 'Add Bus':
-        navigation.navigate('Fleet', {
-            screen: 'FleetList',
-            params: {
-              openAddBus: true
-            }
-          })
+        navigation.navigate('Fleet', { screen: 'AddBus' });
         break;
-
       case 'Add Driver':
-        navigation.navigate('Drivers', {
-            screen: 'DriverList',
-            params: { openAddDriver: true }
-          })
+        navigation.navigate('Drivers', { screen: 'AddDriver' });
         break;
-
       case 'Schedule Trip':
-        navigation.navigate('Operations', {
-          screen: 'ScheduleTripScreen',
-          params: { mode: 'add' }
-        });
+        navigation.navigate('Operations', { screen: 'ScheduleTrip' });
         break;
-
       case 'Send Announcement':
         setAnnounceModalVisible(true);
         break;
-
       case 'Generate Report':
         navigation.navigate('ReportsProfile');
         break;
-
       default:
         Alert.alert('Coming Soon', 'This feature will be available soon');
     }
-  };
+  }, [navigation]);
 
-  // NOTIFICATIONS FUNCTIONS
-  const handleNotificationPress = (notificationId: string) => {
-    setNotifications(notifications.map(notif =>
-      notif.id === notificationId ? { ...notif, read: true } : notif
-    ));
-
-    const notification = notifications.find(n => n.id === notificationId);
-    if (notification) {
-      Alert.alert(
-        'Notification',
-        notification.message,
-        [
-          { text: 'OK', style: 'default' },
-          { text: 'View Details', onPress: () => handleNotificationAction(notification.type, notification.message) }
-        ]
-      );
-    }
-  };
-
-  const handleNotificationAction = (type: string, message: string) => {
-    switch(type) {
-      case 'maintenance':
-        Alert.alert('Maintenance', 'Redirecting to Fleet Management...');
-        break;
-      case 'warning':
-        Alert.alert('Delay Alert', 'Redirecting to Operations...');
-        break;
-      case 'emergency':
-        Alert.alert('EMERGENCY', 'Calling driver immediately...');
-        break;
-      default:
-        Alert.alert('Notification', message);
-    }
-  };
-
-  const handleDismissAlert = (notificationId: string) => {
-    setNotifications(notifications.filter(n => n.id !== notificationId));
-    Alert.alert('Dismissed', 'Alert removed from list');
-  };
-
-  const markAllAsRead = () => {
-    setNotifications(notifications.map(notif => ({ ...notif, read: true })));
-    Alert.alert('Success', 'All notifications marked as read');
-  };
-
-  const unreadCount = notifications.filter(n => !n.read).length;
-
-  // ANNOUNCEMENT FUNCTION
-  const handleSendAnnouncement = () => {
+  // Send Announcement
+  const handleSendAnnouncement = useCallback(async () => {
     if (!announcementText.trim()) {
       Alert.alert('Error', 'Please enter announcement text');
       return;
     }
 
-    Alert.alert(
-      'Confirm Announcement',
-      `Send this announcement to all drivers?\n\n"${announcementText}"`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Send',
-          onPress: () => {
-            Alert.alert('Success', 'Announcement sent to all drivers');
-            setAnnouncementText('');
-            setAnnounceModalVisible(false);
-          }
+    if (!user) return;
+
+    try {
+      const driversSnapshot = await firestore()
+        .collection('drivers')
+        .where('transporterId', '==', user.uid)
+        .get();
+
+      const batch = firestore().batch();
+      const timestamp = firestore.FieldValue.serverTimestamp();
+
+      driversSnapshot.docs.forEach((driverDoc) => {
+        const notificationRef = firestore().collection('notifications').doc();
+        batch.set(notificationRef, {
+          driverId: driverDoc.id,
+          transporterId: user.uid,
+          type: 'info',
+          title: 'New Announcement',
+          message: announcementText,
+          time: timestamp,
+          read: false,
+          actionRequired: false,
+        });
+      });
+
+      const announcementRef = firestore().collection('announcements').doc();
+      batch.set(announcementRef, {
+        transporterId: user.uid,
+        message: announcementText,
+        sentTo: driversSnapshot.size,
+        time: timestamp,
+      });
+
+      await batch.commit();
+
+      Alert.alert('Success', `Announcement sent to ${driversSnapshot.size} drivers`);
+      setAnnouncementText('');
+      setAnnounceModalVisible(false);
+    } catch (error) {
+      console.error('Error sending announcement:', error);
+      Alert.alert('Error', 'Failed to send announcement. Please try again.');
+    }
+  }, [user, announcementText]);
+
+  // Notification handlers
+  const handleNotificationPress = useCallback(async (notification: Notification) => {
+    if (!notification.read) {
+      try {
+        await firestore()
+          .collection('notifications')
+          .doc(notification.id)
+          .update({ read: true });
+
+        setNotifications(prev =>
+          prev.map(n => n.id === notification.id ? { ...n, read: true } : n)
+        );
+      } catch (error) {
+        console.error('Error marking notification as read:', error);
+      }
+    }
+
+    // Handle navigation based on type
+    switch (notification.type) {
+      case 'maintenance':
+        if (notification.busId) {
+          navigation.navigate('Fleet', {
+            screen: 'BusDetails',
+            params: { busId: notification.busId },
+          });
         }
-      ]
-    );
-  };
-
-  // VIEW ALL TRIPS FUNCTION
-  const handleViewAllTrips = () => {
-    navigation.navigate('Operations', {
-      initial: false,
-      screen: 'Schedule'
-    });
-  };
-
-  const getStatusIcon = (status: string) => {
-    switch(status) {
-      case 'active': case 'on-time': return '🟢';
-      case 'maintenance': case 'delayed': return '🟡';
-      case 'inactive': case 'completed': return '🔵';
-      case 'upcoming': return '⚪';
-      default: return '⚫';
-    }
-  };
-
-  const getStatusColor = (status: string) => {
-    switch(status) {
-      case 'active': case 'on-time': return '#4CAF50';
-      case 'maintenance': case 'delayed': return '#FF9800';
-      case 'inactive': case 'completed': return '#2196F3';
-      case 'upcoming': return '#9C27B0';
-      default: return '#666666';
-    }
-  };
-
-  const handleAlertAction = (alertType: string, alertMessage: string) => {
-    switch(alertType) {
-      case 'warning':
-        Alert.alert(
-          'Maintenance Required',
-          'What would you like to do?',
-          [
-            { text: 'Cancel', style: 'cancel' },
-            { text: 'Schedule Maintenance', onPress: () => {
-              Alert.alert('Scheduled', 'Maintenance scheduled for tomorrow.');
-            }},
-            { text: 'Contact Mechanic', onPress: () => {
-              Alert.alert('Contact', 'Calling mechanic...');
-            }}
-          ]
-        );
         break;
-
-      case 'error':
-        Alert.alert(
-          'Emergency Action',
-          'Immediate attention required!',
-          [
-            { text: 'Call Driver', onPress: () => {
-              Alert.alert('Calling', 'Calling driver...');
-            }},
-            { text: 'Send Replacement', onPress: () => {
-              Alert.alert('Replacement', 'Replacement bus dispatched.');
-            }},
-            { text: 'Notify Passengers', onPress: () => {
-              Alert.alert('Notification', 'Passengers notified about delay.');
-            }}
-          ]
-        );
+      case 'emergency':
+        Alert.alert('Emergency Alert', notification.message, [
+          { text: 'Call Driver', onPress: () => Alert.alert('Calling', 'Driver notified') },
+          { text: 'View Details', onPress: () => console.log('View details') },
+        ]);
         break;
-
-      case 'success':
-        Alert.alert(
-          'Success Action',
-          'Great job!',
-          [
-            { text: 'Send Bonus', onPress: () => {
-              Alert.alert('Bonus', 'Bonus sent to driver.');
-            }},
-            { text: 'Share Achievement', onPress: () => {
-              Alert.alert('Shared', 'Achievement shared with team.');
-            }}
-          ]
-        );
-        break;
-
       default:
-        Alert.alert('Info', alertMessage);
+        Alert.alert(notification.title, notification.message);
     }
-  };
+  }, [navigation]);
+
+  const markAllAsRead = useCallback(async () => {
+    if (!user) return;
+
+    try {
+      const batch = firestore().batch();
+      notifications
+        .filter(n => !n.read)
+        .forEach(notification => {
+          const ref = firestore().collection('notifications').doc(notification.id);
+          batch.update(ref, { read: true });
+        });
+
+      await batch.commit();
+      setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+      Alert.alert('Success', 'All notifications marked as read');
+    } catch (error) {
+      console.error('Error marking all as read:', error);
+    }
+  }, [user, notifications]);
+
+  const handleDismissNotification = useCallback(async (notificationId: string) => {
+    try {
+      await firestore()
+        .collection('notifications')
+        .doc(notificationId)
+        .delete();
+
+      setNotifications(prev => prev.filter(n => n.id !== notificationId));
+    } catch (error) {
+      console.error('Error dismissing notification:', error);
+    }
+  }, []);
+
+  // Alert handlers
+  const handleAlertPress = useCallback(async (alert: AlertType) => {
+    try {
+      await firestore()
+        .collection('alerts')
+        .doc(alert.id)
+        .update({ acknowledged: true });
+
+      setAlerts(prev => prev.filter(a => a.id !== alert.id));
+    } catch (error) {
+      console.error('Error acknowledging alert:', error);
+    }
+
+    // Handle alert action
+    switch (alert.type) {
+      case 'warning':
+        Alert.alert('Maintenance Required', alert.message, [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Schedule Maintenance',
+            onPress: () => navigation.navigate('Fleet', { screen: 'Maintenance' }),
+          },
+        ]);
+        break;
+      case 'error':
+        Alert.alert('Emergency Action Required', alert.message, [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Send Replacement',
+            onPress: () => Alert.alert('Replacement', 'Replacement bus dispatched'),
+          },
+        ]);
+        break;
+      default:
+        Alert.alert('Info', alert.message);
+    }
+  }, [navigation]);
+
+  // Render functions for FlatList
+  const renderHeader = () => (
+    <>
+      {/* Header */}
+      <View style={styles.header}>
+        <View>
+          <Text style={styles.companyName}>ZUGO Transport</Text>
+          <Text style={styles.companySubtitle}>{transporterName}</Text>
+        </View>
+        <TouchableOpacity
+          style={styles.notificationButton}
+          onPress={() => setShowNotifications(true)}
+        >
+          <Text style={styles.notificationIcon}>🔔</Text>
+          {notifications.filter(n => !n.read).length > 0 && (
+            <View style={styles.notificationBadge}>
+              <Text style={styles.notificationBadgeText}>
+                {notifications.filter(n => !n.read).length}
+              </Text>
+            </View>
+          )}
+        </TouchableOpacity>
+      </View>
+
+      {/* Quick Stats */}
+      <Text style={styles.sectionTitle}>📊 Business Overview</Text>
+      <View style={styles.statsContainer}>
+        <StatCard
+          icon="🚌"
+          value={stats.totalBuses}
+          label="Total Buses"
+          subLabel={`${stats.activeBuses} active • ${stats.maintenanceBuses} maintenance`}
+          color={COLORS.secondary}
+        />
+        <StatCard
+          icon="👤"
+          value={stats.activeDrivers}
+          label="On Duty"
+          subLabel={`${stats.onlineDrivers} online • ${stats.totalDrivers} total`}
+          color={COLORS.success}
+        />
+        <StatCard
+          icon="💰"
+          value={formatCurrency(stats.todayRevenue).replace('PKR ', '')}
+          label="Today's Revenue"
+          subLabel={`${stats.todayTrips} trips today`}
+          color={COLORS.warning}
+        />
+        <StatCard
+          icon="⭐"
+          value={`${stats.onTimePerformance}%`}
+          label="On-time"
+          subLabel={`${stats.averageRating} avg rating`}
+          color={COLORS.purple}
+        />
+      </View>
+
+      {/* Quick Actions */}
+      <Text style={styles.sectionTitle}>⚡ Quick Actions</Text>
+      <View style={styles.actionsContainer}>
+        {QUICK_ACTIONS.map((action) => (
+          <TouchableOpacity
+            key={action.id}
+            style={[styles.actionButton, { backgroundColor: action.color }]}
+            onPress={() => handleQuickAction(action.action)}
+          >
+            <Text style={styles.actionIcon}>{action.icon}</Text>
+            <Text style={styles.actionText}>{action.label}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      {/* Today's Trips Title */}
+      <Text style={styles.sectionTitle}>📅 Today's Operations</Text>
+    </>
+  );
+
+  const renderTripItem = ({ item }: { item: Trip }) => (
+    <TripCard
+      trip={item}
+      onPress={() => navigation.navigate('Operations', {
+        screen: 'TripDetails',
+        params: { tripId: item.id }
+      })}
+      formatTime={formatTime}
+      formatCurrency={formatCurrency}
+      getStatusColor={getStatusColor}
+      getStatusIcon={getStatusIcon}
+    />
+  );
+
+  const renderFooter = () => (
+    <>
+      {/* View All Trips Button */}
+      <TouchableOpacity
+        style={styles.viewAllButton}
+        onPress={() => navigation.navigate('Operations', { screen: 'TripsList' })}
+      >
+        <Text style={styles.viewAllText}>View All Trips →</Text>
+      </TouchableOpacity>
+
+      {/* Alerts */}
+      {alerts.length > 0 && (
+        <>
+          <Text style={styles.sectionTitle}>🔔 Active Alerts</Text>
+          <View style={styles.alertsContainer}>
+            {alerts.map((alert) => {
+              const alertTime = alert.timestamp?.toDate
+                ? alert.timestamp.toDate()
+                : new Date(alert.timestamp);
+
+              return (
+                <TouchableOpacity
+                  key={alert.id}
+                  style={[styles.alertCard, SHADOWS.small]}
+                  onPress={() => handleAlertPress(alert)}
+                >
+                  <Text style={[
+                    styles.alertIcon,
+                    alert.type === 'success' && styles.successIcon,
+                    alert.type === 'warning' && styles.warningIcon,
+                    alert.type === 'error' && styles.errorIcon,
+                    alert.type === 'info' && styles.infoIcon,
+                  ]}>
+                    {alert.type === 'success' ? '✅' :
+                     alert.type === 'warning' ? '⚠️' :
+                     alert.type === 'error' ? '❌' : 'ℹ️'}
+                  </Text>
+                  <View style={styles.alertContent}>
+                    <Text style={styles.alertMessage}>{alert.message}</Text>
+                    <Text style={styles.alertTime}>{getTimeAgo(alertTime)}</Text>
+                  </View>
+                  <Text style={styles.alertAction}>Tap to handle →</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </>
+      )}
+
+      {/* Live Stats */}
+      <Text style={styles.sectionTitle}>📈 Live Statistics</Text>
+      <View style={styles.liveStatsContainer}>
+        <View style={[styles.liveStat, SHADOWS.small]}>
+          <Text style={styles.liveStatValue}>{liveStats.activeTrips}</Text>
+          <Text style={styles.liveStatLabel}>Active Trips</Text>
+        </View>
+        <View style={[styles.liveStat, SHADOWS.small]}>
+          <Text style={styles.liveStatValue}>{liveStats.delayedTrips}</Text>
+          <Text style={styles.liveStatLabel}>Delayed</Text>
+        </View>
+        <View style={[styles.liveStat, SHADOWS.small]}>
+          <Text style={styles.liveStatValue}>{liveStats.upcomingTrips}</Text>
+          <Text style={styles.liveStatLabel}>Upcoming</Text>
+        </View>
+        <View style={[styles.liveStat, SHADOWS.small]}>
+          <Text style={styles.liveStatValue}>
+            {formatCurrency(liveStats.todayRevenue).replace('PKR ', '')}
+          </Text>
+          <Text style={styles.liveStatLabel}>Revenue</Text>
+        </View>
+      </View>
+    </>
+  );
+
+  const renderEmptyTrips = () => (
+    <View style={styles.emptyContainer}>
+      <Text style={styles.emptyText}>No trips scheduled for today</Text>
+    </View>
+  );
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color={COLORS.primary} />
+        <Text style={styles.loadingText}>Loading Dashboard...</Text>
+      </View>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView
-        showsVerticalScrollIndicator={false}
+      <FlatList
+        data={recentTrips}
+        renderItem={renderTripItem}
+        keyExtractor={(item) => item.id}
+        ListHeaderComponent={renderHeader}
+        ListFooterComponent={renderFooter}
+        ListEmptyComponent={renderEmptyTrips}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
-      >
-        {/* Header */}
-        <View style={styles.header}>
-          <View>
-            <Text style={styles.companyName}>City Transport Co.</Text>
-            <Text style={styles.companySubtitle}>Transporter Dashboard</Text>
-          </View>
-          <TouchableOpacity
-            style={styles.notificationButton}
-            onPress={() => setShowNotifications(!showNotifications)}
-          >
-            <Text style={styles.notificationIcon}>🔔</Text>
-            {unreadCount > 0 && (
-              <View style={styles.notificationBadge}>
-                <Text style={styles.notificationBadgeText}>{unreadCount}</Text>
-              </View>
-            )}
-          </TouchableOpacity>
-        </View>
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.listContent}
+      />
 
-        {/* Notifications Dropdown Modal */}
-        {showNotifications && (
-          <View style={styles.notificationsDropdown}>
-            <View style={styles.notificationsHeader}>
-              <Text style={styles.notificationsTitle}>Notifications</Text>
-              <TouchableOpacity onPress={markAllAsRead}>
-                <Text style={styles.markAllReadText}>Mark all read</Text>
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView style={styles.notificationsList}>
-              {notifications.map(notification => (
-                <TouchableOpacity
-                  key={notification.id}
-                  style={[
-                    styles.notificationItem,
-                    !notification.read && styles.unreadNotification
-                  ]}
-                  onPress={() => handleNotificationPress(notification.id)}
-                >
-                  <View style={styles.notificationContent}>
-                    <Text style={styles.notificationMessage}>{notification.message}</Text>
-                    <Text style={styles.notificationTime}>{notification.time}</Text>
-                  </View>
-                  {!notification.read && <View style={styles.unreadDot} />}
-                  <TouchableOpacity
-                    style={styles.dismissButton}
-                    onPress={() => handleDismissAlert(notification.id)}
-                  >
-                    <Text style={styles.dismissText}>×</Text>
-                  </TouchableOpacity>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-
-            <TouchableOpacity
-              style={styles.viewAllNotifications}
-              onPress={() => {
-                setShowNotifications(false);
-                navigation.navigate('Dashboard', {
-                  screen: 'Notifications'
-                });
-              }}
-            >
-              <Text style={styles.viewAllText}>View All Notifications →</Text>
-            </TouchableOpacity>
-
-          </View>
-        )}
-
-        {/* Quick Stats */}
-        <Text style={styles.sectionTitle}>📊 Business Overview</Text>
-        <View style={styles.statsContainer}>
-          <View style={styles.statCard}>
-            <Text style={[styles.statIcon, { color: '#4A90E2' }]}>🚌</Text>
-            <Text style={styles.statValue}>{stats.totalBuses}</Text>
-            <Text style={styles.statLabel}>Total Buses</Text>
-            <Text style={styles.statSubLabel}>{stats.activeBuses} active</Text>
-          </View>
-
-          <View style={styles.statCard}>
-            <Text style={[styles.statIcon, { color: '#4CAF50' }]}>👤</Text>
-            <Text style={styles.statValue}>{stats.activeDrivers}</Text>
-            <Text style={styles.statLabel}>Active Drivers</Text>
-            <Text style={styles.statSubLabel}>Online/On-duty</Text>
-          </View>
-
-          <View style={styles.statCard}>
-            <Text style={[styles.statIcon, { color: '#FF9800' }]}>💰</Text>
-            <Text style={styles.statValue}>₹{stats.todayRevenue.toLocaleString()}</Text>
-            <Text style={styles.statLabel}>Today's Revenue</Text>
-            <Text style={styles.statSubLabel}>+12% from yesterday</Text>
-          </View>
-
-          <View style={styles.statCard}>
-            <Text style={[styles.statIcon, { color: '#9C27B0' }]}>📊</Text>
-            <Text style={styles.statValue}>{stats.onTimePerformance}%</Text>
-            <Text style={styles.statLabel}>On-time</Text>
-            <Text style={styles.statSubLabel}>Performance</Text>
-          </View>
-        </View>
-
-        {/* Quick Actions */}
-        <Text style={styles.sectionTitle}>⚡ Quick Actions</Text>
-        <View style={styles.actionsContainer}>
-          <TouchableOpacity
-            style={[styles.actionButton, { backgroundColor: '#4A90E2' }]}
-            onPress={() => handleQuickAction('Add Bus')}
-          >
-            <Text style={styles.actionIcon}>🚌</Text>
-            <Text style={styles.actionText}>Add Bus</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.actionButton, { backgroundColor: '#4CAF50' }]}
-            onPress={() => handleQuickAction('Add Driver')}
-          >
-            <Text style={styles.actionIcon}>👤</Text>
-            <Text style={styles.actionText}>Add Driver</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.actionButton, { backgroundColor: '#FF9800' }]}
-            onPress={() => handleQuickAction('Schedule Trip')}
-          >
-            <Text style={styles.actionIcon}>📅</Text>
-            <Text style={styles.actionText}>Schedule Trip</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.actionButton, { backgroundColor: '#9C27B0' }]}
-            onPress={() => handleQuickAction('Send Announcement')}
-          >
-            <Text style={styles.actionIcon}>📢</Text>
-            <Text style={styles.actionText}>Announce</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.actionButton, { backgroundColor: '#607D8B' }]}
-            onPress={() => handleQuickAction('Generate Report')}
-          >
-            <Text style={styles.actionIcon}>📊</Text>
-            <Text style={styles.actionText}>Report</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Today's Trips */}
-        <Text style={styles.sectionTitle}>📅 Today's Operations</Text>
-        <View style={styles.tripsContainer}>
-          {mockTrips.slice(0, 3).map((trip) => (
-            <View key={trip.id} style={styles.tripCard}>
-              <View style={styles.tripHeader}>
-                <Text style={styles.tripTime}>{trip.time}</Text>
-                <View style={[styles.statusBadge, { backgroundColor: getStatusColor(trip.status) }]}>
-                  <Text style={styles.statusBadgeText}>
-                    {getStatusIcon(trip.status)} {trip.status}
-                  </Text>
-                </View>
-              </View>
-              <Text style={styles.tripRoute}>{trip.route}</Text>
-              <View style={styles.tripDetails}>
-                <Text style={styles.tripDetail}>🚌 {trip.bus}</Text>
-                <Text style={styles.tripDetail}>👤 {trip.driver}</Text>
-                <Text style={styles.tripDetail}>👥 {trip.passengers} passengers</Text>
-              </View>
-            </View>
-          ))}
-          <TouchableOpacity
-            style={styles.viewAllButton}
-            onPress={handleViewAllTrips}
-          >
-            <Text style={styles.viewAllText}>View All Trips →</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Recent Alerts */}
-        <Text style={styles.sectionTitle}>🔔 Recent Alerts</Text>
-        <View style={styles.alertsContainer}>
-          {mockAlerts.map((alert) => (
-            <TouchableOpacity
-              key={alert.id}
-              style={styles.alertCard}
-              onPress={() => handleAlertAction(alert.type, alert.message)}
-              activeOpacity={0.7}
-            >
-              <Text style={[
-                styles.alertIcon,
-                alert.type === 'success' && styles.successIcon,
-                alert.type === 'warning' && styles.warningIcon,
-                alert.type === 'error' && styles.errorIcon,
-                alert.type === 'info' && styles.infoIcon,
-              ]}>
-                {alert.type === 'success' ? '✅' :
-                 alert.type === 'warning' ? '⚠️' :
-                 alert.type === 'error' ? '❌' : 'ℹ️'}
-              </Text>
-              <View style={styles.alertContent}>
-                <Text style={styles.alertMessage}>{alert.message}</Text>
-                <Text style={styles.alertTimestamp}>{alert.timestamp}</Text>
-              </View>
-              <TouchableOpacity
-                style={styles.alertDismiss}
-                onPress={() => Alert.alert('Dismiss', 'This alert will be removed')}
-              >
-                <Text style={styles.alertDismissText}>×</Text>
-              </TouchableOpacity>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        {/* Live Stats */}
-        <Text style={styles.sectionTitle}>📈 Live Statistics</Text>
-        <View style={styles.liveStatsContainer}>
-          <View style={styles.liveStat}>
-            <Text style={styles.liveStatValue}>38</Text>
-            <Text style={styles.liveStatLabel}>Active Trips</Text>
-          </View>
-          <View style={styles.liveStat}>
-            <Text style={styles.liveStatValue}>5</Text>
-            <Text style={styles.liveStatLabel}>Delayed</Text>
-          </View>
-          <View style={styles.liveStat}>
-            <Text style={styles.liveStatValue}>12</Text>
-            <Text style={styles.liveStatLabel}>Upcoming</Text>
-          </View>
-          <View style={styles.liveStat}>
-            <Text style={styles.liveStatValue}>₹1.25L</Text>
-            <Text style={styles.liveStatLabel}>Today</Text>
-          </View>
-        </View>
-      </ScrollView>
+      {/* Notifications Dropdown */}
+      <NotificationDropdown
+        visible={showNotifications}
+        onClose={() => setShowNotifications(false)}
+        notifications={notifications}
+        unreadCount={notifications.filter(n => !n.read).length}
+        onNotificationPress={handleNotificationPress}
+        onDismiss={handleDismissNotification}
+        onMarkAllRead={markAllAsRead}
+        onViewAll={() => {
+          setShowNotifications(false);
+          navigation.navigate('Notifications');
+        }}
+        getTimeAgo={getTimeAgo}
+      />
 
       {/* Announcement Modal */}
       <Modal
@@ -584,14 +772,16 @@ const DashboardScreen = () => {
         }}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContainer}>
+          <View style={[styles.modalContainer, SHADOWS.large]}>
             <Text style={styles.modalTitle}>Send Announcement</Text>
-            <Text style={styles.modalSubtitle}>Message will be sent to all drivers</Text>
+            <Text style={styles.modalSubtitle}>
+              Message will be sent to all drivers
+            </Text>
 
             <TextInput
               style={styles.announcementInput}
               placeholder="Type your announcement here..."
-              placeholderTextColor="#999"
+              placeholderTextColor={COLORS.textLighter}
               value={announcementText}
               onChangeText={setAnnouncementText}
               multiline
@@ -613,7 +803,7 @@ const DashboardScreen = () => {
                 style={[styles.modalButton, styles.sendButton]}
                 onPress={handleSendAnnouncement}
               >
-                <Text style={styles.sendButtonText}>Send Announcement</Text>
+                <Text style={styles.sendButtonText}>Send to All Drivers</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -626,39 +816,53 @@ const DashboardScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F8F9FA',
+    backgroundColor: COLORS.background,
+  },
+  listContent: {
+    paddingBottom: SIZES.xxxl,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: COLORS.background,
+  },
+  loadingText: {
+    marginTop: SIZES.sm,
+    fontSize: FONTS.medium,
+    color: COLORS.primary,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 20,
-    backgroundColor: '#1A237E',
+    paddingHorizontal: SIZES.md,
+    paddingVertical: SIZES.lg,
+    backgroundColor: COLORS.primary,
   },
   companyName: {
-    fontSize: 20,
+    fontSize: FONTS.xlarge,
     fontWeight: '700',
-    color: '#FFFFFF',
+    color: COLORS.white,
   },
   companySubtitle: {
-    fontSize: 14,
-    color: '#E0E0E0',
+    fontSize: FONTS.regular,
+    color: COLORS.greyLight,
     marginTop: 2,
   },
   notificationButton: {
     position: 'relative',
-    padding: 8,
+    padding: SIZES.xs,
   },
   notificationIcon: {
     fontSize: 24,
-    color: '#FFFFFF',
+    color: COLORS.white,
   },
   notificationBadge: {
     position: 'absolute',
-    top: 4,
-    right: 4,
-    backgroundColor: '#F44336',
+    top: 0,
+    right: 0,
+    backgroundColor: COLORS.danger,
     borderRadius: 10,
     width: 20,
     height: 20,
@@ -666,302 +870,136 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   notificationBadgeText: {
-    color: '#FFFFFF',
+    color: COLORS.white,
     fontSize: 12,
     fontWeight: '600',
-  },
-  notificationsDropdown: {
-    position: 'absolute',
-    top: 70,
-    right: 16,
-    width: 320,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 8,
-    zIndex: 1000,
-    maxHeight: 400,
-  },
-  notificationsHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E0E0E0',
-  },
-  notificationsTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#1A237E',
-  },
-  markAllReadText: {
-    fontSize: 14,
-    color: '#4A90E2',
-    fontWeight: '600',
-  },
-  notificationsList: {
-    maxHeight: 300,
-  },
-  notificationItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
-  },
-  unreadNotification: {
-    backgroundColor: '#F0F7FF',
-  },
-  notificationContent: {
-    flex: 1,
-    marginRight: 12,
-  },
-  notificationMessage: {
-    fontSize: 14,
-    color: '#333333',
-    marginBottom: 4,
-  },
-  notificationTime: {
-    fontSize: 12,
-    color: '#999999',
-  },
-  unreadDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#4A90E2',
-  },
-  dismissButton: {
-    padding: 4,
-    marginLeft: 8,
-  },
-  dismissText: {
-    fontSize: 20,
-    color: '#999999',
-    fontWeight: 'bold',
-  },
-  viewAllNotifications: {
-    padding: 16,
-    alignItems: 'center',
-    borderTopWidth: 1,
-    borderTopColor: '#E0E0E0',
-  },
-  viewAllText: {
-    color: '#4A90E2',
-    fontWeight: '600',
-    fontSize: 14,
   },
   sectionTitle: {
-    fontSize: 18,
+    fontSize: FONTS.large,
     fontWeight: '600',
-    color: '#1A237E',
-    marginTop: 24,
-    marginBottom: 16,
-    marginLeft: 16,
+    color: COLORS.primary,
+    marginTop: SIZES.xl,
+    marginBottom: SIZES.md,
+    marginLeft: SIZES.md,
   },
   statsContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-  },
-  statCard: {
-    width: '48%',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 12,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  statIcon: {
-    fontSize: 32,
-    marginBottom: 8,
-  },
-  statValue: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#1A237E',
-    marginBottom: 4,
-  },
-  statLabel: {
-    fontSize: 14,
-    color: '#666666',
-    marginBottom: 2,
-  },
-  statSubLabel: {
-    fontSize: 12,
-    color: '#999999',
+    paddingHorizontal: SIZES.md,
   },
   actionsContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    marginBottom: 8,
+    paddingHorizontal: SIZES.md,
+    marginBottom: SIZES.xs,
   },
   actionButton: {
     width: '18%',
     aspectRatio: 1,
-    borderRadius: 16,
+    borderRadius: SIZES.md,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 4,
   },
   actionIcon: {
     fontSize: 24,
-    marginBottom: 8,
+    marginBottom: 4,
   },
   actionText: {
     fontSize: 10,
     fontWeight: '600',
-    color: '#FFFFFF',
+    color: COLORS.white,
     textAlign: 'center',
-  },
-  tripsContainer: {
-    paddingHorizontal: 16,
-  },
-  tripCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
-  },
-  tripHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  tripTime: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1A237E',
-  },
-  statusBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 20,
-  },
-  statusBadgeText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
-  tripRoute: {
-    fontSize: 14,
-    color: '#333333',
-    marginBottom: 12,
-  },
-  tripDetails: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  tripDetail: {
-    fontSize: 12,
-    color: '#666666',
   },
   viewAllButton: {
     alignItems: 'center',
-    paddingVertical: 12,
+    paddingVertical: SIZES.md,
+    marginBottom: SIZES.xs,
+  },
+  viewAllText: {
+    color: COLORS.secondary,
+    fontWeight: '600',
+    fontSize: FONTS.regular,
+  },
+  emptyContainer: {
+    padding: SIZES.xxxl,
+    alignItems: 'center',
+    backgroundColor: COLORS.white,
+    borderRadius: SIZES.md,
+    marginHorizontal: SIZES.md,
+  },
+  emptyText: {
+    color: COLORS.textLighter,
+    fontSize: FONTS.regular,
   },
   alertsContainer: {
-    paddingHorizontal: 16,
-    marginBottom: 16,
+    paddingHorizontal: SIZES.md,
+    marginBottom: SIZES.md,
   },
   alertCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
+    backgroundColor: COLORS.white,
+    borderRadius: SIZES.md,
+    padding: SIZES.sm,
+    marginBottom: SIZES.xs,
   },
   alertIcon: {
     fontSize: 20,
-    marginRight: 12,
+    marginRight: SIZES.sm,
   },
   successIcon: {
-    color: '#4CAF50',
+    color: COLORS.success,
   },
   warningIcon: {
-    color: '#FF9800',
+    color: COLORS.warning,
   },
   errorIcon: {
-    color: '#F44336',
+    color: COLORS.danger,
   },
   infoIcon: {
-    color: '#2196F3',
+    color: COLORS.info,
   },
   alertContent: {
     flex: 1,
   },
   alertMessage: {
-    fontSize: 14,
-    color: '#333333',
-    marginBottom: 4,
+    fontSize: FONTS.regular,
+    color: COLORS.text,
+    marginBottom: 2,
   },
-  alertTimestamp: {
+  alertTime: {
+    fontSize: 11,
+    color: COLORS.textLighter,
+  },
+  alertAction: {
     fontSize: 12,
-    color: '#999999',
-  },
-  alertDismiss: {
-    padding: 4,
-    marginLeft: 8,
-  },
-  alertDismissText: {
-    fontSize: 20,
-    color: '#999999',
-    fontWeight: '300',
+    color: COLORS.secondary,
+    fontWeight: '600',
+    marginLeft: SIZES.xs,
   },
   liveStatsContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    marginBottom: 30,
+    paddingHorizontal: SIZES.md,
+    marginBottom: SIZES.xxxl,
   },
   liveStat: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 16,
+    backgroundColor: COLORS.white,
+    borderRadius: SIZES.md,
+    padding: SIZES.sm,
     width: '23%',
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
   },
   liveStatValue: {
-    fontSize: 18,
+    fontSize: FONTS.large,
     fontWeight: '700',
-    color: '#1A237E',
-    marginBottom: 4,
+    color: COLORS.primary,
+    marginBottom: 2,
   },
   liveStatLabel: {
-    fontSize: 12,
-    color: '#666666',
+    fontSize: 10,
+    color: COLORS.textLight,
     textAlign: 'center',
   },
   modalOverlay: {
@@ -972,36 +1010,31 @@ const styles = StyleSheet.create({
   },
   modalContainer: {
     width: '90%',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
+    backgroundColor: COLORS.white,
+    borderRadius: SIZES.md,
+    padding: SIZES.lg,
   },
   modalTitle: {
-    fontSize: 20,
+    fontSize: FONTS.xlarge,
     fontWeight: '700',
-    color: '#1A237E',
-    marginBottom: 4,
+    color: COLORS.primary,
+    marginBottom: 2,
   },
   modalSubtitle: {
-    fontSize: 14,
-    color: '#666666',
-    marginBottom: 20,
+    fontSize: FONTS.regular,
+    color: COLORS.textLight,
+    marginBottom: SIZES.lg,
   },
   announcementInput: {
     borderWidth: 1,
-    borderColor: '#E0E0E0',
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 16,
-    color: '#333333',
+    borderColor: COLORS.border,
+    borderRadius: SIZES.xs,
+    padding: SIZES.sm,
+    fontSize: FONTS.medium,
+    color: COLORS.text,
     textAlignVertical: 'top',
     minHeight: 100,
-    marginBottom: 20,
+    marginBottom: SIZES.lg,
   },
   modalButtons: {
     flexDirection: 'row',
@@ -1009,27 +1042,27 @@ const styles = StyleSheet.create({
   },
   modalButton: {
     flex: 1,
-    paddingVertical: 14,
-    borderRadius: 8,
+    paddingVertical: SIZES.md,
+    borderRadius: SIZES.xs,
     alignItems: 'center',
   },
   cancelButton: {
-    backgroundColor: '#F5F5F5',
-    marginRight: 8,
+    backgroundColor: COLORS.greyLight,
+    marginRight: SIZES.xs,
   },
   sendButton: {
-    backgroundColor: '#4CAF50',
-    marginLeft: 8,
+    backgroundColor: COLORS.success,
+    marginLeft: SIZES.xs,
   },
   cancelButtonText: {
-    fontSize: 16,
+    fontSize: FONTS.medium,
     fontWeight: '600',
-    color: '#666666',
+    color: COLORS.textLight,
   },
   sendButtonText: {
-    fontSize: 16,
+    fontSize: FONTS.medium,
     fontWeight: '600',
-    color: '#FFFFFF',
+    color: COLORS.white,
   },
 });
 

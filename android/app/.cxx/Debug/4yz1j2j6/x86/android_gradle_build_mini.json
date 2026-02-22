@@ -1,0 +1,91 @@
+{
+  "buildFiles": [
+    "D:\\MyProjects\\ZuGo2\\node_modules\\@react-native-community\\datetimepicker\\android\\build\\generated\\source\\codegen\\jni\\CMakeLists.txt",
+    "D:\\MyProjects\\ZuGo2\\node_modules\\react-native-gesture-handler\\android\\build\\generated\\source\\codegen\\jni\\CMakeLists.txt",
+    "D:\\MyProjects\\ZuGo2\\node_modules\\react-native-image-picker\\android\\build\\generated\\source\\codegen\\jni\\CMakeLists.txt",
+    "D:\\MyProjects\\ZuGo2\\node_modules\\react-native-reanimated\\android\\build\\generated\\source\\codegen\\jni\\CMakeLists.txt",
+    "D:\\MyProjects\\ZuGo2\\node_modules\\react-native-safe-area-context\\android\\src\\main\\jni\\CMakeLists.txt",
+    "D:\\MyProjects\\ZuGo2\\node_modules\\react-native-screens\\android\\src\\main\\jni\\CMakeLists.txt",
+    "D:\\MyProjects\\ZuGo2\\node_modules\\react-native-vector-icons\\android\\build\\generated\\source\\codegen\\jni\\CMakeLists.txt",
+    "D:\\MyProjects\\ZuGo2\\node_modules\\react-native-worklets\\android\\build\\generated\\source\\codegen\\jni\\CMakeLists.txt",
+    "D:\\MyProjects\\ZuGo2\\node_modules\\react-native\\ReactAndroid\\cmake-utils\\default-app-setup\\CMakeLists.txt"
+  ],
+  "cleanCommandsComponents": [
+    [
+      "C:\\Users\\Muhammad_Atif_Khan\\AppData\\Local\\Android\\Sdk\\cmake\\3.22.1\\bin\\ninja.exe",
+      "-C",
+      "D:\\MyProjects\\ZuGo2\\android\\app\\.cxx\\Debug\\4yz1j2j6\\x86",
+      "clean"
+    ]
+  ],
+  "buildTargetsCommandComponents": [
+    "C:\\Users\\Muhammad_Atif_Khan\\AppData\\Local\\Android\\Sdk\\cmake\\3.22.1\\bin\\ninja.exe",
+    "-C",
+    "D:\\MyProjects\\ZuGo2\\android\\app\\.cxx\\Debug\\4yz1j2j6\\x86",
+    "{LIST_OF_TARGETS_TO_BUILD}"
+  ],
+  "libraries": {
+    "react_codegen_RNVectorIconsSpec::@479809fae146501fd34d": {
+      "artifactName": "react_codegen_RNVectorIconsSpec",
+      "abi": "x86",
+      "runtimeFiles": []
+    },
+    "react_codegen_rnreanimated::@8afabad14bfffa3f8b9a": {
+      "artifactName": "react_codegen_rnreanimated",
+      "abi": "x86",
+      "runtimeFiles": []
+    },
+    "react_codegen_safeareacontext::@7984cd80db47aa7b952a": {
+      "artifactName": "react_codegen_safeareacontext",
+      "abi": "x86",
+      "output": "D:\\MyProjects\\ZuGo2\\android\\app\\build\\intermediates\\cxx\\Debug\\4yz1j2j6\\obj\\x86\\libreact_codegen_safeareacontext.so",
+      "runtimeFiles": [
+        "C:\\Users\\Muhammad_Atif_Khan\\.gradle\\caches\\8.13\\transforms\\b7dce72bff7fdb5c13643e891a8a1b5d\\transformed\\fbjni-0.7.0\\prefab\\modules\\fbjni\\libs\\android.x86\\libfbjni.so",
+        "C:\\Users\\Muhammad_Atif_Khan\\.gradle\\caches\\8.13\\transforms\\a23ed67b2edeb9ce0dd199ade731b727\\transformed\\react-android-0.83.0-debug\\prefab\\modules\\jsi\\libs\\android.x86\\libjsi.so",
+        "C:\\Users\\Muhammad_Atif_Khan\\.gradle\\caches\\8.13\\transforms\\a23ed67b2edeb9ce0dd199ade731b727\\transformed\\react-android-0.83.0-debug\\prefab\\modules\\reactnative\\libs\\android.x86\\libreactnative.so"
+      ]
+    },
+    "react_codegen_rngesturehandler_codegen::@39f233abcd2c728bc6ec": {
+      "artifactName": "react_codegen_rngesturehandler_codegen",
+      "abi": "x86",
+      "runtimeFiles": []
+    },
+    "react_codegen_RNImagePickerSpec::@f66ee9a2efecfb28bee4": {
+      "artifactName": "react_codegen_RNImagePickerSpec",
+      "abi": "x86",
+      "runtimeFiles": []
+    },
+    "react_codegen_rnscreens::@25bcbd507e98d3a854ad": {
+      "artifactName": "react_codegen_rnscreens",
+      "abi": "x86",
+      "output": "D:\\MyProjects\\ZuGo2\\android\\app\\build\\intermediates\\cxx\\Debug\\4yz1j2j6\\obj\\x86\\libreact_codegen_rnscreens.so",
+      "runtimeFiles": [
+        "C:\\Users\\Muhammad_Atif_Khan\\.gradle\\caches\\8.13\\transforms\\a23ed67b2edeb9ce0dd199ade731b727\\transformed\\react-android-0.83.0-debug\\prefab\\modules\\reactnative\\libs\\android.x86\\libreactnative.so",
+        "C:\\Users\\Muhammad_Atif_Khan\\.gradle\\caches\\8.13\\transforms\\a23ed67b2edeb9ce0dd199ade731b727\\transformed\\react-android-0.83.0-debug\\prefab\\modules\\jsi\\libs\\android.x86\\libjsi.so",
+        "C:\\Users\\Muhammad_Atif_Khan\\.gradle\\caches\\8.13\\transforms\\b7dce72bff7fdb5c13643e891a8a1b5d\\transformed\\fbjni-0.7.0\\prefab\\modules\\fbjni\\libs\\android.x86\\libfbjni.so"
+      ]
+    },
+    "react_codegen_RNDateTimePickerCGen::@59b70ddc31ba2f8ef1d2": {
+      "artifactName": "react_codegen_RNDateTimePickerCGen",
+      "abi": "x86",
+      "runtimeFiles": []
+    },
+    "appmodules::@6890427a1f51a3e7e1df": {
+      "artifactName": "appmodules",
+      "abi": "x86",
+      "output": "D:\\MyProjects\\ZuGo2\\android\\app\\build\\intermediates\\cxx\\Debug\\4yz1j2j6\\obj\\x86\\libappmodules.so",
+      "runtimeFiles": [
+        "D:\\MyProjects\\ZuGo2\\android\\app\\build\\intermediates\\cxx\\Debug\\4yz1j2j6\\obj\\x86\\libreact_codegen_safeareacontext.so",
+        "D:\\MyProjects\\ZuGo2\\android\\app\\build\\intermediates\\cxx\\Debug\\4yz1j2j6\\obj\\x86\\libreact_codegen_rnscreens.so",
+        "C:\\Users\\Muhammad_Atif_Khan\\.gradle\\caches\\8.13\\transforms\\b7dce72bff7fdb5c13643e891a8a1b5d\\transformed\\fbjni-0.7.0\\prefab\\modules\\fbjni\\libs\\android.x86\\libfbjni.so",
+        "C:\\Users\\Muhammad_Atif_Khan\\.gradle\\caches\\8.13\\transforms\\a23ed67b2edeb9ce0dd199ade731b727\\transformed\\react-android-0.83.0-debug\\prefab\\modules\\jsi\\libs\\android.x86\\libjsi.so",
+        "C:\\Users\\Muhammad_Atif_Khan\\.gradle\\caches\\8.13\\transforms\\a23ed67b2edeb9ce0dd199ade731b727\\transformed\\react-android-0.83.0-debug\\prefab\\modules\\reactnative\\libs\\android.x86\\libreactnative.so"
+      ]
+    },
+    "react_codegen_rnworklets::@68f58d84d4754f193387": {
+      "artifactName": "react_codegen_rnworklets",
+      "abi": "x86",
+      "runtimeFiles": []
+    }
+  }
+}

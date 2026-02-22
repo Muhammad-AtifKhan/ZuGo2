@@ -1,4 +1,4 @@
-// src/navigation/AuthNavigator.tsx - UPDATED WITH PROPS
+// src/navigation/AuthNavigator.tsx - FULLY UPDATED
 import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import LoginScreen from '../screens/auth/LoginScreen';
@@ -8,12 +8,18 @@ import TransporterRegistrationScreen from '../screens/auth/TransporterRegistrati
 import OTPVerificationScreen from '../screens/auth/OTPVerificationScreen';
 import ForgotPasswordScreen from '../screens/auth/ForgotPasswordScreen';
 
+// Updated navigation param list
 export type AuthStackParamList = {
-  Login: undefined;
+  Login: { preFilledEmail?: string } | undefined;
   RoleSelection: undefined;
   PassengerRegistration: undefined;
   TransporterRegistration: undefined;
-  OTPVerification: { phone: string; role: string };
+  OTPVerification: {
+    phone: string;
+    role: 'passenger' | 'driver' | 'transporter';
+    email: string;
+    userId: string;
+  };
   ForgotPassword: undefined;
 };
 
@@ -34,10 +40,15 @@ export default function AuthNavigator({ setUserRole }: AuthNavigatorProps) {
       <Stack.Screen name="Login">
         {() => <LoginScreen setUserRole={setUserRole} />}
       </Stack.Screen>
+
       <Stack.Screen name="RoleSelection" component={RoleSelectionScreen} />
+
       <Stack.Screen name="PassengerRegistration" component={PassengerRegistrationScreen} />
+
       <Stack.Screen name="TransporterRegistration" component={TransporterRegistrationScreen} />
+
       <Stack.Screen name="OTPVerification" component={OTPVerificationScreen} />
+
       <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
     </Stack.Navigator>
   );
