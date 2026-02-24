@@ -1,5 +1,5 @@
 # ninja log v5
-1	31	0	D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/CMakeFiles/cmake.verify_globs	bc02b793f885ac62
+2	39	0	D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/CMakeFiles/cmake.verify_globs	bc02b793f885ac62
 41659	55029	7930980137826423	rnscreens_autolinked_build/CMakeFiles/react_codegen_rnscreens.dir/d1b21aba2120e093dec9a7fcc15fb5d7/common/cpp/react/renderer/components/rnscreens/RNSScreenStackHeaderSubviewState.cpp.o	232cd76fe7efa430
 10865	24432	7930979832336285	RNImagePickerSpec_autolinked_build/CMakeFiles/react_codegen_RNImagePickerSpec.dir/react/renderer/components/RNImagePickerSpec/ComponentDescriptors.cpp.o	ed4ef6293937ec3f
 121	9549	7930979682964966	rngesturehandler_codegen_autolinked_build/CMakeFiles/react_codegen_rngesturehandler_codegen.dir/react/renderer/components/rngesturehandler_codegen/States.cpp.o	8c33f517cbf3feea
@@ -68,4 +68,4 @@
 46257	68272	7930980270658974	rnscreens_autolinked_build/CMakeFiles/react_codegen_rnscreens.dir/3adfc1edca016eb44b7e4f8d5ec71fd6/build/generated/source/codegen/jni/react/renderer/components/rnscreens/Props.cpp.o	4ae9c1026c2aaac0
 68273	68531	7930980273395096	D:/MyProjects/ZuGo2/android/app/build/intermediates/cxx/Debug/4yz1j2j6/obj/armeabi-v7a/libreact_codegen_rnscreens.so	ef5218fbc39fdaa5
 62606	69370	7930980282061740	rnworklets_autolinked_build/CMakeFiles/react_codegen_rnworklets.dir/rnworklets-generated.cpp.o	8ed57ed8783acf34
-1	28	0	D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/CMakeFiles/cmake.verify_globs	bc02b793f885ac62
+1	39	0	D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/CMakeFiles/cmake.verify_globs	bc02b793f885ac62

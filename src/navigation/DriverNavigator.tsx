@@ -1,7 +1,10 @@
-import React from 'react';
+// navigation/DriverNavigator.tsx - FIXED VERSION
+import React, { useEffect, useState } from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createDrawerNavigator } from '@react-navigation/drawer';
-import { StyleSheet, Text, View, TouchableOpacity } from 'react-native';
+import { StyleSheet, Text, View, TouchableOpacity, ActivityIndicator } from 'react-native';
+import auth from '@react-native-firebase/auth';  // ✅ Direct Firebase import
+import firestore from '@react-native-firebase/firestore';
 
 // Import screens
 import DashboardScreen from '../screens/driver/DashboardScreen';
@@ -16,8 +19,18 @@ import EmergencyScreen from '../screens/driver/EmergencyScreen';
 import ProfileScreen from '../screens/driver/ProfileScreen';
 import NotificationsScreen from '../screens/driver/NotificationsScreen';
 
+// ❌ NO useAuth import - directly use Firebase
+
 const Tab = createBottomTabNavigator();
 const Drawer = createDrawerNavigator();
+
+// Loading component
+const LoadingScreen = () => (
+  <View style={styles.loadingContainer}>
+    <ActivityIndicator size="large" color="#4A90E2" />
+    <Text style={styles.loadingText}>Loading Driver Panel...</Text>
+  </View>
+);
 
 // Simple tab bar icon component
 const TabIcon = ({ focused, title }: { focused: boolean; title: string }) => {
@@ -71,7 +84,7 @@ const DriverTabs = () => {
         component={DashboardScreen}
         options={{
           title: 'Driver Dashboard',
-          headerShown: false, // Custom header دکھائیں گے
+          headerShown: false,
         }}
       />
       <Tab.Screen
@@ -94,9 +107,31 @@ const DriverTabs = () => {
   );
 };
 
-// Custom Drawer Content
+// Custom Drawer Content - with direct Firebase
 const CustomDrawerContent = (props: any) => {
   const { navigation } = props;
+  const [driverName, setDriverName] = useState('Driver');
+  const [loading, setLoading] = useState(true);
+
+  const user = auth().currentUser;  // ✅ Direct Firebase
+
+  useEffect(() => {
+    const fetchDriverName = async () => {
+      if (user) {
+        try {
+          const userDoc = await firestore().collection('users').doc(user.uid).get();
+          if (userDoc.exists) {
+            setDriverName(userDoc.data()?.fullName || 'Driver');
+          }
+        } catch (error) {
+          console.error('Error fetching driver name:', error);
+        }
+      }
+      setLoading(false);
+    };
+
+    fetchDriverName();
+  }, [user]);
 
   const drawerItems = [
     { name: 'Main', label: '🏠 Main Dashboard', screen: 'Main' },
@@ -108,11 +143,23 @@ const CustomDrawerContent = (props: any) => {
     { name: 'Notifications', label: '🔔 Notifications', screen: 'Notifications' },
   ];
 
+  const handleLogout = async () => {
+    try {
+      await auth().signOut();  // ✅ Direct Firebase logout
+    } catch (error) {
+      console.error('Logout error:', error);
+    }
+  };
+
+  if (loading) {
+    return <LoadingScreen />;
+  }
+
   return (
     <View style={styles.drawerContainer}>
       <View style={styles.drawerHeader}>
         <Text style={styles.drawerTitle}>Driver App</Text>
-        <Text style={styles.drawerSubtitle}>Welcome, Driver Ali!</Text>
+        <Text style={styles.drawerSubtitle}>Welcome, {driverName}!</Text>
       </View>
 
       <View style={styles.drawerItems}>
@@ -122,7 +169,6 @@ const CustomDrawerContent = (props: any) => {
             style={styles.drawerItem}
             onPress={() => {
               if (item.name === 'Main') {
-                // Main tabs پر واپس جائیں
                 navigation.navigate('Main', { screen: 'Dashboard' });
               } else {
                 navigation.navigate(item.screen);
@@ -138,10 +184,7 @@ const CustomDrawerContent = (props: any) => {
       <View style={styles.drawerFooter}>
         <TouchableOpacity
           style={styles.logoutButton}
-          onPress={() => {
-            // Logout logic here
-            navigation.closeDrawer();
-          }}
+          onPress={handleLogout}
         >
           <Text style={styles.logoutText}>🚪 Logout</Text>
         </TouchableOpacity>
@@ -152,6 +195,27 @@ const CustomDrawerContent = (props: any) => {
 
 // Main Driver Navigator with Drawer
 const DriverNavigator = () => {
+  const [initializing, setInitializing] = useState(true);
+  const [user, setUser] = useState<any>(null);
+
+  // Check auth state directly
+  useEffect(() => {
+    const subscriber = auth().onAuthStateChanged((authUser) => {
+      setUser(authUser);
+      if (initializing) setInitializing(false);
+    });
+    return subscriber;
+  }, [initializing]);
+
+  if (initializing) {
+    return <LoadingScreen />;
+  }
+
+  // Agar user nahi hai to kuch mat dikhao - RootNavigator handle karega
+  if (!user) {
+    return null;
+  }
+
   return (
     <Drawer.Navigator
       drawerContent={(props) => <CustomDrawerContent {...props} />}
@@ -217,6 +281,17 @@ const DriverNavigator = () => {
 };
 
 const styles = StyleSheet.create({
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#F8F9FA',
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: '#4A90E2',
+  },
   tabBar: {
     backgroundColor: '#FFFFFF',
     borderTopColor: '#E0E0E0',

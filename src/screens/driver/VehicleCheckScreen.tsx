@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -10,8 +10,12 @@ import {
   Alert,
   Modal,
   TextInput,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { StackNavigationProp } from '@react-navigation/stack';
+import firestore from '@react-native-firebase/firestore';
+import auth from '@react-native-firebase/auth';
 
 type VehicleCheckScreenProps = {
   navigation: StackNavigationProp<any>;
@@ -23,52 +27,172 @@ interface ChecklistItem {
   title: string;
   checked: boolean;
   description?: string;
+  category: 'exterior' | 'interior' | 'mechanical' | 'safety' | 'documents';
 }
 
 interface IssueType {
   id: string;
   label: string;
   value: string;
+  category: string;
+}
+
+interface VehicleCheck {
+  id: string;
+  driverId: string;
+  driverName: string;
+  tripId?: string;
+  busId: string;
+  busNumber: string;
+  checkDate: any;
+  checkType: 'pre-trip' | 'post-trip' | 'weekly' | 'incident';
+  items: ChecklistItem[];
+  passed: boolean;
+  issues?: VehicleIssue[];
+  odometerReading?: number;
+  fuelLevel?: number;
+  notes?: string;
+  completedAt: any;
+}
+
+interface VehicleIssue {
+  id: string;
+  type: string;
+  description: string;
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  status: 'reported' | 'in-progress' | 'resolved';
+  reportedAt: any;
+  resolvedAt?: any;
+  photos?: string[];
 }
 
 const VehicleCheckScreen: React.FC<VehicleCheckScreenProps> = ({ navigation, route }) => {
+  const user = auth().currentUser;
   const dutyId = route?.params?.dutyId;
+  const tripId = route?.params?.tripId;
+  const dutyDetails = route?.params?.dutyDetails;
+
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [driverName, setDriverName] = useState('');
+  const [busInfo, setBusInfo] = useState<{ id: string; number: string } | null>(null);
 
   // Check if coming from START DUTY flow
   const [isStartDutyFlow, setIsStartDutyFlow] = useState(!!dutyId);
 
   const [checklist, setChecklist] = useState<ChecklistItem[]>([
-    { id: '1', title: 'Fuel Level', checked: false, description: 'Check fuel gauge - should be at least half tank' },
-    { id: '2', title: 'Tire Pressure', checked: false, description: 'Check all tires for proper inflation' },
-    { id: '3', title: 'Lights', checked: false, description: 'Headlights, brake lights, indicators, interior lights' },
-    { id: '4', title: 'Brakes', checked: false, description: 'Test brake pedal response and emergency brake' },
-    { id: '5', title: 'Engine Oil', checked: false, description: 'Check oil level using dipstick' },
-    { id: '6', title: 'First Aid Kit', checked: false, description: 'Verify kit is present and fully stocked' },
-    { id: '7', title: 'Fire Extinguisher', checked: false, description: 'Check pressure gauge and expiry date' },
-    { id: '8', title: 'Emergency Tools', checked: false, description: 'Triangle, spare tire, jack, tools' },
-    { id: '9', title: 'Cleanliness', checked: false, description: 'Interior and exterior cleanliness' },
-    { id: '10', title: 'Documents', checked: false, description: 'Registration, insurance, permits, license' },
+    { id: '1', title: 'Fuel Level', checked: false, description: 'Check fuel gauge - should be at least half tank', category: 'mechanical' },
+    { id: '2', title: 'Tire Pressure', checked: false, description: 'Check all tires for proper inflation', category: 'exterior' },
+    { id: '3', title: 'Lights', checked: false, description: 'Headlights, brake lights, indicators, interior lights', category: 'exterior' },
+    { id: '4', title: 'Brakes', checked: false, description: 'Test brake pedal response and emergency brake', category: 'mechanical' },
+    { id: '5', title: 'Engine Oil', checked: false, description: 'Check oil level using dipstick', category: 'mechanical' },
+    { id: '6', title: 'First Aid Kit', checked: false, description: 'Verify kit is present and fully stocked', category: 'safety' },
+    { id: '7', title: 'Fire Extinguisher', checked: false, description: 'Check pressure gauge and expiry date', category: 'safety' },
+    { id: '8', title: 'Emergency Tools', checked: false, description: 'Triangle, spare tire, jack, tools', category: 'safety' },
+    { id: '9', title: 'Cleanliness', checked: false, description: 'Interior and exterior cleanliness', category: 'interior' },
+    { id: '10', title: 'Documents', checked: false, description: 'Registration, insurance, permits, license', category: 'documents' },
   ]);
 
   const [allChecked, setAllChecked] = useState(false);
   const [showIssueForm, setShowIssueForm] = useState(false);
   const [selectedIssueType, setSelectedIssueType] = useState('');
   const [issueDescription, setIssueDescription] = useState('');
+  const [issueSeverity, setIssueSeverity] = useState<'low' | 'medium' | 'high' | 'critical'>('medium');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const [odometerReading, setOdometerReading] = useState('');
+  const [fuelLevel, setFuelLevel] = useState('');
+  const [notes, setNotes] = useState('');
+
+  const [recentChecks, setRecentChecks] = useState<VehicleCheck[]>([]);
+
   const issueTypes: IssueType[] = [
-    { id: '1', label: 'Fuel Issue', value: 'fuel' },
-    { id: '2', label: 'Tire Problem', value: 'tire' },
-    { id: '3', label: 'Brake Problem', value: 'brake' },
-    { id: '4', label: 'Engine Issue', value: 'engine' },
-    { id: '5', label: 'Electrical Problem', value: 'electrical' },
-    { id: '6', label: 'Other Mechanical', value: 'mechanical' },
-    { id: '7', label: 'Safety Equipment', value: 'safety' },
-    { id: '8', label: 'Cleanliness', value: 'cleanliness' },
-    { id: '9', label: 'Document Issue', value: 'document' },
-    { id: '10', label: 'Other', value: 'other' },
+    { id: '1', label: 'Fuel Issue', value: 'fuel', category: 'mechanical' },
+    { id: '2', label: 'Tire Problem', value: 'tire', category: 'exterior' },
+    { id: '3', label: 'Brake Problem', value: 'brake', category: 'mechanical' },
+    { id: '4', label: 'Engine Issue', value: 'engine', category: 'mechanical' },
+    { id: '5', label: 'Electrical Problem', value: 'electrical', category: 'mechanical' },
+    { id: '6', label: 'Other Mechanical', value: 'mechanical', category: 'mechanical' },
+    { id: '7', label: 'Safety Equipment', value: 'safety', category: 'safety' },
+    { id: '8', label: 'Cleanliness', value: 'cleanliness', category: 'interior' },
+    { id: '9', label: 'Document Issue', value: 'document', category: 'documents' },
+    { id: '10', label: 'Other', value: 'other', category: 'other' },
   ];
 
+  // Fetch driver and bus info
+  useEffect(() => {
+    if (!user) return;
+
+    const fetchData = async () => {
+      try {
+        setLoading(true);
+
+        // Get driver info
+        const driverDoc = await firestore().collection('drivers').doc(user.uid).get();
+        if (driverDoc.exists) {
+          const data = driverDoc.data();
+          setDriverName(data?.fullName || 'Driver');
+
+          // If bus is assigned
+          if (data?.busNumber) {
+            setBusInfo({
+              id: data?.vehicleAssigned || '',
+              number: data?.busNumber || 'B-001',
+            });
+          }
+        }
+
+        // If duty details provided, use that bus
+        if (dutyDetails?.busNumber) {
+          setBusInfo({
+            id: dutyDetails.busId || '',
+            number: dutyDetails.busNumber,
+          });
+        }
+
+        // Fetch recent checks
+        const checksSnapshot = await firestore()
+          .collection('vehicle_checks')
+          .where('driverId', '==', user.uid)
+          .orderBy('checkDate', 'desc')
+          .limit(5)
+          .get();
+
+        const checks: VehicleCheck[] = [];
+        checksSnapshot.forEach(doc => {
+          const data = doc.data();
+          checks.push({
+            id: doc.id,
+            driverId: data.driverId,
+            driverName: data.driverName,
+            tripId: data.tripId,
+            busId: data.busId,
+            busNumber: data.busNumber,
+            checkDate: data.checkDate,
+            checkType: data.checkType,
+            items: data.items,
+            passed: data.passed,
+            issues: data.issues,
+            completedAt: data.completedAt,
+          });
+        });
+
+        setRecentChecks(checks);
+        setLoading(false);
+        setRefreshing(false);
+
+      } catch (error) {
+        console.error('Error fetching data:', error);
+        setLoading(false);
+        setRefreshing(false);
+      }
+    };
+
+    fetchData();
+  }, [user, dutyDetails]);
+
+  // Toggle checklist item
   const toggleChecklistItem = (id: string) => {
     const updatedChecklist = checklist.map(item =>
       item.id === id ? { ...item, checked: !item.checked } : item
@@ -81,13 +205,19 @@ const VehicleCheckScreen: React.FC<VehicleCheckScreenProps> = ({ navigation, rou
     setAllChecked(allCheckedNow);
   };
 
-  const handleVehicleOK = () => {
+  // Handle vehicle OK
+  const handleVehicleOK = async () => {
     if (!allChecked) {
       Alert.alert(
         'Incomplete Checklist',
         'Please check all items before marking vehicle as OK.',
         [{ text: 'OK' }]
       );
+      return;
+    }
+
+    if (!busInfo) {
+      Alert.alert('Error', 'No bus information available');
       return;
     }
 
@@ -101,25 +231,69 @@ const VehicleCheckScreen: React.FC<VehicleCheckScreenProps> = ({ navigation, rou
         },
         {
           text: 'Confirm',
-          onPress: () => {
-            if (isStartDutyFlow) {
-              // Navigate to Route screen if coming from START DUTY
-              Alert.alert(
-                'Duty Started',
-                'Vehicle check completed. Your duty has started successfully.',
-                [
-                  {
-                    text: 'OK',
-                    onPress: () => navigation.navigate('Route')
-                  }
-                ]
-              );
-            } else {
-              Alert.alert(
-                'Success',
-                'Vehicle check report submitted successfully.',
-                [{ text: 'OK', onPress: () => navigation.goBack() }]
-              );
+          onPress: async () => {
+            setSaving(true);
+
+            try {
+              // Create vehicle check record
+              const checkData = {
+                driverId: user?.uid,
+                driverName: driverName,
+                tripId: tripId || null,
+                busId: busInfo.id,
+                busNumber: busInfo.number,
+                checkDate: firestore.FieldValue.serverTimestamp(),
+                checkType: isStartDutyFlow ? 'pre-trip' : 'weekly',
+                items: checklist,
+                passed: true,
+                odometerReading: odometerReading ? parseInt(odometerReading) : null,
+                fuelLevel: fuelLevel ? parseInt(fuelLevel) : null,
+                notes: notes || null,
+                completedAt: firestore.FieldValue.serverTimestamp(),
+              };
+
+              const checkRef = await firestore().collection('vehicle_checks').add(checkData);
+
+              // Update bus last check date
+              if (busInfo.id) {
+                await firestore().collection('buses').doc(busInfo.id).update({
+                  lastCheck: firestore.FieldValue.serverTimestamp(),
+                  lastCheckId: checkRef.id,
+                });
+              }
+
+              setSaving(false);
+
+              if (isStartDutyFlow && tripId) {
+                // Update trip status to in-progress
+                await firestore().collection('trips').doc(tripId).update({
+                  status: 'in-progress',
+                  vehicleCheckId: checkRef.id,
+                  actualStartTime: firestore.FieldValue.serverTimestamp(),
+                });
+
+                Alert.alert(
+                  'Duty Started',
+                  'Vehicle check completed. Your duty has started successfully.',
+                  [
+                    {
+                      text: 'OK',
+                      onPress: () => navigation.navigate('Route', { tripId })
+                    }
+                  ]
+                );
+              } else {
+                Alert.alert(
+                  'Success',
+                  'Vehicle check report submitted successfully.',
+                  [{ text: 'OK', onPress: () => navigation.goBack() }]
+                );
+              }
+
+            } catch (error) {
+              console.error('Error saving vehicle check:', error);
+              Alert.alert('Error', 'Failed to save vehicle check');
+              setSaving(false);
             }
           },
         },
@@ -127,11 +301,13 @@ const VehicleCheckScreen: React.FC<VehicleCheckScreenProps> = ({ navigation, rou
     );
   };
 
+  // Handle report issue
   const handleReportIssue = () => {
     setShowIssueForm(true);
   };
 
-  const handleSubmitIssue = () => {
+  // Handle submit issue
+  const handleSubmitIssue = async () => {
     if (!selectedIssueType) {
       Alert.alert('Error', 'Please select an issue type.');
       return;
@@ -142,20 +318,69 @@ const VehicleCheckScreen: React.FC<VehicleCheckScreenProps> = ({ navigation, rou
       return;
     }
 
+    if (!busInfo) {
+      Alert.alert('Error', 'No bus information available');
+      return;
+    }
+
     setIsSubmitting(true);
 
-    // Simulate API call
-    setTimeout(() => {
+    try {
+      const issueTypeLabel = issueTypes.find(type => type.value === selectedIssueType)?.label;
+
+      // Create issue record
+      const issue: VehicleIssue = {
+        id: Date.now().toString(),
+        type: selectedIssueType,
+        description: issueDescription,
+        severity: issueSeverity,
+        status: 'reported',
+        reportedAt: firestore.FieldValue.serverTimestamp() as any,
+      };
+
+      // Save to Firebase
+      const issueRef = await firestore().collection('vehicle_issues').add({
+        busId: busInfo.id,
+        busNumber: busInfo.number,
+        driverId: user?.uid,
+        driverName: driverName,
+        tripId: tripId || null,
+        ...issue,
+        reportedAt: firestore.FieldValue.serverTimestamp(),
+      });
+
+      // Update bus status
+      await firestore().collection('buses').doc(busInfo.id).update({
+        status: issueSeverity === 'critical' || issueSeverity === 'high' ? 'maintenance' : 'active',
+        currentIssueId: issueRef.id,
+        lastIssueReported: firestore.FieldValue.serverTimestamp(),
+      });
+
+      // Create notification for maintenance team
+      await firestore().collection('notifications').add({
+        type: 'maintenance',
+        title: 'Vehicle Issue Reported',
+        message: `${issueTypeLabel} issue reported for bus ${busInfo.number} by ${driverName}`,
+        busId: busInfo.id,
+        busNumber: busInfo.number,
+        issueId: issueRef.id,
+        severity: issueSeverity,
+        timestamp: firestore.FieldValue.serverTimestamp(),
+        read: false,
+        actionable: true,
+      });
+
       setIsSubmitting(false);
       setShowIssueForm(false);
       setSelectedIssueType('');
       setIssueDescription('');
-
-      const issueTypeLabel = issueTypes.find(type => type.value === selectedIssueType)?.label;
+      setIssueSeverity('medium');
 
       Alert.alert(
         'Issue Reported',
-        `Your ${issueTypeLabel} issue has been reported to the maintenance team. They will contact you shortly.`,
+        `Your ${issueTypeLabel} issue has been reported to the maintenance team. They will contact you shortly.${
+          issueSeverity === 'critical' ? '\n\n⚠️ CRITICAL ISSUE: Emergency team notified.' : ''
+        }`,
         [
           {
             text: 'OK',
@@ -171,8 +396,19 @@ const VehicleCheckScreen: React.FC<VehicleCheckScreenProps> = ({ navigation, rou
           }
         ]
       );
-    }, 1500);
+
+    } catch (error) {
+      console.error('Error reporting issue:', error);
+      Alert.alert('Error', 'Failed to report issue');
+      setIsSubmitting(false);
+    }
   };
+
+  // Handle refresh
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    // Data will auto-refresh
+  }, []);
 
   const getIssueTypeLabel = (value: string) => {
     return issueTypes.find(type => type.value === value)?.label || value;
@@ -212,6 +448,15 @@ const VehicleCheckScreen: React.FC<VehicleCheckScreenProps> = ({ navigation, rou
   const checkedCount = checklist.filter(item => item.checked).length;
   const totalCount = checklist.length;
 
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#4A90E2" />
+        <Text style={styles.loadingText}>Loading vehicle check...</Text>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar backgroundColor="#1A237E" barStyle="light-content" />
@@ -219,12 +464,23 @@ const VehicleCheckScreen: React.FC<VehicleCheckScreenProps> = ({ navigation, rou
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>🔧 VEHICLE CHECK</Text>
+        {busInfo && (
+          <Text style={styles.busInfo}>
+            🚌 {busInfo.number} • Driver: {driverName}
+          </Text>
+        )}
         {isStartDutyFlow && (
           <Text style={styles.headerSubtitle}>Required before starting duty</Text>
         )}
       </View>
 
-      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={styles.scrollView}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+      >
         {/* Progress Indicator */}
         <View style={styles.progressSection}>
           <View style={styles.progressHeader}>
@@ -249,6 +505,33 @@ const VehicleCheckScreen: React.FC<VehicleCheckScreenProps> = ({ navigation, rou
           </Text>
         </View>
 
+        {/* Additional Readings */}
+        <View style={styles.readingsSection}>
+          <View style={styles.readingInput}>
+            <Text style={styles.readingLabel}>Odometer (km)</Text>
+            <TextInput
+              style={styles.readingField}
+              value={odometerReading}
+              onChangeText={setOdometerReading}
+              keyboardType="numeric"
+              placeholder="12345"
+              placeholderTextColor="#999"
+            />
+          </View>
+
+          <View style={styles.readingInput}>
+            <Text style={styles.readingLabel}>Fuel Level (%)</Text>
+            <TextInput
+              style={styles.readingField}
+              value={fuelLevel}
+              onChangeText={setFuelLevel}
+              keyboardType="numeric"
+              placeholder="50"
+              placeholderTextColor="#999"
+            />
+          </View>
+        </View>
+
         {/* Checklist Section */}
         <View style={styles.checklistSection}>
           <Text style={styles.sectionTitle}>CHECKLIST</Text>
@@ -257,25 +540,45 @@ const VehicleCheckScreen: React.FC<VehicleCheckScreenProps> = ({ navigation, rou
           </View>
         </View>
 
+        {/* Notes */}
+        <View style={styles.notesSection}>
+          <Text style={styles.sectionTitle}>ADDITIONAL NOTES</Text>
+          <TextInput
+            style={styles.notesInput}
+            value={notes}
+            onChangeText={setNotes}
+            placeholder="Any additional observations or comments..."
+            placeholderTextColor="#999"
+            multiline
+            numberOfLines={3}
+            textAlignVertical="top"
+          />
+        </View>
+
         {/* Action Buttons */}
         <View style={styles.actionSection}>
           <TouchableOpacity
             style={[
               styles.actionButton,
               styles.okButton,
-              !allChecked && styles.disabledButton
+              (!allChecked || saving) && styles.disabledButton
             ]}
             onPress={handleVehicleOK}
-            disabled={!allChecked}
+            disabled={!allChecked || saving}
           >
-            <Text style={styles.okButtonText}>
-              ✅ VEHICLE OK
-            </Text>
+            {saving ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <Text style={styles.okButtonText}>
+                ✅ VEHICLE OK
+              </Text>
+            )}
           </TouchableOpacity>
 
           <TouchableOpacity
             style={[styles.actionButton, styles.issueButton]}
             onPress={handleReportIssue}
+            disabled={saving}
           >
             <Text style={styles.issueButtonText}>
               ⚠️ REPORT ISSUE
@@ -287,24 +590,33 @@ const VehicleCheckScreen: React.FC<VehicleCheckScreenProps> = ({ navigation, rou
         <View style={styles.recentSection}>
           <Text style={styles.sectionTitle}>RECENT CHECKS</Text>
           <View style={styles.recentCard}>
-            <View style={styles.recentItem}>
-              <Text style={styles.recentDate}>Today, 07:30 AM</Text>
-              <View style={styles.statusBadgeSuccess}>
-                <Text style={styles.statusBadgeText}>PASSED</Text>
-              </View>
-            </View>
-            <View style={styles.recentItem}>
-              <Text style={styles.recentDate}>Yesterday, 07:45 AM</Text>
-              <View style={styles.statusBadgeWarning}>
-                <Text style={styles.statusBadgeText}>MINOR ISSUE</Text>
-              </View>
-            </View>
-            <View style={styles.recentItem}>
-              <Text style={styles.recentDate}>15 Mar, 08:00 AM</Text>
-              <View style={styles.statusBadgeSuccess}>
-                <Text style={styles.statusBadgeText}>PASSED</Text>
-              </View>
-            </View>
+            {recentChecks.length > 0 ? (
+              recentChecks.map((check) => {
+                const checkDate = check.checkDate?.toDate?.() || new Date();
+                const dateStr = checkDate.toLocaleDateString('en-US', {
+                  month: 'short',
+                  day: 'numeric',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                });
+
+                return (
+                  <View key={check.id} style={styles.recentItem}>
+                    <Text style={styles.recentDate}>{dateStr}</Text>
+                    <View style={[
+                      styles.statusBadge,
+                      check.passed ? styles.statusBadgeSuccess : styles.statusBadgeWarning
+                    ]}>
+                      <Text style={styles.statusBadgeText}>
+                        {check.passed ? 'PASSED' : 'ISSUES'}
+                      </Text>
+                    </View>
+                  </View>
+                );
+              })
+            ) : (
+              <Text style={styles.noRecentText}>No recent checks found</Text>
+            )}
           </View>
         </View>
       </ScrollView>
@@ -347,6 +659,64 @@ const VehicleCheckScreen: React.FC<VehicleCheckScreenProps> = ({ navigation, rou
                       </Text>
                     </TouchableOpacity>
                   ))}
+                </View>
+              </View>
+
+              {/* Severity Selection */}
+              <View style={styles.formSection}>
+                <Text style={styles.formLabel}>Severity *</Text>
+                <View style={styles.severityGrid}>
+                  <TouchableOpacity
+                    style={[
+                      styles.severityButton,
+                      issueSeverity === 'low' && styles.severityLowSelected
+                    ]}
+                    onPress={() => setIssueSeverity('low')}
+                  >
+                    <Text style={[
+                      styles.severityText,
+                      issueSeverity === 'low' && styles.severityTextSelected
+                    ]}>LOW</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.severityButton,
+                      issueSeverity === 'medium' && styles.severityMediumSelected
+                    ]}
+                    onPress={() => setIssueSeverity('medium')}
+                  >
+                    <Text style={[
+                      styles.severityText,
+                      issueSeverity === 'medium' && styles.severityTextSelected
+                    ]}>MEDIUM</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.severityButton,
+                      issueSeverity === 'high' && styles.severityHighSelected
+                    ]}
+                    onPress={() => setIssueSeverity('high')}
+                  >
+                    <Text style={[
+                      styles.severityText,
+                      issueSeverity === 'high' && styles.severityTextSelected
+                    ]}>HIGH</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.severityButton,
+                      issueSeverity === 'critical' && styles.severityCriticalSelected
+                    ]}
+                    onPress={() => setIssueSeverity('critical')}
+                  >
+                    <Text style={[
+                      styles.severityText,
+                      issueSeverity === 'critical' && styles.severityTextSelected
+                    ]}>CRITICAL</Text>
+                  </TouchableOpacity>
                 </View>
               </View>
 
@@ -399,9 +769,11 @@ const VehicleCheckScreen: React.FC<VehicleCheckScreenProps> = ({ navigation, rou
                 onPress={handleSubmitIssue}
                 disabled={isSubmitting}
               >
-                <Text style={styles.submitButtonText}>
-                  {isSubmitting ? 'SUBMITTING...' : 'SUBMIT REPORT'}
-                </Text>
+                {isSubmitting ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.submitButtonText}>SUBMIT REPORT</Text>
+                )}
               </TouchableOpacity>
             </View>
           </View>
@@ -416,6 +788,17 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#F8F9FA',
   },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#F8F9FA',
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: '#4A90E2',
+  },
   header: {
     backgroundColor: '#1A237E',
     paddingHorizontal: 20,
@@ -426,6 +809,11 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: 'bold',
     color: '#FFFFFF',
+    marginBottom: 4,
+  },
+  busInfo: {
+    fontSize: 14,
+    color: '#E3F2FD',
     marginBottom: 4,
   },
   headerSubtitle: {
@@ -480,6 +868,28 @@ const styles = StyleSheet.create({
     color: '#666666',
     textAlign: 'center',
     marginTop: 8,
+  },
+  readingsSection: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 20,
+  },
+  readingInput: {
+    flex: 1,
+  },
+  readingLabel: {
+    fontSize: 12,
+    color: '#666666',
+    marginBottom: 4,
+  },
+  readingField: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 14,
+    color: '#1A237E',
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
   },
   checklistSection: {
     marginTop: 20,
@@ -550,6 +960,19 @@ const styles = StyleSheet.create({
     fontSize: 20,
     marginLeft: 8,
   },
+  notesSection: {
+    marginTop: 20,
+  },
+  notesInput: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 16,
+    fontSize: 14,
+    color: '#1A237E',
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    minHeight: 80,
+  },
   actionSection: {
     marginTop: 24,
     gap: 12,
@@ -604,22 +1027,26 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#1A237E',
   },
-  statusBadgeSuccess: {
-    backgroundColor: '#E8F5E9',
+  statusBadge: {
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 12,
   },
+  statusBadgeSuccess: {
+    backgroundColor: '#E8F5E9',
+  },
   statusBadgeWarning: {
     backgroundColor: '#FFF3E0',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
   },
   statusBadgeText: {
     fontSize: 12,
     fontWeight: '600',
     color: '#666666',
+  },
+  noRecentText: {
+    textAlign: 'center',
+    color: '#666666',
+    padding: 20,
   },
   // Modal Styles
   modalOverlay: {
@@ -687,6 +1114,45 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   issueTypeTextSelected: {
+    color: '#FFFFFF',
+  },
+  severityGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  severityButton: {
+    flex: 1,
+    paddingVertical: 10,
+    backgroundColor: '#F8F9FA',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    alignItems: 'center',
+    minWidth: '22%',
+  },
+  severityLowSelected: {
+    backgroundColor: '#4CAF50',
+    borderColor: '#4CAF50',
+  },
+  severityMediumSelected: {
+    backgroundColor: '#FF9800',
+    borderColor: '#FF9800',
+  },
+  severityHighSelected: {
+    backgroundColor: '#F44336',
+    borderColor: '#F44336',
+  },
+  severityCriticalSelected: {
+    backgroundColor: '#9C27B0',
+    borderColor: '#9C27B0',
+  },
+  severityText: {
+    fontSize: 11,
+    color: '#666666',
+    fontWeight: '600',
+  },
+  severityTextSelected: {
     color: '#FFFFFF',
   },
   descriptionInput: {

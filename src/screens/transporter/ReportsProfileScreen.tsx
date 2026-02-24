@@ -1,5 +1,6 @@
 // src/screens/transporter/ReportsProfileScreen.tsx
 import React, { useState, useEffect, useCallback } from 'react';
+import { CommonActions } from '@react-navigation/native';
 import {
   View,
   Text,
@@ -404,38 +405,47 @@ const ReportsProfileScreen = () => {
   };
 
   // ========== LOGOUT FUNCTION ==========
-  const handleLogout = () => {
-    Alert.alert(
-      'Logout',
-      'Are you sure you want to logout?',
-      [
-        {
-          text: 'Cancel',
-          style: 'cancel',
-        },
-        {
-          text: 'Logout',
-          style: 'destructive',
-          onPress: async () => {
-            setLogoutLoading(true);
-            try {
-              await auth().signOut();
-              navigation.reset({
-                index: 0,
-                routes: [{ name: 'Login' }],
-              });
-            } catch (error) {
-              console.error('Logout error:', error);
-              Alert.alert('Error', 'Failed to logout. Please try again.');
-            } finally {
-              setLogoutLoading(false);
-            }
-          },
-        },
-      ],
-      { cancelable: true }
-    );
-  };
+// ReportsProfileScreen.tsx - Replace the handleLogout function
+
+   const handleLogout = () => {
+     Alert.alert(
+       'Logout',
+       'Are you sure you want to logout?',
+       [
+         {
+           text: 'Cancel',
+           style: 'cancel',
+         },
+         {
+           text: 'Logout',
+           style: 'destructive',
+           onPress: async () => {
+             setLogoutLoading(true);
+             try {
+               await auth().signOut();
+
+               // 👇 Use CommonActions.reset
+               navigation.dispatch(
+                 CommonActions.reset({
+                   index: 0,
+                   routes: [
+                     { name: 'Login' },
+                   ],
+                 })
+               );
+
+             } catch (error) {
+               console.error('Logout error:', error);
+               Alert.alert('Error', 'Failed to logout. Please try again.');
+             } finally {
+               setLogoutLoading(false);
+             }
+           },
+         },
+       ],
+       { cancelable: true }
+     );
+   };
 
   // ========== RENDER FUNCTIONS ==========
   const renderBarChart = (data: any[], maxValue: number, color: string, label: string) => {

@@ -186,7 +186,7 @@
 				{
 					"directoryIndex" : 0,
 					"id" : "appmodules::@6890427a1f51a3e7e1df",
-					"jsonFile" : "target-appmodules-Debug-95860c410e20f9a57c23.json",
+					"jsonFile" : "target-appmodules-Debug-28de6f9c1622d9ce3e8c.json",
 					"name" : "appmodules",
 					"projectIndex" : 0
 				},
@@ -228,7 +228,7 @@
 				{
 					"directoryIndex" : 6,
 					"id" : "react_codegen_rnscreens::@25bcbd507e98d3a854ad",
-					"jsonFile" : "target-react_codegen_rnscreens-Debug-4440037c42bcedb3c7a5.json",
+					"jsonFile" : "target-react_codegen_rnscreens-Debug-fbc10969672eab7a8112.json",
 					"name" : "react_codegen_rnscreens",
 					"projectIndex" : 0
 				},
@@ -242,7 +242,7 @@
 				{
 					"directoryIndex" : 5,
 					"id" : "react_codegen_safeareacontext::@7984cd80db47aa7b952a",
-					"jsonFile" : "target-react_codegen_safeareacontext-Debug-7c789aab4fd7769237cc.json",
+					"jsonFile" : "target-react_codegen_safeareacontext-Debug-feea0a04f6751e8bf38b.json",
 					"name" : "react_codegen_safeareacontext",
 					"projectIndex" : 0
 				}
@@ -252,7 +252,7 @@
 	"kind" : "codemodel",
 	"paths" : 
 	{
-		"build" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64",
+		"build" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/arm64-v8a",
 		"source" : "D:/MyProjects/ZuGo2/node_modules/react-native/ReactAndroid/cmake-utils/default-app-setup"
 	},
 	"version" : 

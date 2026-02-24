@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,8 +9,12 @@ import {
   StatusBar,
   Alert,
   Dimensions,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { DrawerNavigationProp } from '@react-navigation/drawer';
+import firestore from '@react-native-firebase/firestore';
+import auth from '@react-native-firebase/auth';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -29,6 +33,7 @@ type RootDrawerParamList = {
 
 interface RouteScreenProps {
   navigation: DrawerNavigationProp<RootDrawerParamList, 'Route'>;
+  route?: any; // For params
 }
 
 interface Stop {
@@ -39,81 +44,440 @@ interface Stop {
   actualTime?: string;
   status: 'COMPLETED' | 'CURRENT' | 'UPCOMING';
   passengerCount: number;
+  location?: {
+    latitude: number;
+    longitude: number;
+  };
 }
 
-const RouteScreen: React.FC<RouteScreenProps> = ({ navigation }) => {
-  const [currentStopIndex, setCurrentStopIndex] = useState(2); // Stop 3 is current
+interface TripData {
+  id: string;
+  routeName: string;
+  routeCode: string;
+  busNumber: string;
+  tripId: string;
+  totalStops: number;
+  completedStops: number;
+  distanceCovered: number;
+  totalDistance: number;
+  timeElapsed: string;
+  totalTime: string;
+  nextStopETA: string;
+  status: 'scheduled' | 'in-progress' | 'completed';
+  startTime: any;
+  estimatedEndTime: any;
+}
 
-  // Mock route data
-  const routeData = {
-    routeName: 'City Express',
-    routeCode: 'RT-001',
-    busNumber: 'B-001',
-    tripId: 'TR-2024-015',
-    totalStops: 12,
-    completedStops: 2,
-    distanceCovered: 24,
-    totalDistance: 60,
-    timeElapsed: '1:15',
-    totalTime: '3:00',
-    nextStopETA: '08:45 AM',
-  };
+const RouteScreen: React.FC<RouteScreenProps> = ({ navigation, route }) => {
+  const user = auth().currentUser;
+  const tripIdFromParams = route?.params?.tripId;
 
-  // Mock stops data
-  const [stops, setStops] = useState<Stop[]>([
-    { id: '1', number: 1, name: 'Main Terminal', scheduledTime: '07:00', actualTime: '07:02', status: 'COMPLETED', passengerCount: 12 },
-    { id: '2', number: 2, name: 'City Mall', scheduledTime: '07:25', actualTime: '07:28', status: 'COMPLETED', passengerCount: 8 },
-    { id: '3', number: 3, name: 'University', scheduledTime: '07:45', actualTime: '07:47', status: 'CURRENT', passengerCount: 15 },
-    { id: '4', number: 4, name: 'Hospital', scheduledTime: '08:15', status: 'UPCOMING', passengerCount: 5 },
-    { id: '5', number: 5, name: 'Airport', scheduledTime: '08:45', status: 'UPCOMING', passengerCount: 7 },
-    { id: '6', number: 6, name: 'Industrial Area', scheduledTime: '09:15', status: 'UPCOMING', passengerCount: 3 },
-  ]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [tripData, setTripData] = useState<TripData | null>(null);
+  const [stops, setStops] = useState<Stop[]>([]);
+  const [currentStopIndex, setCurrentStopIndex] = useState(0);
+  const [currentTime, setCurrentTime] = useState(new Date().toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit'
+  }));
 
-  const currentStop = stops[currentStopIndex];
-
-  const handleMarkReached = () => {
-    const updatedStops = [...stops];
-    updatedStops[currentStopIndex] = {
-      ...updatedStops[currentStopIndex],
-      status: 'COMPLETED',
-      actualTime: new Date().toLocaleTimeString('en-US', {
+  // Update time every minute
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(new Date().toLocaleTimeString('en-US', {
         hour: '2-digit',
-        minute: '2-digit',
-        hour12: false
-      }).slice(0, 5),
+        minute: '2-digit'
+      }));
+    }, 60000);
+
+    return () => clearInterval(timer);
+  }, []);
+
+  // Fetch trip data from Firebase
+  useEffect(() => {
+    if (!user) return;
+
+    let unsubscribeTrip: () => void;
+    let unsubscribeStops: () => void;
+
+    const fetchTripData = async () => {
+      try {
+        setLoading(true);
+
+        // Find active trip for this driver
+        let tripQuery;
+        if (tripIdFromParams) {
+          // If tripId provided in params
+          tripQuery = firestore().collection('trips').doc(tripIdFromParams);
+        } else {
+          // Otherwise find active trip
+          tripQuery = firestore()
+            .collection('trips')
+            .where('driverId', '==', user.uid)
+            .where('status', 'in', ['in-progress', 'ready'])
+            .limit(1);
+        }
+
+        if (tripIdFromParams) {
+          // Single doc listener
+          unsubscribeTrip = (tripQuery as firestore.DocumentReference).onSnapshot(
+            (doc) => {
+              if (doc.exists) {
+                const data = doc.data();
+                setTripData({
+                  id: doc.id,
+                  routeName: data?.routeName || 'City Express',
+                  routeCode: data?.routeCode || 'RT-001',
+                  busNumber: data?.busNumber || 'B-001',
+                  tripId: doc.id,
+                  totalStops: data?.totalStops || 12,
+                  completedStops: data?.completedStops || 0,
+                  distanceCovered: data?.distanceCovered || 0,
+                  totalDistance: data?.totalDistance || 60,
+                  timeElapsed: data?.timeElapsed || '0:00',
+                  totalTime: data?.totalTime || '3:00',
+                  nextStopETA: data?.nextStopETA || '--:--',
+                  status: data?.status || 'in-progress',
+                  startTime: data?.startTime,
+                  estimatedEndTime: data?.estimatedEndTime,
+                });
+              } else {
+                Alert.alert('Error', 'Trip not found');
+                navigation.goBack();
+              }
+            },
+            (error) => {
+              console.error('Error fetching trip:', error);
+              setLoading(false);
+            }
+          );
+
+          // Fetch stops for this trip
+          unsubscribeStops = firestore()
+            .collection('stops')
+            .where('tripId', '==', tripIdFromParams)
+            .orderBy('number', 'asc')
+            .onSnapshot(
+              (snapshot) => {
+                const stopsData: Stop[] = [];
+                snapshot.forEach(doc => {
+                  const data = doc.data();
+                  stopsData.push({
+                    id: doc.id,
+                    number: data.number || 0,
+                    name: data.name || 'Unknown Stop',
+                    scheduledTime: data.scheduledTime || '--:--',
+                    actualTime: data.actualTime,
+                    status: data.status || 'UPCOMING',
+                    passengerCount: data.passengerCount || 0,
+                    location: data.location,
+                  });
+
+                  // Find current stop index
+                  const currentIndex = stopsData.findIndex(s => s.status === 'CURRENT');
+                  if (currentIndex !== -1) {
+                    setCurrentStopIndex(currentIndex);
+                  }
+                });
+                setStops(stopsData);
+                setLoading(false);
+                setRefreshing(false);
+              },
+              (error) => {
+                console.error('Error fetching stops:', error);
+                setLoading(false);
+                setRefreshing(false);
+              }
+            );
+        } else {
+          // Collection query listener
+          unsubscribeTrip = (tripQuery as firestore.Query).onSnapshot(
+            async (snapshot) => {
+              if (!snapshot.empty) {
+                const tripDoc = snapshot.docs[0];
+                const data = tripDoc.data();
+                setTripData({
+                  id: tripDoc.id,
+                  routeName: data?.routeName || 'City Express',
+                  routeCode: data?.routeCode || 'RT-001',
+                  busNumber: data?.busNumber || 'B-001',
+                  tripId: tripDoc.id,
+                  totalStops: data?.totalStops || 12,
+                  completedStops: data?.completedStops || 0,
+                  distanceCovered: data?.distanceCovered || 0,
+                  totalDistance: data?.totalDistance || 60,
+                  timeElapsed: data?.timeElapsed || '0:00',
+                  totalTime: data?.totalTime || '3:00',
+                  nextStopETA: data?.nextStopETA || '--:--',
+                  status: data?.status || 'in-progress',
+                  startTime: data?.startTime,
+                  estimatedEndTime: data?.estimatedEndTime,
+                });
+
+                // Fetch stops for this trip
+                unsubscribeStops = firestore()
+                  .collection('stops')
+                  .where('tripId', '==', tripDoc.id)
+                  .orderBy('number', 'asc')
+                  .onSnapshot(
+                    (stopSnapshot) => {
+                      const stopsData: Stop[] = [];
+                      stopSnapshot.forEach(doc => {
+                        const data = doc.data();
+                        stopsData.push({
+                          id: doc.id,
+                          number: data.number || 0,
+                          name: data.name || 'Unknown Stop',
+                          scheduledTime: data.scheduledTime || '--:--',
+                          actualTime: data.actualTime,
+                          status: data.status || 'UPCOMING',
+                          passengerCount: data.passengerCount || 0,
+                          location: data.location,
+                        });
+
+                        // Find current stop index
+                        const currentIndex = stopsData.findIndex(s => s.status === 'CURRENT');
+                        if (currentIndex !== -1) {
+                          setCurrentStopIndex(currentIndex);
+                        }
+                      });
+                      setStops(stopsData);
+                      setLoading(false);
+                      setRefreshing(false);
+                    },
+                    (error) => {
+                      console.error('Error fetching stops:', error);
+                      setLoading(false);
+                      setRefreshing(false);
+                    }
+                  );
+              } else {
+                Alert.alert(
+                  'No Active Trip',
+                  'You don\'t have any active trip.',
+                  [
+                    {
+                      text: 'Go to Dashboard',
+                      onPress: () => navigation.navigate('Dashboard')
+                    }
+                  ]
+                );
+                setLoading(false);
+              }
+            },
+            (error) => {
+              console.error('Error fetching trip:', error);
+              setLoading(false);
+              setRefreshing(false);
+            }
+          );
+        }
+
+      } catch (error) {
+        console.error('Error in fetchTripData:', error);
+        setLoading(false);
+        setRefreshing(false);
+      }
     };
 
-    if (currentStopIndex < stops.length - 1) {
-      updatedStops[currentStopIndex + 1].status = 'CURRENT';
-      setCurrentStopIndex(prev => prev + 1);
-    }
+    fetchTripData();
 
-    setStops(updatedStops);
+    return () => {
+      if (unsubscribeTrip) unsubscribeTrip();
+      if (unsubscribeStops) unsubscribeStops();
+    };
+  }, [user, tripIdFromParams]);
+
+  // Handle mark stop as reached
+  const handleMarkReached = async () => {
+    if (!tripData || !stops.length) return;
+
+    const currentStop = stops[currentStopIndex];
+    if (!currentStop) return;
 
     Alert.alert(
-      'Stop Reached',
-      `You have reached ${currentStop.name}. ${currentStop.passengerCount} passengers to board.`,
-      [{ text: 'OK' }]
+      'Confirm Stop Reached',
+      `Have you reached ${currentStop.name}?\n\n${currentStop.passengerCount} passengers waiting to board.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Yes, Mark Reached',
+          onPress: async () => {
+            try {
+              const batch = firestore().batch();
+              const now = new Date();
+              const currentTimeStr = now.toLocaleTimeString('en-US', {
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: false
+              }).slice(0, 5);
+
+              // Update current stop
+              const stopRef = firestore().collection('stops').doc(currentStop.id);
+              batch.update(stopRef, {
+                status: 'COMPLETED',
+                actualTime: currentTimeStr,
+                reachedAt: firestore.FieldValue.serverTimestamp(),
+              });
+
+              // Update next stop if exists
+              if (currentStopIndex < stops.length - 1) {
+                const nextStopRef = firestore().collection('stops').doc(stops[currentStopIndex + 1].id);
+                batch.update(nextStopRef, {
+                  status: 'CURRENT',
+                });
+
+                // Update trip progress
+                const tripRef = firestore().collection('trips').doc(tripData.id);
+                batch.update(tripRef, {
+                  completedStops: currentStopIndex + 1,
+                  currentStopId: stops[currentStopIndex + 1].id,
+                  distanceCovered: ((currentStopIndex + 1) / stops.length) * tripData.totalDistance,
+                  lastUpdated: firestore.FieldValue.serverTimestamp(),
+                });
+
+                setCurrentStopIndex(prev => prev + 1);
+              } else {
+                // Last stop reached - complete trip
+                const tripRef = firestore().collection('trips').doc(tripData.id);
+                batch.update(tripRef, {
+                  status: 'completed',
+                  completedStops: stops.length,
+                  completedAt: firestore.FieldValue.serverTimestamp(),
+                });
+
+                Alert.alert(
+                  'Trip Completed!',
+                  'You have reached the final stop. Trip completed successfully.',
+                  [
+                    {
+                      text: 'OK',
+                      onPress: () => navigation.navigate('Dashboard')
+                    }
+                  ]
+                );
+              }
+
+              await batch.commit();
+
+              Alert.alert(
+                'Stop Reached',
+                `You have reached ${currentStop.name}. ${currentStop.passengerCount} passengers can now board.`,
+                [{ text: 'OK' }]
+              );
+
+            } catch (error) {
+              console.error('Error marking stop reached:', error);
+              Alert.alert('Error', 'Failed to update stop status. Please try again.');
+            }
+          }
+        }
+      ]
     );
   };
 
-  const handlePrevStop = () => {
-    if (currentStopIndex > 0) {
-      setCurrentStopIndex(prev => prev - 1);
-    }
+  // Handle report delay
+  const handleReportDelay = () => {
+    if (!tripData) return;
+
+    Alert.alert(
+      'Report Delay',
+      'Select delay reason:',
+      [
+        {
+          text: 'Traffic Congestion',
+          onPress: async () => {
+            try {
+              await firestore().collection('delays').add({
+                tripId: tripData.id,
+                driverId: user?.uid,
+                stopId: stops[currentStopIndex]?.id,
+                stopName: stops[currentStopIndex]?.name,
+                reason: 'Traffic Congestion',
+                estimatedDelay: '10 min',
+                timestamp: firestore.FieldValue.serverTimestamp(),
+              });
+              Alert.alert('Delay Reported', 'Traffic delay reported to dispatch.');
+            } catch (error) {
+              Alert.alert('Error', 'Failed to report delay.');
+            }
+          }
+        },
+        {
+          text: 'Passenger Delay',
+          onPress: async () => {
+            try {
+              await firestore().collection('delays').add({
+                tripId: tripData.id,
+                driverId: user?.uid,
+                stopId: stops[currentStopIndex]?.id,
+                stopName: stops[currentStopIndex]?.name,
+                reason: 'Passenger Delay',
+                estimatedDelay: '3 min',
+                timestamp: firestore.FieldValue.serverTimestamp(),
+              });
+              Alert.alert('Delay Reported', 'Passenger delay reported.');
+            } catch (error) {
+              Alert.alert('Error', 'Failed to report delay.');
+            }
+          }
+        },
+        {
+          text: 'Mechanical Issue',
+          onPress: async () => {
+            try {
+              await firestore().collection('delays').add({
+                tripId: tripData.id,
+                driverId: user?.uid,
+                stopId: stops[currentStopIndex]?.id,
+                stopName: stops[currentStopIndex]?.name,
+                reason: 'Mechanical Issue',
+                estimatedDelay: '20 min',
+                timestamp: firestore.FieldValue.serverTimestamp(),
+              });
+              Alert.alert('Delay Reported', 'Mechanical issue reported to maintenance.');
+            } catch (error) {
+              Alert.alert('Error', 'Failed to report issue.');
+            }
+          }
+        },
+        { text: 'Cancel', style: 'cancel' }
+      ]
+    );
   };
 
-  const handleNextStop = () => {
-    if (currentStopIndex < stops.length - 1) {
-      setCurrentStopIndex(prev => prev + 1);
-    }
-  };
-
+  // Handle emergency
   const handleEmergency = () => {
-    // Direct navigation to Emergency screen
-    navigation.navigate('Emergency');
+    Alert.alert(
+      '🚨 EMERGENCY',
+      'This will contact emergency services. Are you sure?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Yes, Emergency',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await firestore().collection('emergencies').add({
+                tripId: tripData?.id,
+                driverId: user?.uid,
+                location: stops[currentStopIndex]?.name,
+                timestamp: firestore.FieldValue.serverTimestamp(),
+                status: 'active',
+              });
+              navigation.navigate('Emergency');
+            } catch (error) {
+              console.error('Error reporting emergency:', error);
+              navigation.navigate('Emergency');
+            }
+          }
+        }
+      ]
+    );
   };
 
+  // Render stop item
   const renderStopItem = (stop: Stop) => {
     let statusIndicator = '○';
     let statusColor = '#666666';
@@ -163,9 +527,28 @@ const RouteScreen: React.FC<RouteScreenProps> = ({ navigation }) => {
     );
   };
 
+  // Calculate progress percentage
   const calculateProgress = () => {
-    return (routeData.distanceCovered / routeData.totalDistance) * 100;
+    if (!tripData) return 0;
+    return (tripData.completedStops / stops.length) * 100;
   };
+
+  // Handle refresh
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    // Data will auto-refresh via Firebase listeners
+  }, []);
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#4A90E2" />
+        <Text style={styles.loadingText}>Loading route data...</Text>
+      </SafeAreaView>
+    );
+  }
+
+  const currentStop = stops[currentStopIndex];
 
   return (
     <SafeAreaView style={styles.container}>
@@ -174,27 +557,28 @@ const RouteScreen: React.FC<RouteScreenProps> = ({ navigation }) => {
       {/* Top Bar */}
       <View style={styles.topBar}>
         <View>
-          <Text style={styles.routeTitle}>{routeData.routeName}</Text>
+          <Text style={styles.routeTitle}>{tripData?.routeName}</Text>
           <Text style={styles.routeSubtitle}>
-            {routeData.routeCode} • Bus: {routeData.busNumber}
+            {tripData?.routeCode} • Bus: {tripData?.busNumber}
           </Text>
         </View>
         <View style={styles.timeContainer}>
-          <Text style={styles.currentTime}>
-            {new Date().toLocaleTimeString('en-US', {
-              hour: '2-digit',
-              minute: '2-digit'
-            })}
-          </Text>
+          <Text style={styles.currentTime}>{currentTime}</Text>
         </View>
       </View>
 
-      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={styles.scrollView}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+      >
         {/* Simple Map Representation */}
         <View style={styles.mapContainer}>
           <View style={styles.mapPlaceholder}>
             <Text style={styles.mapTitle}>📍 Route Map</Text>
-            <Text style={styles.mapSubtitle}>City Express Route</Text>
+            <Text style={styles.mapSubtitle}>{tripData?.routeName}</Text>
 
             {/* Simple map visualization */}
             <View style={styles.simpleMap}>
@@ -228,7 +612,7 @@ const RouteScreen: React.FC<RouteScreenProps> = ({ navigation }) => {
             <View style={styles.mapLegend}>
               <View style={styles.legendItem}>
                 <View style={[styles.legendColor, { backgroundColor: '#2196F3' }]} />
-                <Text style={styles.legendText}>Current Stop</Text>
+                <Text style={styles.legendText}>Current</Text>
               </View>
               <View style={styles.legendItem}>
                 <View style={[styles.legendColor, { backgroundColor: '#4CAF50' }]} />
@@ -248,38 +632,30 @@ const RouteScreen: React.FC<RouteScreenProps> = ({ navigation }) => {
 
           <View style={styles.currentStopCard}>
             <View style={styles.stopHeader}>
-              <Text style={styles.stopNumberLarge}>#{currentStop.number}</Text>
-              <Text style={styles.stopNameLarge}>{currentStop.name}</Text>
+              <Text style={styles.stopNumberLarge}>#{currentStop?.number}</Text>
+              <Text style={styles.stopNameLarge}>{currentStop?.name}</Text>
             </View>
 
             <View style={styles.stopTiming}>
               <View style={styles.timingItem}>
                 <Text style={styles.timingLabel}>Scheduled</Text>
-                <Text style={styles.timingValue}>{currentStop.scheduledTime}</Text>
+                <Text style={styles.timingValue}>{currentStop?.scheduledTime}</Text>
               </View>
               <View style={styles.timingDivider} />
               <View style={styles.timingItem}>
                 <Text style={styles.timingLabel}>Actual</Text>
                 <Text style={styles.timingValue}>
-                  {currentStop.actualTime || '--:--'}
+                  {currentStop?.actualTime || '--:--'}
                 </Text>
               </View>
             </View>
 
             <Text style={styles.passengerAlert}>
-              👥 {currentStop.passengerCount} passengers waiting to board
+              👥 {currentStop?.passengerCount || 0} passengers waiting to board
             </Text>
 
             {/* Control Buttons */}
             <View style={styles.controlButtons}>
-              <TouchableOpacity
-                style={[styles.controlButton, styles.prevButton]}
-                onPress={handlePrevStop}
-                disabled={currentStopIndex === 0}
-              >
-                <Text style={styles.controlButtonText}>← PREV STOP</Text>
-              </TouchableOpacity>
-
               <TouchableOpacity
                 style={[styles.controlButton, styles.reachedButton]}
                 onPress={handleMarkReached}
@@ -288,11 +664,10 @@ const RouteScreen: React.FC<RouteScreenProps> = ({ navigation }) => {
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={[styles.controlButton, styles.nextButton]}
-                onPress={handleNextStop}
-                disabled={currentStopIndex === stops.length - 1}
+                style={[styles.controlButton, styles.delayButton]}
+                onPress={handleReportDelay}
               >
-                <Text style={styles.controlButtonText}>NEXT STOP →</Text>
+                <Text style={styles.delayButtonText}>⏰ REPORT DELAY</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -312,7 +687,7 @@ const RouteScreen: React.FC<RouteScreenProps> = ({ navigation }) => {
 
           <View style={styles.progressCard}>
             <View style={styles.progressHeader}>
-              <Text style={styles.tripId}>Trip ID: {routeData.tripId}</Text>
+              <Text style={styles.tripId}>Trip ID: {tripData?.tripId?.slice(0, 8)}</Text>
               <Text style={styles.progressPercentage}>
                 {Math.round(calculateProgress())}%
               </Text>
@@ -337,23 +712,23 @@ const RouteScreen: React.FC<RouteScreenProps> = ({ navigation }) => {
             {/* Stats */}
             <View style={styles.statsGrid}>
               <View style={styles.statItem}>
-                <Text style={styles.statValue}>{routeData.distanceCovered} km</Text>
-                <Text style={styles.statLabel}>Distance Covered</Text>
+                <Text style={styles.statValue}>{tripData?.completedStops}/{tripData?.totalStops}</Text>
+                <Text style={styles.statLabel}>Stops</Text>
               </View>
               <View style={styles.statItem}>
-                <Text style={styles.statValue}>{routeData.timeElapsed}</Text>
-                <Text style={styles.statLabel}>Time Elapsed</Text>
+                <Text style={styles.statValue}>{Math.round(tripData?.distanceCovered || 0)} km</Text>
+                <Text style={styles.statLabel}>Distance</Text>
               </View>
               <View style={styles.statItem}>
-                <Text style={styles.statValue}>{routeData.nextStopETA}</Text>
-                <Text style={styles.statLabel}>Next Stop ETA</Text>
+                <Text style={styles.statValue}>{tripData?.nextStopETA}</Text>
+                <Text style={styles.statLabel}>Next ETA</Text>
               </View>
             </View>
           </View>
         </View>
       </ScrollView>
 
-      {/* Floating Emergency Button (Fixed Position) */}
+      {/* Floating Emergency Button */}
       <TouchableOpacity
         style={styles.floatingEmergencyButton}
         onPress={handleEmergency}
@@ -372,6 +747,17 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F8F9FA',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#F8F9FA',
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: '#4A90E2',
   },
   topBar: {
     backgroundColor: '#1A237E',
@@ -572,24 +958,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  prevButton: {
-    backgroundColor: '#F8F9FA',
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
-  },
   reachedButton: {
     backgroundColor: '#4CAF50',
   },
-  nextButton: {
-    backgroundColor: '#4A90E2',
-  },
-  controlButtonText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#666666',
+  delayButton: {
+    backgroundColor: '#FF9800',
   },
   reachedButtonText: {
-    fontSize: 12,
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  delayButtonText: {
+    fontSize: 14,
     fontWeight: '600',
     color: '#FFFFFF',
   },
