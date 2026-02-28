@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,95 +7,233 @@ import {
   ScrollView,
   SafeAreaView,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { PassengerStackParamList } from '../../navigation/PassengerNavigator';
 import Icon from 'react-native-vector-icons/MaterialIcons';
+import firestore from '@react-native-firebase/firestore';
+import auth from '@react-native-firebase/auth';
 
 type SearchResultsScreenNavigationProp = StackNavigationProp<PassengerStackParamList, 'SearchResults'>;
 type SearchResultsScreenRouteProp = RouteProp<PassengerStackParamList, 'SearchResults'>;
 
+interface Bus {
+  id: string;
+  busNumber: string;
+  busType: string;
+  departureTime: string;
+  arrivalTime: string;
+  routeName: string;
+  routeCode: string;
+  availableSeats: number;
+  totalSeats: number;
+  fare: number;
+  driver: {
+    id: string;
+    name: string;
+    rating: number;
+  };
+  amenities: string[];
+  busId: string;
+  operator: string;
+  duration: string;
+  distance: string;
+}
+
 const SearchResultsScreen = () => {
   const navigation = useNavigation<SearchResultsScreenNavigationProp>();
   const route = useRoute<SearchResultsScreenRouteProp>();
-  const { from, to, date, time } = route.params;
+  const user = auth().currentUser;
 
-  // Dummy bus data
-  const [buses, setBuses] = useState([
-    {
-      id: 'bus-001',
-      busNumber: 'B-001',
-      busType: 'Toyota Coaster',
-      departureTime: '08:00 AM',
-      arrivalTime: '09:30 AM',
-      route: 'Downtown Express (RT-005)',
-      availableSeats: 12,
-      fare: 12,
-      driver: { name: 'Ali Ahmed', rating: 4.8 },
-      amenities: ['AC', 'WiFi', 'Water'],
-    },
-    {
-      id: 'bus-002',
-      busNumber: 'B-003',
-      busType: 'Mitsubishi Rosa',
-      departureTime: '09:00 AM',
-      arrivalTime: '10:30 AM',
-      route: 'Airport Express',
-      availableSeats: 8,
-      fare: 15,
-      driver: { name: 'Sara Khan', rating: 4.5 },
-      amenities: ['AC', 'TV'],
-    },
-    {
-      id: 'bus-003',
-      busNumber: 'B-005',
-      busType: 'Hiace',
-      departureTime: '10:00 AM',
-      arrivalTime: '11:30 AM',
-      route: 'Premium Service',
-      availableSeats: 20,
-      fare: 20,
-      driver: { name: 'Usman Ali', rating: 4.2 },
-      amenities: ['AC', 'VIP', 'WiFi', 'Snacks'],
-    },
-  ]);
+  const { from, to, fromCode, toCode, date, time, routeId } = route.params;
+
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [buses, setBuses] = useState<Bus[]>([]);
+  const [filteredBuses, setFilteredBuses] = useState<Bus[]>([]);
+  const [sortBy, setSortBy] = useState<'departure' | 'price' | 'rating'>('departure');
+  const [filterType, setFilterType] = useState<string>('all');
+
+  // Fetch buses from Firebase
+  useEffect(() => {
+    fetchBuses();
+  }, [from, to, date]);
+
+  const fetchBuses = async () => {
+    try {
+      setLoading(true);
+
+      // Query trips based on from/to locations
+      let query = firestore().collection('trips');
+
+      // If we have routeId from quick booking, use it
+      if (routeId) {
+        query = query.where('routeId', '==', routeId);
+      } else {
+        // Otherwise search by from/to
+        if (fromCode) {
+          query = query.where('fromCode', '==', fromCode);
+        }
+        if (toCode) {
+          query = query.where('toCode', '==', toCode);
+        }
+      }
+
+      // Filter by date (if provided)
+      if (date && date !== 'Anytime') {
+        query = query.where('date', '==', date);
+      }
+
+      // Only show trips with available seats
+      query = query.where('availableSeats', '>', 0);
+
+      const snapshot = await query.get();
+
+      const busesList: Bus[] = [];
+
+      for (const doc of snapshot.docs) {
+        const data = doc.data();
+
+        // Get route details
+        let routeName = data.routeName || '';
+        let routeCode = data.routeCode || '';
+
+        if (data.routeId) {
+          const routeDoc = await firestore().collection('routes').doc(data.routeId).get();
+          if (routeDoc.exists) {
+            const routeData = routeDoc.data();
+            routeName = routeData?.name || routeName;
+            routeCode = routeData?.code || routeCode;
+          }
+        }
+
+        // Get driver details
+        let driverName = 'Not assigned';
+        let driverRating = 0;
+
+        if (data.driverId) {
+          const driverDoc = await firestore().collection('drivers').doc(data.driverId).get();
+          if (driverDoc.exists) {
+            const driverData = driverDoc.data();
+            driverName = driverData?.fullName || 'Driver';
+            driverRating = driverData?.rating || 0;
+          }
+        }
+
+        busesList.push({
+          id: doc.id,
+          busNumber: data.busNumber || 'N/A',
+          busType: data.busType || 'Standard',
+          departureTime: data.departureTime || '00:00',
+          arrivalTime: data.arrivalTime || '00:00',
+          routeName: routeName,
+          routeCode: data.routeCode || '',
+          availableSeats: data.availableSeats || 0,
+          totalSeats: data.totalSeats || 40,
+          fare: data.fare || 0,
+          driver: {
+            id: data.driverId || '',
+            name: driverName,
+            rating: driverRating,
+          },
+          amenities: data.amenities || ['AC', 'WiFi'],
+          busId: data.busId || '',
+          operator: data.operator || 'ZUGO Transport',
+          duration: data.duration || '1h 30m',
+          distance: data.distance || '45 km',
+        });
+      }
+
+      // Sort by departure time initially
+      const sorted = busesList.sort((a, b) =>
+        a.departureTime.localeCompare(b.departureTime)
+      );
+
+      setBuses(sorted);
+      setFilteredBuses(sorted);
+      setLoading(false);
+
+    } catch (error) {
+      console.error('Error fetching buses:', error);
+      Alert.alert('Error', 'Failed to load bus schedules');
+      setLoading(false);
+    }
+  };
 
   const handleSelectBus = (busId: string) => {
     const selectedBus = buses.find(bus => bus.id === busId);
     if (selectedBus && selectedBus.availableSeats > 0) {
       navigation.navigate('SeatSelection', {
-        busId,
+        tripId: busId,
+        busId: selectedBus.busId,
         from,
         to,
+        fromCode,
+        toCode,
         date,
         time: selectedBus.departureTime,
+        fare: selectedBus.fare,
+        busNumber: selectedBus.busNumber,
       });
     } else {
       Alert.alert('No Seats Available', 'This bus has no available seats.');
     }
   };
 
-  const handleSort = (type: 'price' | 'time' | 'rating') => {
-    let sortedBuses = [...buses];
+  const handleSort = (type: 'departure' | 'price' | 'rating') => {
+    setSortBy(type);
+
+    let sortedBuses = [...filteredBuses];
 
     switch (type) {
+      case 'departure':
+        sortedBuses.sort((a, b) => a.departureTime.localeCompare(b.departureTime));
+        break;
       case 'price':
         sortedBuses.sort((a, b) => a.fare - b.fare);
-        break;
-      case 'time':
-        sortedBuses.sort((a, b) =>
-          a.departureTime.localeCompare(b.departureTime)
-        );
         break;
       case 'rating':
         sortedBuses.sort((a, b) => b.driver.rating - a.driver.rating);
         break;
     }
 
-    setBuses(sortedBuses);
-    Alert.alert('Sorted', `Sorted by ${type}`);
+    setFilteredBuses(sortedBuses);
   };
+
+  const handleFilter = (type: string) => {
+    setFilterType(type);
+
+    if (type === 'all') {
+      setFilteredBuses(buses);
+      return;
+    }
+
+    const filtered = buses.filter(bus => {
+      if (type === 'ac' && bus.amenities.includes('AC')) return true;
+      if (type === 'luxury' && bus.busType === 'Luxury') return true;
+      if (type === 'economy' && bus.fare < 15) return true;
+      return false;
+    });
+
+    setFilteredBuses(filtered);
+  };
+
+  const formatCurrency = (amount: number) => {
+    return `PKR ${amount.toLocaleString()}`;
+  };
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#4A90E2" />
+          <Text style={styles.loadingText}>Finding buses...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -117,11 +255,13 @@ const SearchResultsScreen = () => {
             <View style={styles.locationContainer}>
               <Icon name="location-on" size={20} color="#4A90E2" />
               <Text style={styles.locationText}>{from}</Text>
+              {fromCode && <Text style={styles.locationCode}>({fromCode})</Text>}
             </View>
             <Icon name="arrow-forward" size={20} color="#666" />
             <View style={styles.locationContainer}>
               <Icon name="location-on" size={20} color="#4A90E2" />
               <Text style={styles.locationText}>{to}</Text>
+              {toCode && <Text style={styles.locationCode}>({toCode})</Text>}
             </View>
           </View>
 
@@ -137,38 +277,107 @@ const SearchResultsScreen = () => {
           </View>
         </View>
 
+        {/* Filter Chips */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.filterScroll}
+        >
+          <TouchableOpacity
+            style={[styles.filterChip, filterType === 'all' && styles.filterChipActive]}
+            onPress={() => handleFilter('all')}
+          >
+            <Text style={[styles.filterChipText, filterType === 'all' && styles.filterChipTextActive]}>
+              All
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.filterChip, filterType === 'ac' && styles.filterChipActive]}
+            onPress={() => handleFilter('ac')}
+          >
+            <Icon name="ac-unit" size={16} color={filterType === 'ac' ? '#FFF' : '#666'} />
+            <Text style={[styles.filterChipText, filterType === 'ac' && styles.filterChipTextActive]}>
+              AC
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.filterChip, filterType === 'luxury' && styles.filterChipActive]}
+            onPress={() => handleFilter('luxury')}
+          >
+            <Icon name="star" size={16} color={filterType === 'luxury' ? '#FFF' : '#666'} />
+            <Text style={[styles.filterChipText, filterType === 'luxury' && styles.filterChipTextActive]}>
+              Luxury
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.filterChip, filterType === 'economy' && styles.filterChipActive]}
+            onPress={() => handleFilter('economy')}
+          >
+            <Icon name="attach-money" size={16} color={filterType === 'economy' ? '#FFF' : '#666'} />
+            <Text style={[styles.filterChipText, filterType === 'economy' && styles.filterChipTextActive]}>
+              Economy
+            </Text>
+          </TouchableOpacity>
+        </ScrollView>
+
         {/* Sort Options */}
         <View style={styles.sortSection}>
           <Text style={styles.sortTitle}>Sort by:</Text>
           <View style={styles.sortButtons}>
             <TouchableOpacity
-              style={styles.sortButton}
-              onPress={() => handleSort('time')}
+              style={[styles.sortButton, sortBy === 'departure' && styles.sortButtonActive]}
+              onPress={() => handleSort('departure')}
             >
-              <Text style={styles.sortButtonText}>Departure Time</Text>
+              <Icon
+                name="schedule"
+                size={16}
+                color={sortBy === 'departure' ? '#FFF' : '#666'}
+              />
+              <Text style={[styles.sortButtonText, sortBy === 'departure' && styles.sortButtonTextActive]}>
+                Departure
+              </Text>
             </TouchableOpacity>
+
             <TouchableOpacity
-              style={styles.sortButton}
+              style={[styles.sortButton, sortBy === 'price' && styles.sortButtonActive]}
               onPress={() => handleSort('price')}
             >
-              <Text style={styles.sortButtonText}>Price</Text>
+              <Icon
+                name="attach-money"
+                size={16}
+                color={sortBy === 'price' ? '#FFF' : '#666'}
+              />
+              <Text style={[styles.sortButtonText, sortBy === 'price' && styles.sortButtonTextActive]}>
+                Price
+              </Text>
             </TouchableOpacity>
+
             <TouchableOpacity
-              style={styles.sortButton}
+              style={[styles.sortButton, sortBy === 'rating' && styles.sortButtonActive]}
               onPress={() => handleSort('rating')}
             >
-              <Text style={styles.sortButtonText}>Rating</Text>
+              <Icon
+                name="star"
+                size={16}
+                color={sortBy === 'rating' ? '#FFF' : '#666'}
+              />
+              <Text style={[styles.sortButtonText, sortBy === 'rating' && styles.sortButtonTextActive]}>
+                Rating
+              </Text>
             </TouchableOpacity>
           </View>
         </View>
 
         {/* Results Count */}
         <Text style={styles.resultsCount}>
-          {buses.length} buses found
+          {filteredBuses.length} buses found
         </Text>
 
         {/* Bus Results */}
-        {buses.map((bus) => (
+        {filteredBuses.map((bus) => (
           <TouchableOpacity
             key={bus.id}
             style={styles.busCard}
@@ -183,9 +392,15 @@ const SearchResultsScreen = () => {
                   {bus.departureTime} - {bus.arrivalTime}
                 </Text>
               </View>
-              <View style={styles.seatBadge}>
+              <View style={[
+                styles.seatBadge,
+                bus.availableSeats < 5 && styles.seatBadgeWarning,
+                bus.availableSeats === 0 && styles.seatBadgeSoldOut
+              ]}>
                 <Icon name="event-seat" size={16} color="#FFF" />
-                <Text style={styles.seatBadgeText}>{bus.availableSeats} seats</Text>
+                <Text style={styles.seatBadgeText}>
+                  {bus.availableSeats === 0 ? 'Sold Out' : `${bus.availableSeats} seats`}
+                </Text>
               </View>
             </View>
 
@@ -200,23 +415,40 @@ const SearchResultsScreen = () => {
               </View>
 
               <View style={styles.detailsColumn}>
-                <Text style={styles.routeText}>{bus.route}</Text>
+                <Text style={styles.routeText}>{bus.routeName}</Text>
+                <Text style={styles.routeCode}>{bus.routeCode}</Text>
 
                 <View style={styles.driverRow}>
                   <Icon name="person" size={16} color="#666" />
                   <Text style={styles.driverText}>Driver: {bus.driver.name}</Text>
                   <View style={styles.ratingContainer}>
                     <Icon name="star" size={14} color="#FFD700" />
-                    <Text style={styles.ratingText}>{bus.driver.rating}★</Text>
+                    <Text style={styles.ratingText}>{bus.driver.rating.toFixed(1)}★</Text>
                   </View>
                 </View>
 
                 <View style={styles.amenitiesRow}>
-                  {bus.amenities.map((amenity, index) => (
+                  {bus.amenities.slice(0, 3).map((amenity, index) => (
                     <View key={index} style={styles.amenityBadge}>
                       <Text style={styles.amenityText}>{amenity}</Text>
                     </View>
                   ))}
+                  {bus.amenities.length > 3 && (
+                    <View style={styles.amenityBadge}>
+                      <Text style={styles.amenityText}>+{bus.amenities.length - 3}</Text>
+                    </View>
+                  )}
+                </View>
+
+                <View style={styles.tripInfoRow}>
+                  <View style={styles.tripInfoItem}>
+                    <Icon name="timer" size={14} color="#666" />
+                    <Text style={styles.tripInfoText}>{bus.duration}</Text>
+                  </View>
+                  <View style={styles.tripInfoItem}>
+                    <Icon name="straighten" size={14} color="#666" />
+                    <Text style={styles.tripInfoText}>{bus.distance}</Text>
+                  </View>
                 </View>
               </View>
             </View>
@@ -225,23 +457,31 @@ const SearchResultsScreen = () => {
             <View style={styles.footer}>
               <View style={styles.fareContainer}>
                 <Text style={styles.fareLabel}>Fare:</Text>
-                <Text style={styles.fareAmount}>${bus.fare}</Text>
+                <Text style={styles.fareAmount}>{formatCurrency(bus.fare)}</Text>
                 <Text style={styles.perPerson}>/person</Text>
               </View>
 
               <TouchableOpacity
-                style={styles.selectButton}
+                style={[
+                  styles.selectButton,
+                  bus.availableSeats === 0 && styles.selectButtonDisabled
+                ]}
                 onPress={() => handleSelectBus(bus.id)}
+                disabled={bus.availableSeats === 0}
               >
-                <Text style={styles.selectButtonText}>SELECT SEATS</Text>
-                <Icon name="arrow-forward" size={18} color="#FFF" />
+                <Text style={styles.selectButtonText}>
+                  {bus.availableSeats === 0 ? 'SOLD OUT' : 'SELECT SEATS'}
+                </Text>
+                {bus.availableSeats > 0 && (
+                  <Icon name="arrow-forward" size={18} color="#FFF" />
+                )}
               </TouchableOpacity>
             </View>
           </TouchableOpacity>
         ))}
 
         {/* No Results Message */}
-        {buses.length === 0 && (
+        {filteredBuses.length === 0 && (
           <View style={styles.noResultsContainer}>
             <Icon name="search-off" size={60} color="#CCC" />
             <Text style={styles.noResultsText}>No buses found</Text>
@@ -263,6 +503,17 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     padding: 16,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#F8F9FA',
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: '#4A90E2',
   },
   header: {
     flexDirection: 'row',
@@ -306,7 +557,12 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
     color: '#1A1A1A',
-    marginLeft: 12,
+    marginLeft: 8,
+  },
+  locationCode: {
+    fontSize: 12,
+    color: '#4A90E2',
+    marginLeft: 4,
   },
   detailsRow: {
     flexDirection: 'row',
@@ -321,6 +577,32 @@ const styles = StyleSheet.create({
     color: '#666',
     marginLeft: 8,
   },
+  filterScroll: {
+    marginBottom: 16,
+  },
+  filterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFF',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#E3E8EF',
+    marginRight: 12,
+  },
+  filterChipActive: {
+    backgroundColor: '#4A90E2',
+    borderColor: '#4A90E2',
+  },
+  filterChipText: {
+    fontSize: 14,
+    color: '#666',
+    marginLeft: 6,
+  },
+  filterChipTextActive: {
+    color: '#FFF',
+  },
   sortSection: {
     marginBottom: 20,
   },
@@ -334,6 +616,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
   },
   sortButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: '#FFF',
     paddingHorizontal: 16,
     paddingVertical: 10,
@@ -342,9 +626,17 @@ const styles = StyleSheet.create({
     borderColor: '#E3E8EF',
     marginRight: 12,
   },
+  sortButtonActive: {
+    backgroundColor: '#4A90E2',
+    borderColor: '#4A90E2',
+  },
   sortButtonText: {
     fontSize: 14,
     color: '#666',
+    marginLeft: 6,
+  },
+  sortButtonTextActive: {
+    color: '#FFF',
   },
   resultsCount: {
     fontSize: 16,
@@ -390,6 +682,12 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 20,
   },
+  seatBadgeWarning: {
+    backgroundColor: '#FF9800',
+  },
+  seatBadgeSoldOut: {
+    backgroundColor: '#F44336',
+  },
   seatBadgeText: {
     color: '#FFF',
     fontSize: 14,
@@ -431,6 +729,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#1A1A1A',
+    marginBottom: 4,
+  },
+  routeCode: {
+    fontSize: 14,
+    color: '#4A90E2',
     marginBottom: 12,
   },
   driverRow: {
@@ -461,7 +764,7 @@ const styles = StyleSheet.create({
   amenitiesRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    marginTop: 8,
+    marginBottom: 8,
   },
   amenityBadge: {
     backgroundColor: '#E8F4FD',
@@ -475,6 +778,20 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#4A90E2',
     fontWeight: '500',
+  },
+  tripInfoRow: {
+    flexDirection: 'row',
+    marginTop: 4,
+  },
+  tripInfoItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 16,
+  },
+  tripInfoText: {
+    fontSize: 12,
+    color: '#666',
+    marginLeft: 4,
   },
   footer: {
     flexDirection: 'row',
@@ -515,6 +832,10 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 4,
+  },
+  selectButtonDisabled: {
+    backgroundColor: '#CCC',
+    shadowColor: '#999',
   },
   selectButtonText: {
     color: '#FFF',

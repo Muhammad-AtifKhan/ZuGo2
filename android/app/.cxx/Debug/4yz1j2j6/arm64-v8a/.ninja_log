@@ -1,5 +1,5 @@
 # ninja log v5
-2	39	0	D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/arm64-v8a/CMakeFiles/cmake.verify_globs	3e9edd8affcd40d3
+2	45	0	D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/arm64-v8a/CMakeFiles/cmake.verify_globs	3e9edd8affcd40d3
 46769	61621	7930979411513774	rnscreens_autolinked_build/CMakeFiles/react_codegen_rnscreens.dir/d1b21aba2120e093dec9a7fcc15fb5d7/common/cpp/react/renderer/components/rnscreens/RNSScreenStackHeaderSubviewState.cpp.o	bc977c4dbf3b3d
 11245	24894	7930979044284784	RNImagePickerSpec_autolinked_build/CMakeFiles/react_codegen_RNImagePickerSpec.dir/react/renderer/components/RNImagePickerSpec/ComponentDescriptors.cpp.o	53c9d96727bcc7e0
 140	10489	7930978900398606	rngesturehandler_codegen_autolinked_build/CMakeFiles/react_codegen_rngesturehandler_codegen.dir/react/renderer/components/rngesturehandler_codegen/States.cpp.o	f59bf807ddb7a501
@@ -68,4 +68,4 @@
 76962	77208	7930979567430614	D:/MyProjects/ZuGo2/android/app/build/intermediates/cxx/Debug/4yz1j2j6/obj/arm64-v8a/libreact_codegen_rnscreens.so	e2ccf75a5511f6db
 68670	77554	7930979571283506	rnworklets_autolinked_build/CMakeFiles/react_codegen_rnworklets.dir/react/renderer/components/rnworklets/ComponentDescriptors.cpp.o	c06e5a39b63fe00d
 24118	24862	7934032598421695	D:/MyProjects/ZuGo2/android/app/build/intermediates/cxx/Debug/4yz1j2j6/obj/arm64-v8a/libappmodules.so	3a0fdbd679b855cf
-2	51	0	D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/arm64-v8a/CMakeFiles/cmake.verify_globs	3e9edd8affcd40d3
+1	36	0	D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/arm64-v8a/CMakeFiles/cmake.verify_globs	3e9edd8affcd40d3

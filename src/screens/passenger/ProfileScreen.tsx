@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -12,11 +12,15 @@ import {
   Image,
   Modal,
   Linking,
+  ActivityIndicator,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import auth from '@react-native-firebase/auth';
+import firestore from '@react-native-firebase/firestore';
+import storage from '@react-native-firebase/storage';
 import Icon from 'react-native-vector-icons/MaterialIcons';
+import { launchImageLibrary } from 'react-native-image-picker';
 
 // Define navigation types
 type RootStackParamList = {
@@ -30,41 +34,91 @@ type RootStackParamList = {
 
 type ProfileScreenNavigationProp = StackNavigationProp<RootStackParamList>;
 
+interface UserData {
+  name: string;
+  email: string;
+  phone: string;
+  dateOfBirth: string;
+  profileImage: string | null;
+  loyaltyPoints: number;
+  memberSince: string;
+  totalTrips: number;
+  totalSaved: number;
+  cnic?: string;
+  address?: string;
+  city?: string;
+}
+
+interface PaymentMethod {
+  id: string;
+  type: 'visa' | 'mastercard' | 'jazzcash' | 'easypaisa';
+  lastFour: string;
+  expiry: string;
+  name: string;
+  isDefault: boolean;
+  token?: string;
+}
+
+interface NotificationSettings {
+  tripReminders: boolean;
+  boardingAlerts: boolean;
+  delayUpdates: boolean;
+  promotionalOffers: boolean;
+  systemUpdates: boolean;
+  bookingConfirmations: boolean;
+  receipts: boolean;
+  newsletter: boolean;
+  bookingDetailsSMS: boolean;
+  importantAlertsSMS: boolean;
+  otpCodesSMS: boolean;
+}
+
+interface UserPreferences {
+  defaultPayment: 'card' | 'mobile';
+  seatPreference: 'window' | 'aisle' | 'any';
+  language: 'english' | 'urdu' | 'arabic';
+  currency: 'USD' | 'PKR';
+}
+
+interface EmergencyContact {
+  name: string;
+  relationship: string;
+  phone: string;
+}
+
+interface SpecialNeeds {
+  wheelchair: boolean;
+  extraLuggage: boolean;
+  priorityBoarding: boolean;
+  assistanceRequired: boolean;
+}
+
 const ProfileScreen = () => {
   const navigation = useNavigation<ProfileScreenNavigationProp>();
+  const user = auth().currentUser;
+
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [logoutLoading, setLogoutLoading] = useState(false);
-  const [userData, setUserData] = useState({
-    name: 'Ali Ahmed',
-    email: 'ali.ahmed@email.com',
-    phone: '+92 300 1234567',
-    dateOfBirth: '15/05/1990',
-    profileImage: null as string | null,
-    loyaltyPoints: 450,
-    memberSince: 'Jan 2024',
-    totalTrips: 45,
-    totalSaved: 120,
+
+  const [userData, setUserData] = useState<UserData>({
+    name: '',
+    email: user?.email || '',
+    phone: '',
+    dateOfBirth: '',
+    profileImage: null,
+    loyaltyPoints: 0,
+    memberSince: '',
+    totalTrips: 0,
+    totalSaved: 0,
+    cnic: '',
+    address: '',
+    city: '',
   });
 
-  const [paymentMethods, setPaymentMethods] = useState([
-    {
-      id: 'card-1',
-      type: 'visa',
-      lastFour: '1234',
-      expiry: '06/25',
-      name: 'Visa Classic',
-      isDefault: true,
-    },
-    {
-      id: 'card-2',
-      type: 'mastercard',
-      lastFour: '5678',
-      expiry: '03/24',
-      name: 'Mastercard Gold',
-      isDefault: false,
-    },
-  ]);
-
-  const [notifications, setNotifications] = useState({
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
+  const [notifications, setNotifications] = useState<NotificationSettings>({
     tripReminders: true,
     boardingAlerts: true,
     delayUpdates: true,
@@ -78,21 +132,20 @@ const ProfileScreen = () => {
     otpCodesSMS: true,
   });
 
-  const [preferences, setPreferences] = useState({
+  const [preferences, setPreferences] = useState<UserPreferences>({
     defaultPayment: 'card',
     seatPreference: 'window',
-    notificationType: 'all',
     language: 'english',
     currency: 'USD',
   });
 
-  const [emergencyContact, setEmergencyContact] = useState({
-    name: 'Fatima Ahmed',
-    relationship: 'Wife',
-    phone: '+92 300 7654321',
+  const [emergencyContact, setEmergencyContact] = useState<EmergencyContact>({
+    name: '',
+    relationship: '',
+    phone: '',
   });
 
-  const [specialNeeds, setSpecialNeeds] = useState({
+  const [specialNeeds, setSpecialNeeds] = useState<SpecialNeeds>({
     wheelchair: false,
     extraLuggage: false,
     priorityBoarding: false,
@@ -115,6 +168,97 @@ const ProfileScreen = () => {
     name: '',
     cvv: '',
   });
+
+  // Load user data from Firebase
+  useEffect(() => {
+    if (!user) {
+      setLoading(false);
+      return;
+    }
+
+    loadUserData();
+  }, [user]);
+
+  const loadUserData = async () => {
+    try {
+      setLoading(true);
+
+      // Get user document
+      const userDoc = await firestore().collection('users').doc(user?.uid).get();
+
+      if (userDoc.exists) {
+        const data = userDoc.data();
+
+        // Calculate total trips
+        const bookingsSnapshot = await firestore()
+          .collection('bookings')
+          .where('userId', '==', user?.uid)
+          .get();
+
+        const totalTrips = bookingsSnapshot.size;
+
+        // Calculate total saved (simplified - in real app would be from transactions)
+        const totalSaved = bookingsSnapshot.docs.reduce((sum, doc) => {
+          const bookingData = doc.data();
+          return sum + (bookingData.discount || 0);
+        }, 0);
+
+        setUserData({
+          name: data?.fullName || data?.name || '',
+          email: user?.email || '',
+          phone: data?.phone || '',
+          dateOfBirth: data?.dateOfBirth || '',
+          profileImage: data?.profileImage || null,
+          loyaltyPoints: data?.loyaltyPoints || 0,
+          memberSince: data?.createdAt?.toDate?.()
+            ? new Date(data.createdAt.toDate()).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+            : 'Jan 2024',
+          totalTrips: totalTrips,
+          totalSaved: totalSaved,
+          cnic: data?.cnic || '',
+          address: data?.address || '',
+          city: data?.city || '',
+        });
+
+        // Load payment methods
+        if (data?.paymentMethods) {
+          setPaymentMethods(data.paymentMethods);
+        }
+
+        // Load notification settings
+        if (data?.notificationSettings) {
+          setNotifications({
+            ...notifications,
+            ...data.notificationSettings,
+          });
+        }
+
+        // Load preferences
+        if (data?.preferences) {
+          setPreferences({
+            ...preferences,
+            ...data.preferences,
+          });
+        }
+
+        // Load emergency contact
+        if (data?.emergencyContact) {
+          setEmergencyContact(data.emergencyContact);
+        }
+
+        // Load special needs
+        if (data?.specialNeeds) {
+          setSpecialNeeds(data.specialNeeds);
+        }
+      }
+
+      setLoading(false);
+    } catch (error) {
+      console.error('Error loading user data:', error);
+      Alert.alert('Error', 'Failed to load profile data');
+      setLoading(false);
+    }
+  };
 
   const handleLogout = () => {
     Alert.alert(
@@ -148,19 +292,112 @@ const ProfileScreen = () => {
 
   const handleEditProfile = () => {
     setIsEditing(true);
-    // Close all dropdowns when starting edit
     setShowPaymentDropdown(false);
     setShowSeatDropdown(false);
     setShowLanguageDropdown(false);
   };
 
-  const handleSaveProfile = () => {
-    setIsEditing(false);
-    // Close all dropdowns when saving
-    setShowPaymentDropdown(false);
-    setShowSeatDropdown(false);
-    setShowLanguageDropdown(false);
-    Alert.alert('Success', 'Profile updated successfully');
+  const handleSaveProfile = async () => {
+    if (!user) return;
+
+    setSaving(true);
+
+    try {
+      await firestore().collection('users').doc(user.uid).update({
+        fullName: userData.name,
+        phone: userData.phone,
+        dateOfBirth: userData.dateOfBirth,
+        cnic: userData.cnic,
+        address: userData.address,
+        city: userData.city,
+        preferences: preferences,
+        emergencyContact: emergencyContact,
+        specialNeeds: specialNeeds,
+        updatedAt: firestore.FieldValue.serverTimestamp(),
+      });
+
+      setIsEditing(false);
+      Alert.alert('Success', 'Profile updated successfully');
+    } catch (error) {
+      console.error('Error saving profile:', error);
+      Alert.alert('Error', 'Failed to save profile');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleImagePicker = () => {
+    Alert.alert(
+      'Profile Photo',
+      'Choose an option',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Take Photo', onPress: () => openCamera() },
+        { text: 'Choose from Gallery', onPress: () => openGallery() },
+        { text: 'Remove Photo', style: 'destructive', onPress: handleRemoveImage },
+      ]
+    );
+  };
+
+  const openGallery = () => {
+    launchImageLibrary({ mediaType: 'photo', quality: 0.5 }, async (response) => {
+      if (response.didCancel) return;
+
+      if (response.error) {
+        Alert.alert('Error', response.error);
+        return;
+      }
+
+      if (response.assets && response.assets[0].uri) {
+        await uploadImage(response.assets[0].uri);
+      }
+    });
+  };
+
+  const openCamera = () => {
+    // Implement camera functionality
+    Alert.alert('Camera', 'Camera feature coming soon');
+  };
+
+  const uploadImage = async (uri: string) => {
+    if (!user) return;
+
+    setUploading(true);
+
+    try {
+      const filename = `profile_${user.uid}_${Date.now()}.jpg`;
+      const reference = storage().ref(`profile_images/${filename}`);
+
+      await reference.putFile(uri);
+      const downloadUrl = await reference.getDownloadURL();
+
+      await firestore().collection('users').doc(user.uid).update({
+        profileImage: downloadUrl,
+      });
+
+      setUserData({ ...userData, profileImage: downloadUrl });
+      Alert.alert('Success', 'Profile photo updated');
+    } catch (error) {
+      console.error('Error uploading image:', error);
+      Alert.alert('Error', 'Failed to upload image');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleRemoveImage = async () => {
+    if (!user) return;
+
+    try {
+      await firestore().collection('users').doc(user.uid).update({
+        profileImage: null,
+      });
+
+      setUserData({ ...userData, profileImage: null });
+    } catch (error) {
+      console.error('Error removing image:', error);
+      Alert.alert('Error', 'Failed to remove image');
+    }
   };
 
   const handleAddPaymentMethod = () => {
@@ -176,7 +413,9 @@ const ProfileScreen = () => {
     );
   };
 
-  const handleSaveCard = () => {
+  const handleSaveCard = async () => {
+    if (!user) return;
+
     if (!cardDetails.number || cardDetails.number.replace(/\s/g, '').length !== 16) {
       Alert.alert('Invalid Card', 'Please enter a valid 16-digit card number');
       return;
@@ -197,35 +436,83 @@ const ProfileScreen = () => {
       return;
     }
 
-    const newCard = {
+    const newCard: PaymentMethod = {
       id: `card-${Date.now()}`,
       type: cardDetails.number.startsWith('4') ? 'visa' : 'mastercard',
       lastFour: cardDetails.number.slice(-4),
       expiry: cardDetails.expiry,
       name: cardDetails.name,
-      isDefault: false,
+      isDefault: paymentMethods.length === 0,
     };
 
-    setPaymentMethods([...paymentMethods, newCard]);
-    setShowAddCardModal(false);
-    setCardDetails({ number: '', expiry: '', name: '', cvv: '' });
-    Alert.alert('Success', 'Card added successfully');
+    const updatedMethods = [...paymentMethods, newCard];
+
+    try {
+      await firestore().collection('users').doc(user.uid).update({
+        paymentMethods: updatedMethods,
+      });
+
+      setPaymentMethods(updatedMethods);
+      setShowAddCardModal(false);
+      setCardDetails({ number: '', expiry: '', name: '', cvv: '' });
+      Alert.alert('Success', 'Card added successfully');
+    } catch (error) {
+      console.error('Error saving card:', error);
+      Alert.alert('Error', 'Failed to save card');
+    }
   };
 
-  const addMobileWallet = (wallet: string) => {
-    Alert.alert('Added', `${wallet.charAt(0).toUpperCase() + wallet.slice(1)} connected successfully`);
+  const addMobileWallet = async (wallet: 'jazzcash' | 'easypaisa') => {
+    if (!user) return;
+
+    const newWallet: PaymentMethod = {
+      id: `${wallet}-${Date.now()}`,
+      type: wallet,
+      lastFour: '',
+      expiry: '',
+      name: wallet === 'jazzcash' ? 'JazzCash' : 'EasyPaisa',
+      isDefault: paymentMethods.length === 0,
+    };
+
+    const updatedMethods = [...paymentMethods, newWallet];
+
+    try {
+      await firestore().collection('users').doc(user.uid).update({
+        paymentMethods: updatedMethods,
+      });
+
+      setPaymentMethods(updatedMethods);
+      Alert.alert('Success', `${wallet === 'jazzcash' ? 'JazzCash' : 'EasyPaisa'} connected successfully`);
+    } catch (error) {
+      console.error('Error adding wallet:', error);
+      Alert.alert('Error', 'Failed to connect wallet');
+    }
   };
 
-  const handleSetDefaultPayment = (id: string) => {
+  const handleSetDefaultPayment = async (id: string) => {
+    if (!user) return;
+
     const updatedMethods = paymentMethods.map(method => ({
       ...method,
       isDefault: method.id === id,
     }));
-    setPaymentMethods(updatedMethods);
-    Alert.alert('Updated', 'Default payment method updated');
+
+    try {
+      await firestore().collection('users').doc(user.uid).update({
+        paymentMethods: updatedMethods,
+      });
+
+      setPaymentMethods(updatedMethods);
+      Alert.alert('Updated', 'Default payment method updated');
+    } catch (error) {
+      console.error('Error updating default payment:', error);
+      Alert.alert('Error', 'Failed to update default payment');
+    }
   };
 
-  const handleRemovePayment = (id: string) => {
+  const handleRemovePayment = async (id: string) => {
+    if (!user) return;
+
     Alert.alert(
       'Remove Payment Method',
       'Are you sure you want to remove this payment method?',
@@ -234,25 +521,46 @@ const ProfileScreen = () => {
         {
           text: 'Remove',
           style: 'destructive',
-          onPress: () => {
+          onPress: async () => {
             const updatedMethods = paymentMethods.filter(method => method.id !== id);
-            setPaymentMethods(updatedMethods);
-            Alert.alert('Removed', 'Payment method removed');
+
+            try {
+              await firestore().collection('users').doc(user.uid).update({
+                paymentMethods: updatedMethods,
+              });
+
+              setPaymentMethods(updatedMethods);
+              Alert.alert('Removed', 'Payment method removed');
+            } catch (error) {
+              console.error('Error removing payment:', error);
+              Alert.alert('Error', 'Failed to remove payment method');
+            }
           },
         },
       ]
     );
   };
 
-  const handleToggleNotification = (key: keyof typeof notifications) => {
+  const handleToggleNotification = (key: keyof NotificationSettings) => {
     setNotifications(prev => ({
       ...prev,
       [key]: !prev[key],
     }));
   };
 
-  const handleSaveNotifications = () => {
-    Alert.alert('Saved', 'Notification preferences updated');
+  const handleSaveNotifications = async () => {
+    if (!user) return;
+
+    try {
+      await firestore().collection('users').doc(user.uid).update({
+        notificationSettings: notifications,
+      });
+
+      Alert.alert('Saved', 'Notification preferences updated');
+    } catch (error) {
+      console.error('Error saving notifications:', error);
+      Alert.alert('Error', 'Failed to save preferences');
+    }
   };
 
   const handleContactSupport = () => {
@@ -262,7 +570,7 @@ const ProfileScreen = () => {
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Call Support', onPress: () => Linking.openURL('tel:+92211234567') },
-        { text: 'Email Support', onPress: () => Linking.openURL('mailto:support@transport.com') },
+        { text: 'Email Support', onPress: () => Linking.openURL('mailto:support@zugo.com') },
         { text: 'Live Chat', onPress: () => navigation.navigate('ChatSupport') },
       ]
     );
@@ -289,7 +597,26 @@ const ProfileScreen = () => {
         {
           text: 'Delete Account',
           style: 'destructive',
-          onPress: () => Alert.alert('Account Deleted', 'Your account has been deleted'),
+          onPress: async () => {
+            if (!user) return;
+
+            try {
+              // Delete user data from Firestore
+              await firestore().collection('users').doc(user.uid).delete();
+
+              // Delete user auth
+              await user.delete();
+
+              Alert.alert('Account Deleted', 'Your account has been deleted');
+              navigation.reset({
+                index: 0,
+                routes: [{ name: 'Login' }],
+              });
+            } catch (error) {
+              console.error('Error deleting account:', error);
+              Alert.alert('Error', 'Failed to delete account');
+            }
+          },
         },
       ]
     );
@@ -309,27 +636,48 @@ const ProfileScreen = () => {
     return cleaned;
   };
 
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#4A90E2" />
+          <Text style={styles.loadingText}>Loading profile...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   const renderProfileSection = () => (
     <View style={styles.section}>
       {/* Profile Header */}
       <View style={styles.profileHeader}>
-        <TouchableOpacity style={styles.profileImageContainer}>
-          {userData.profileImage ? (
+        <TouchableOpacity
+          style={styles.profileImageContainer}
+          onPress={isEditing ? handleImagePicker : undefined}
+          disabled={!isEditing || uploading}
+        >
+          {uploading ? (
+            <View style={styles.profileImagePlaceholder}>
+              <ActivityIndicator size="large" color="#FFF" />
+            </View>
+          ) : userData.profileImage ? (
             <Image source={{ uri: userData.profileImage }} style={styles.profileImage} />
           ) : (
             <View style={styles.profileImagePlaceholder}>
               <Icon name="person" size={40} color="#FFF" />
             </View>
           )}
-          <TouchableOpacity style={styles.editPhotoButton}>
-            <Icon name="camera-alt" size={16} color="#4A90E2" />
-          </TouchableOpacity>
+          {isEditing && !uploading && (
+            <View style={styles.editPhotoButton}>
+              <Icon name="camera-alt" size={16} color="#4A90E2" />
+            </View>
+          )}
         </TouchableOpacity>
 
         <View style={styles.profileInfo}>
-          <Text style={styles.userName}>{userData.name}</Text>
+          <Text style={styles.userName}>{userData.name || 'User'}</Text>
           <Text style={styles.userEmail}>{userData.email}</Text>
-          <Text style={styles.userPhone}>{userData.phone}</Text>
+          <Text style={styles.userPhone}>{userData.phone || 'Add phone number'}</Text>
         </View>
       </View>
 
@@ -372,25 +720,17 @@ const ProfileScreen = () => {
               style={styles.editInput}
               value={userData.name}
               onChangeText={(text) => setUserData({...userData, name: text})}
+              placeholder="Enter your full name"
             />
           ) : (
-            <Text style={styles.infoValue}>{userData.name}</Text>
+            <Text style={styles.infoValue}>{userData.name || 'Not set'}</Text>
           )}
         </View>
 
         <View style={styles.infoRow}>
           <Icon name="email" size={20} color="#666" />
           <Text style={styles.infoLabel}>Email:</Text>
-          {isEditing ? (
-            <TextInput
-              style={styles.editInput}
-              value={userData.email}
-              onChangeText={(text) => setUserData({...userData, email: text})}
-              keyboardType="email-address"
-            />
-          ) : (
-            <Text style={styles.infoValue}>{userData.email}</Text>
-          )}
+          <Text style={styles.infoValue}>{userData.email}</Text>
         </View>
 
         <View style={styles.infoRow}>
@@ -402,9 +742,10 @@ const ProfileScreen = () => {
               value={userData.phone}
               onChangeText={(text) => setUserData({...userData, phone: text})}
               keyboardType="phone-pad"
+              placeholder="+92 XXX XXXXXXX"
             />
           ) : (
-            <Text style={styles.infoValue}>{userData.phone}</Text>
+            <Text style={styles.infoValue}>{userData.phone || 'Not set'}</Text>
           )}
         </View>
 
@@ -419,7 +760,52 @@ const ProfileScreen = () => {
               placeholder="DD/MM/YYYY"
             />
           ) : (
-            <Text style={styles.infoValue}>{userData.dateOfBirth}</Text>
+            <Text style={styles.infoValue}>{userData.dateOfBirth || 'Not set'}</Text>
+          )}
+        </View>
+
+        <View style={styles.infoRow}>
+          <Icon name="credit-card" size={20} color="#666" />
+          <Text style={styles.infoLabel}>CNIC:</Text>
+          {isEditing ? (
+            <TextInput
+              style={styles.editInput}
+              value={userData.cnic}
+              onChangeText={(text) => setUserData({...userData, cnic: text})}
+              placeholder="XXXXX-XXXXXXX-X"
+            />
+          ) : (
+            <Text style={styles.infoValue}>{userData.cnic || 'Not set'}</Text>
+          )}
+        </View>
+
+        <View style={styles.infoRow}>
+          <Icon name="home" size={20} color="#666" />
+          <Text style={styles.infoLabel}>Address:</Text>
+          {isEditing ? (
+            <TextInput
+              style={styles.editInput}
+              value={userData.address}
+              onChangeText={(text) => setUserData({...userData, address: text})}
+              placeholder="Your address"
+            />
+          ) : (
+            <Text style={styles.infoValue}>{userData.address || 'Not set'}</Text>
+          )}
+        </View>
+
+        <View style={styles.infoRow}>
+          <Icon name="location-city" size={20} color="#666" />
+          <Text style={styles.infoLabel}>City:</Text>
+          {isEditing ? (
+            <TextInput
+              style={styles.editInput}
+              value={userData.city}
+              onChangeText={(text) => setUserData({...userData, city: text})}
+              placeholder="Your city"
+            />
+          ) : (
+            <Text style={styles.infoValue}>{userData.city || 'Not set'}</Text>
           )}
         </View>
       </View>
@@ -715,9 +1101,10 @@ const ProfileScreen = () => {
               style={styles.editInput}
               value={emergencyContact.name}
               onChangeText={(text) => setEmergencyContact({...emergencyContact, name: text})}
+              placeholder="Emergency contact name"
             />
           ) : (
-            <Text style={styles.infoValue}>{emergencyContact.name}</Text>
+            <Text style={styles.infoValue}>{emergencyContact.name || 'Not set'}</Text>
           )}
         </View>
 
@@ -729,9 +1116,10 @@ const ProfileScreen = () => {
               style={styles.editInput}
               value={emergencyContact.relationship}
               onChangeText={(text) => setEmergencyContact({...emergencyContact, relationship: text})}
+              placeholder="Relationship"
             />
           ) : (
-            <Text style={styles.infoValue}>{emergencyContact.relationship}</Text>
+            <Text style={styles.infoValue}>{emergencyContact.relationship || 'Not set'}</Text>
           )}
         </View>
 
@@ -744,9 +1132,10 @@ const ProfileScreen = () => {
               value={emergencyContact.phone}
               onChangeText={(text) => setEmergencyContact({...emergencyContact, phone: text})}
               keyboardType="phone-pad"
+              placeholder="+92 XXX XXXXXXX"
             />
           ) : (
-            <Text style={styles.infoValue}>{emergencyContact.phone}</Text>
+            <Text style={styles.infoValue}>{emergencyContact.phone || 'Not set'}</Text>
           )}
         </View>
       </View>
@@ -758,15 +1147,23 @@ const ProfileScreen = () => {
             <TouchableOpacity
               style={[styles.actionButton, styles.saveButton]}
               onPress={handleSaveProfile}
+              disabled={saving}
             >
-              <Icon name="check" size={20} color="#FFF" />
-              <Text style={styles.saveButtonText}>SAVE CHANGES</Text>
+              {saving ? (
+                <ActivityIndicator size="small" color="#FFF" />
+              ) : (
+                <>
+                  <Icon name="check" size={20} color="#FFF" />
+                  <Text style={styles.saveButtonText}>SAVE CHANGES</Text>
+                </>
+              )}
             </TouchableOpacity>
 
             <TouchableOpacity
               style={[styles.actionButton, styles.cancelButton]}
               onPress={() => {
                 setIsEditing(false);
+                loadUserData(); // Reload original data
                 setShowPaymentDropdown(false);
                 setShowSeatDropdown(false);
                 setShowLanguageDropdown(false);
@@ -799,7 +1196,11 @@ const ProfileScreen = () => {
             <View style={styles.paymentHeader}>
               <View style={styles.paymentIcon}>
                 <Icon
-                  name={method.type === 'visa' ? 'credit-card' : 'card-membership'}
+                  name={
+                    method.type === 'visa' ? 'credit-card' :
+                    method.type === 'mastercard' ? 'card-membership' :
+                    'smartphone'
+                  }
                   size={28}
                   color="#4A90E2"
                 />
@@ -807,9 +1208,15 @@ const ProfileScreen = () => {
 
               <View style={styles.paymentInfo}>
                 <Text style={styles.paymentName}>{method.name}</Text>
-                <Text style={styles.paymentDetails}>
-                  **** **** **** {method.lastFour} • Expires {method.expiry}
-                </Text>
+                {method.type === 'visa' || method.type === 'mastercard' ? (
+                  <Text style={styles.paymentDetails}>
+                    **** **** **** {method.lastFour} • Expires {method.expiry}
+                  </Text>
+                ) : (
+                  <Text style={styles.paymentDetails}>
+                    Connected • {method.name}
+                  </Text>
+                )}
               </View>
 
               {method.isDefault && (
@@ -854,16 +1261,26 @@ const ProfileScreen = () => {
         <Text style={styles.walletsTitle}>MOBILE WALLETS</Text>
 
         <View style={styles.walletsList}>
-          <TouchableOpacity style={styles.walletButton} onPress={() => addMobileWallet('jazzcash')}>
+          <TouchableOpacity
+            style={styles.walletButton}
+            onPress={() => addMobileWallet('jazzcash')}
+          >
             <Icon name="smartphone" size={24} color="#4A90E2" />
             <Text style={styles.walletText}>JazzCash</Text>
-            <Text style={styles.walletStatus}>Not Connected</Text>
+            <Text style={styles.walletStatus}>
+              {paymentMethods.some(m => m.type === 'jazzcash') ? 'Connected' : 'Not Connected'}
+            </Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.walletButton} onPress={() => addMobileWallet('easypaisa')}>
+          <TouchableOpacity
+            style={styles.walletButton}
+            onPress={() => addMobileWallet('easypaisa')}
+          >
             <Icon name="smartphone" size={24} color="#4A90E2" />
             <Text style={styles.walletText}>EasyPaisa</Text>
-            <Text style={styles.walletStatus}>Not Connected</Text>
+            <Text style={styles.walletStatus}>
+              {paymentMethods.some(m => m.type === 'easypaisa') ? 'Connected' : 'Not Connected'}
+            </Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -1080,7 +1497,7 @@ const ProfileScreen = () => {
           <Icon name="email" size={24} color="#FF9800" />
           <View style={styles.contactInfo}>
             <Text style={styles.contactLabel}>Email Support</Text>
-            <Text style={styles.contactValue}>support@transport.com</Text>
+            <Text style={styles.contactValue}>support@zugo.com</Text>
           </View>
         </TouchableOpacity>
 
@@ -1111,7 +1528,7 @@ const ProfileScreen = () => {
           <Text style={styles.legalItemText}>Terms & Conditions</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.legalItem} onPress={() => Alert.alert('About', 'App Version 1.0.0')}>
+        <TouchableOpacity style={styles.legalItem} onPress={() => Alert.alert('About', 'ZUGO App Version 1.0.0')}>
           <Icon name="info" size={20} color="#666" />
           <Text style={styles.legalItemText}>About This App</Text>
         </TouchableOpacity>
@@ -1124,7 +1541,7 @@ const ProfileScreen = () => {
 
       <View style={styles.appInfo}>
         <Text style={styles.appVersion}>Version 1.0.0</Text>
-        <Text style={styles.appCopyright}>© 2024 City Transport. All rights reserved.</Text>
+        <Text style={styles.appCopyright}>© 2024 ZUGO Transport. All rights reserved.</Text>
       </View>
     </View>
   );
@@ -1349,6 +1766,17 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     padding: 16,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#F8F9FA',
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: '#4A90E2',
   },
   header: {
     flexDirection: 'row',

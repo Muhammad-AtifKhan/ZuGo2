@@ -1,5 +1,5 @@
 # ninja log v5
-1	27	0	D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86/CMakeFiles/cmake.verify_globs	e5e3a8a8711b4dfe
+1	30	0	D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86/CMakeFiles/cmake.verify_globs	e5e3a8a8711b4dfe
 23634	34099	7930980638813771	safeareacontext_autolinked_build/CMakeFiles/react_codegen_safeareacontext.dir/be0954b109027e3aafd0eaee6891f5e0/source/codegen/jni/react/renderer/components/safeareacontext/States.cpp.o	d2b7455fab966284
 58	7744	7930980375133172	RNDateTimePickerCGen_autolinked_build/CMakeFiles/react_codegen_RNDateTimePickerCGen.dir/react/renderer/components/RNDateTimePickerCGen/States.cpp.o	a50c685faed857ef
 40778	54439	7930980842186041	rnscreens_autolinked_build/CMakeFiles/react_codegen_rnscreens.dir/d1b21aba2120e093dec9a7fcc15fb5d7/common/cpp/react/renderer/components/rnscreens/RNSScreenStackHeaderSubviewState.cpp.o	50a97675ecd20648
@@ -68,4 +68,4 @@
 59631	70221	7930981000077799	RNVectorIconsSpec_autolinked_build/CMakeFiles/react_codegen_RNVectorIconsSpec.dir/react/renderer/components/RNVectorIconsSpec/ShadowNodes.cpp.o	9f35addc7c2977f8
 69977	70297	7930981000656898	D:/MyProjects/ZuGo2/android/app/build/intermediates/cxx/Debug/4yz1j2j6/obj/x86/libreact_codegen_rnscreens.so	ed541536bbc4010e
 7893	8524	7934032826518716	D:/MyProjects/ZuGo2/android/app/build/intermediates/cxx/Debug/4yz1j2j6/obj/x86/libappmodules.so	4b276bfe978a5a98
-1	35	0	D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86/CMakeFiles/cmake.verify_globs	e5e3a8a8711b4dfe
+1	34	0	D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86/CMakeFiles/cmake.verify_globs	e5e3a8a8711b4dfe

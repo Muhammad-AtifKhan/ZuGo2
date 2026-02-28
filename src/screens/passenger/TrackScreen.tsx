@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -12,131 +12,112 @@ import {
   Linking,
   Share,
   Platform,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
+import { RouteProp } from '@react-navigation/native';
 import { PassengerStackParamList } from '../../navigation/PassengerNavigator';
 import Icon from 'react-native-vector-icons/MaterialIcons';
+import firestore from '@react-native-firebase/firestore';
+import auth from '@react-native-firebase/auth';
 
-type TrackScreenNavigationProp = StackNavigationProp<PassengerStackParamList>;
+type TrackScreenNavigationProp = StackNavigationProp<PassengerStackParamList, 'Track'>;
+type TrackScreenRouteProp = RouteProp<PassengerStackParamList, 'Track'>;
 
 const { width } = Dimensions.get('window');
 
+interface Trip {
+  id: string;
+  ticketNumber: string;
+  from: string;
+  to: string;
+  fromCode: string;
+  toCode: string;
+  date: string;
+  departureTime: string;
+  arrivalTime: string;
+  busNumber: string;
+  busId: string;
+  seat: string;
+  driver: string;
+  driverId: string;
+  driverContact: string;
+  boardingTime: string;
+  status: string;
+  routeId: string;
+  currentLocation?: string;
+  nextStop?: string;
+  etaToNextStop?: string;
+  etaToDestination?: string;
+  progress?: number;
+  speed?: string;
+  occupancy?: string;
+  temperature?: string;
+  delay?: string;
+}
+
+interface Stop {
+  id: string;
+  name: string;
+  time: string;
+  status: 'departed' | 'arriving' | 'upcoming' | 'destination';
+  delay: string;
+  passed: boolean;
+  sequence: number;
+  isCurrent?: boolean;
+  isDestination?: boolean;
+  isBoardingStop?: boolean;
+  passengersToBoard?: number;
+}
+
+interface Alert {
+  id: string;
+  type: 'delay' | 'info' | 'warning';
+  message: string;
+  time: string;
+  severity: 'low' | 'medium' | 'high';
+  timestamp: any;
+}
+
+interface TrackingData {
+  busLocation: {
+    lat: number;
+    lng: number;
+    address?: string;
+  };
+  lastUpdated: string;
+  distanceCovered: string;
+  distanceRemaining: string;
+  estimatedArrival: string;
+  speed: number;
+  heading?: number;
+}
+
 const TrackScreen = () => {
   const navigation = useNavigation<TrackScreenNavigationProp>();
-  const [activeTrip, setActiveTrip] = useState<any>(null);
-  const [trackingData, setTrackingData] = useState<any>(null);
+  const route = useRoute<TrackScreenRouteProp>();
+  const user = auth().currentUser;
+
+  // Get params from navigation
+  const { tripId, busNumber, from, to, routeId } = route.params || {};
+
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [activeTrip, setActiveTrip] = useState<Trip | null>(null);
+  const [trackingData, setTrackingData] = useState<TrackingData | null>(null);
+  const [stops, setStops] = useState<Stop[]>([]);
+  const [alerts, setAlerts] = useState<Alert[]>([]);
   const [isTracking, setIsTracking] = useState(false);
-  const [refreshInterval, setRefreshInterval] = useState<NodeJS.Timeout | null>(null);
   const [selectedView, setSelectedView] = useState<'map' | 'stops'>('map');
   const [pulseAnim] = useState(new Animated.Value(1));
 
-  // Dummy active trip data
-  const dummyTrips = [
-    {
-      id: 'trip-001',
-      ticketNumber: 'TKT-2024-0160',
-      from: 'City Center',
-      to: 'Airport',
-      date: 'Today',
-      time: '08:00 AM - 09:30 AM',
-      busNumber: 'B-001',
-      seat: '3A',
-      driver: 'Ali Ahmed',
-      driverContact: '+923001112233', // Updated with proper format for dialing
-      boardingTime: '07:45 AM',
-      status: 'active',
-      currentLocation: 'Near University',
-      nextStop: 'University Stop',
-      etaToNextStop: '8 minutes',
-      etaToDestination: '45 minutes',
-      progress: 30,
-      speed: '45 km/h',
-      occupancy: '32/40 seats',
-      temperature: '22°C',
-      delay: '+5 minutes',
-    },
-  ];
+  // Refs for tracking interval
+  const trackingInterval = useRef<NodeJS.Timeout | null>(null);
 
-  // Dummy stops data
-  const dummyStops = [
-    {
-      id: 'stop-1',
-      name: 'Main Terminal',
-      time: '08:00 AM',
-      status: 'departed',
-      delay: '+2 min',
-      passed: true,
-      sequence: 1,
-    },
-    {
-      id: 'stop-2',
-      name: 'City Center',
-      time: '08:30 AM',
-      status: 'departed',
-      delay: '+2 min',
-      passed: true,
-      sequence: 2,
-      isBoardingStop: true,
-    },
-    {
-      id: 'stop-3',
-      name: 'University',
-      time: '08:45 AM',
-      status: 'arriving',
-      delay: '+5 min',
-      passed: false,
-      sequence: 3,
-      isCurrent: true,
-      passengersToBoard: 5,
-    },
-    {
-      id: 'stop-4',
-      name: 'Hospital',
-      time: '09:00 AM',
-      status: 'upcoming',
-      delay: '+7 min',
-      passed: false,
-      sequence: 4,
-    },
-    {
-      id: 'stop-5',
-      name: 'Airport',
-      time: '09:30 AM',
-      status: 'destination',
-      delay: '+5 min',
-      passed: false,
-      sequence: 5,
-      isDestination: true,
-    },
-  ];
-
-  // Dummy alerts
-  const dummyAlerts = [
-    {
-      id: 'alert-1',
-      type: 'delay',
-      message: 'Traffic on University Road',
-      time: '2 minutes ago',
-      severity: 'medium',
-    },
-    {
-      id: 'alert-2',
-      type: 'info',
-      message: 'Boarding completed at City Center',
-      time: '10 minutes ago',
-      severity: 'low',
-    },
-  ];
-
+  // Start pulse animation
   useEffect(() => {
-    // Load active trip on component mount
-    if (dummyTrips.length > 0) {
-      setActiveTrip(dummyTrips[0]);
-      startTracking(dummyTrips[0]);
-    }
-
-    // Start pulse animation
     Animated.loop(
       Animated.sequence([
         Animated.timing(pulseAnim, {
@@ -153,68 +134,302 @@ const TrackScreen = () => {
     ).start();
 
     return () => {
-      if (refreshInterval) {
-        clearInterval(refreshInterval);
+      if (trackingInterval.current) {
+        clearInterval(trackingInterval.current);
       }
     };
   }, []);
 
-  const startTracking = (trip: any) => {
+  // Load trip data from Firebase
+  useEffect(() => {
+    if (!user) {
+      setLoading(false);
+      return;
+    }
+
+    if (tripId) {
+      loadTripData(tripId);
+    } else {
+      loadActiveTrip();
+    }
+  }, [user, tripId]);
+
+  const loadTripData = async (id: string) => {
+    try {
+      setLoading(true);
+
+      // Get booking/trip data
+      const bookingDoc = await firestore().collection('bookings').doc(id).get();
+
+      if (!bookingDoc.exists) {
+        setLoading(false);
+        return;
+      }
+
+      const bookingData = bookingDoc.data();
+
+      // Get trip details
+      const tripDoc = await firestore()
+        .collection('trips')
+        .doc(bookingData?.tripId)
+        .get();
+
+      if (!tripDoc.exists) {
+        setLoading(false);
+        return;
+      }
+
+      const tripData = tripDoc.data();
+
+      // Get driver info
+      let driverName = 'Not assigned';
+      let driverContact = '';
+
+      if (tripData?.driverId) {
+        const driverDoc = await firestore()
+          .collection('drivers')
+          .doc(tripData.driverId)
+          .get();
+
+        if (driverDoc.exists) {
+          const driverData = driverDoc.data();
+          driverName = driverData?.fullName || 'Driver';
+          driverContact = driverData?.contactNumber || '';
+        }
+      }
+
+      // Set active trip
+      const trip: Trip = {
+        id: bookingDoc.id,
+        ticketNumber: bookingData?.ticketNumber || `TKT-${id.slice(0, 8)}`,
+        from: bookingData?.from || tripData?.from || '',
+        to: bookingData?.to || tripData?.to || '',
+        fromCode: bookingData?.fromCode || tripData?.fromCode || '',
+        toCode: bookingData?.toCode || tripData?.toCode || '',
+        date: formatDate(bookingData?.travelDate?.toDate?.() || new Date()),
+        departureTime: tripData?.departureTime || '00:00',
+        arrivalTime: tripData?.arrivalTime || '00:00',
+        busNumber: tripData?.busNumber || 'N/A',
+        busId: tripData?.busId || '',
+        seat: bookingData?.seatNumber || bookingData?.seatIds?.[0] || 'N/A',
+        driver: driverName,
+        driverId: tripData?.driverId || '',
+        driverContact: driverContact,
+        boardingTime: tripData?.departureTime || '00:00',
+        status: tripData?.status || 'scheduled',
+        routeId: tripData?.routeId || '',
+        currentLocation: tripData?.currentLocation || 'On route',
+        nextStop: tripData?.nextStop || '',
+        etaToNextStop: tripData?.etaToNextStop || '10 min',
+        etaToDestination: tripData?.etaToDestination || '45 min',
+        progress: tripData?.progress || 30,
+        speed: tripData?.speed || '45 km/h',
+        occupancy: `${bookingData?.seatIds?.length || 0}/${tripData?.totalSeats || 40} seats`,
+        temperature: tripData?.temperature || '22°C',
+        delay: tripData?.delay ? `+${tripData.delay} min` : 'On time',
+      };
+
+      setActiveTrip(trip);
+
+      // Load stops for this route
+      await loadStops(tripData?.routeId || tripData?.id);
+
+      // Load alerts for this trip
+      await loadAlerts(id);
+
+      // Start real-time tracking
+      startTracking(trip);
+
+    } catch (error) {
+      console.error('Error loading trip data:', error);
+      Alert.alert('Error', 'Failed to load trip data');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadActiveTrip = async () => {
+    try {
+      setLoading(true);
+
+      // Find active trips for this user
+      const snapshot = await firestore()
+        .collection('bookings')
+        .where('userId', '==', user?.uid)
+        .where('status', 'in', ['confirmed', 'boarding'])
+        .orderBy('travelDate', 'asc')
+        .limit(1)
+        .get();
+
+      if (snapshot.empty) {
+        setLoading(false);
+        return;
+      }
+
+      const bookingDoc = snapshot.docs[0];
+      await loadTripData(bookingDoc.id);
+
+    } catch (error) {
+      console.error('Error loading active trip:', error);
+      setLoading(false);
+    }
+  };
+
+  const loadStops = async (routeId: string) => {
+    try {
+      const snapshot = await firestore()
+        .collection('stops')
+        .where('routeId', '==', routeId)
+        .orderBy('sequence', 'asc')
+        .get();
+
+      const stopsList: Stop[] = [];
+      snapshot.forEach(doc => {
+        const data = doc.data();
+        stopsList.push({
+          id: doc.id,
+          name: data.name,
+          time: data.time,
+          status: data.status || 'upcoming',
+          delay: data.delay || '',
+          passed: data.passed || false,
+          sequence: data.sequence,
+          isCurrent: data.isCurrent || false,
+          isDestination: data.isDestination || false,
+          isBoardingStop: data.isBoardingStop || false,
+          passengersToBoard: data.passengersToBoard,
+        });
+      });
+
+      setStops(stopsList);
+    } catch (error) {
+      console.error('Error loading stops:', error);
+    }
+  };
+
+  const loadAlerts = async (tripId: string) => {
+    try {
+      const snapshot = await firestore()
+        .collection('alerts')
+        .where('tripId', '==', tripId)
+        .orderBy('timestamp', 'desc')
+        .limit(5)
+        .get();
+
+      const alertsList: Alert[] = [];
+      snapshot.forEach(doc => {
+        const data = doc.data();
+        const timestamp = data.timestamp?.toDate?.() || new Date();
+        const timeAgo = getTimeAgo(timestamp);
+
+        alertsList.push({
+          id: doc.id,
+          type: data.type || 'info',
+          message: data.message,
+          time: timeAgo,
+          severity: data.severity || 'low',
+          timestamp: data.timestamp,
+        });
+      });
+
+      setAlerts(alertsList);
+    } catch (error) {
+      console.error('Error loading alerts:', error);
+    }
+  };
+
+  const getTimeAgo = (date: Date): string => {
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMins / 60);
+
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins} minute${diffMins > 1 ? 's' : ''} ago`;
+    if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+    return 'Yesterday';
+  };
+
+  const formatDate = (date: Date): string => {
+    const today = new Date();
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    if (date.toDateString() === today.toDateString()) {
+      return 'Today';
+    } else if (date.toDateString() === tomorrow.toDateString()) {
+      return 'Tomorrow';
+    } else {
+      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    }
+  };
+
+  const startTracking = (trip: Trip) => {
     setIsTracking(true);
 
     // Initial tracking data
     setTrackingData({
-      busLocation: { lat: 24.8607, lng: 67.0011 }, // Karachi coordinates
+      busLocation: {
+        lat: 24.8607,
+        lng: 67.0011,
+        address: trip.currentLocation || 'On route',
+      },
       lastUpdated: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       distanceCovered: '12 km',
       distanceRemaining: '18 km',
-      estimatedArrival: '09:35 AM',
+      estimatedArrival: trip.etaToDestination || '09:35 AM',
+      speed: 45,
     });
 
-    // Simulate live updates every 10 seconds
-    const interval = setInterval(() => {
-      setTrackingData(prev => ({
-        ...prev,
-        lastUpdated: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        distanceCovered: (parseFloat(prev.distanceCovered) + 0.5).toFixed(1) + ' km',
-        distanceRemaining: (parseFloat(prev.distanceRemaining) - 0.5).toFixed(1) + ' km',
-      }));
-    }, 10000);
+    // Simulate real-time updates (in real app, use WebSocket or Firebase real-time listeners)
+    if (trackingInterval.current) {
+      clearInterval(trackingInterval.current);
+    }
 
-    setRefreshInterval(interval);
+    trackingInterval.current = setInterval(() => {
+      setTrackingData(prev => {
+        if (!prev) return prev;
+
+        const distanceCoveredNum = parseFloat(prev.distanceCovered) + 0.5;
+        const distanceRemainingNum = parseFloat(prev.distanceRemaining) - 0.5;
+
+        return {
+          ...prev,
+          lastUpdated: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          distanceCovered: distanceCoveredNum.toFixed(1) + ' km',
+          distanceRemaining: distanceRemainingNum > 0 ? distanceRemainingNum.toFixed(1) + ' km' : '0 km',
+        };
+      });
+    }, 10000);
   };
 
   const stopTracking = () => {
-    if (refreshInterval) {
-      clearInterval(refreshInterval);
-      setRefreshInterval(null);
+    if (trackingInterval.current) {
+      clearInterval(trackingInterval.current);
+      trackingInterval.current = null;
     }
     setIsTracking(false);
   };
 
-  const handleRefresh = () => {
-    Alert.alert(
-      'Refreshing Location',
-      'Fetching latest bus location...',
-      [
-        { text: 'OK', onPress: () => {
-          // Simulate refresh
-          setTrackingData(prev => ({
-            ...prev,
-            lastUpdated: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          }));
-          Alert.alert('Updated', 'Location data refreshed successfully');
-        }}
-      ]
-    );
+  const handleRefresh = async () => {
+    setRefreshing(true);
+
+    // Simulate refresh
+    setTimeout(() => {
+      setTrackingData(prev => ({
+        ...prev!,
+        lastUpdated: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      }));
+      setRefreshing(false);
+      Alert.alert('Updated', 'Location data refreshed successfully');
+    }, 1000);
   };
 
   const handleShareLocation = async () => {
     try {
       const shareContent = {
         title: 'My Bus Location',
-        message: `I'm currently tracking my bus:\n\nBus: ${activeTrip?.busNumber}\nFrom: ${activeTrip?.from}\nTo: ${activeTrip?.to}\nCurrent Location: ${activeTrip?.currentLocation}\nETA: ${activeTrip?.etaToDestination}\n\nLive tracking available on Bus App`,
-        url: 'https://busapp.com/track', // In real app, use dynamic URL
+        message: `I'm currently tracking my bus:\n\nBus: ${activeTrip?.busNumber}\nFrom: ${activeTrip?.from}\nTo: ${activeTrip?.to}\nCurrent Location: ${activeTrip?.currentLocation}\nETA: ${activeTrip?.etaToDestination}\n\nLive tracking available on ZUGO App`,
       };
 
       const result = await Share.share(shareContent);
@@ -273,13 +488,6 @@ const TrackScreen = () => {
               }
             }
           },
-          {
-            text: '📧 Email',
-            onPress: () => {
-              Alert.alert('Email Driver', 'Email functionality would open email app');
-              // In real app: Linking.openURL(`mailto:${driverEmail}`);
-            }
-          },
         ]
       );
     }
@@ -296,7 +504,7 @@ const TrackScreen = () => {
             text: 'Google Maps',
             onPress: async () => {
               try {
-                const url = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(activeTrip.currentLocation)}&travelmode=transit`;
+                const url = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(activeTrip.currentLocation!)}&travelmode=transit`;
                 const canOpen = await Linking.canOpenURL(url);
                 if (canOpen) {
                   await Linking.openURL(url);
@@ -312,7 +520,7 @@ const TrackScreen = () => {
             text: 'Apple Maps',
             onPress: async () => {
               try {
-                const url = `http://maps.apple.com/?daddr=${encodeURIComponent(activeTrip.currentLocation)}&dirflg=r`;
+                const url = `http://maps.apple.com/?daddr=${encodeURIComponent(activeTrip.currentLocation!)}&dirflg=r`;
                 const canOpen = await Linking.canOpenURL(url);
                 if (canOpen) {
                   await Linking.openURL(url);
@@ -321,22 +529,6 @@ const TrackScreen = () => {
                 }
               } catch (error) {
                 Alert.alert('Error', 'Failed to open Apple Maps');
-              }
-            }
-          },
-          {
-            text: 'Waze',
-            onPress: async () => {
-              try {
-                const url = `https://waze.com/ul?q=${encodeURIComponent(activeTrip.currentLocation)}&navigate=yes`;
-                const canOpen = await Linking.canOpenURL(url);
-                if (canOpen) {
-                  await Linking.openURL(url);
-                } else {
-                  Alert.alert('Waze Not Installed', 'Please install Waze from app store');
-                }
-              } catch (error) {
-                Alert.alert('Error', 'Failed to open Waze');
               }
             }
           },
@@ -377,7 +569,7 @@ const TrackScreen = () => {
         {
           text: '🚨 Emergency Services',
           style: 'destructive',
-          onPress: async () => {
+          onPress: () => {
             Alert.alert(
               'Emergency Services',
               'Choose emergency service:',
@@ -432,29 +624,35 @@ const TrackScreen = () => {
     );
   };
 
-  const handleSelectTrip = () => {
-    Alert.alert(
-      'Select Trip',
-      'Choose a trip to track:',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        ...dummyTrips.map(trip => ({
-          text: `${trip.from} → ${trip.to} (${trip.time})`,
-          onPress: () => {
-            setActiveTrip(trip);
-            startTracking(trip);
-          },
-        })),
-      ]
-    );
-  };
-
   const handleViewAllAlerts = () => {
-    // Navigate to AlertsScreen
     navigation.navigate('Alerts', {
       tripId: activeTrip?.id,
       busNumber: activeTrip?.busNumber
     });
+  };
+
+  const handleAlertPress = (alert: Alert) => {
+    Alert.alert(
+      alert.type === 'delay' ? 'Delay Alert' : 'Information',
+      alert.message,
+      [
+        { text: 'OK' },
+        {
+          text: 'Mark as Read',
+          onPress: async () => {
+            try {
+              await firestore().collection('alerts').doc(alert.id).update({
+                read: true,
+              });
+              // Remove from local state
+              setAlerts(prev => prev.filter(a => a.id !== alert.id));
+            } catch (error) {
+              console.error('Error marking alert as read:', error);
+            }
+          }
+        }
+      ]
+    );
   };
 
   const renderMapView = () => (
@@ -474,31 +672,34 @@ const TrackScreen = () => {
         <View style={styles.routeLine} />
 
         {/* Stops */}
-        {[0, 1, 2, 3, 4].map((position) => (
-          <View
-            key={position}
-            style={[
-              styles.stopPoint,
-              {
-                left: `${position * 25}%`,
-                top: position % 2 === 0 ? 40 : 80,
-              },
-              position < 2 && styles.stopPassed,
-              position === 2 && styles.stopCurrent,
-            ]}
-          >
-            {position < 2 && <Icon name="check-circle" size={16} color="#4CAF50" />}
-            {position === 2 && (
-              <View style={styles.currentStop}>
-                <Icon name="location-on" size={20} color="#2196F3" />
-              </View>
-            )}
-            {position > 2 && <View style={styles.upcomingStop} />}
-          </View>
-        ))}
+        {stops.map((stop, index) => {
+          const position = (index / (stops.length - 1)) * 100;
+          return (
+            <View
+              key={stop.id}
+              style={[
+                styles.stopPoint,
+                {
+                  left: `${position}%`,
+                  top: index % 2 === 0 ? 40 : 80,
+                },
+                stop.passed && styles.stopPassed,
+                stop.isCurrent && styles.stopCurrent,
+              ]}
+            >
+              {stop.passed && <Icon name="check-circle" size={16} color="#4CAF50" />}
+              {stop.isCurrent && (
+                <View style={styles.currentStop}>
+                  <Icon name="location-on" size={20} color="#2196F3" />
+                </View>
+              )}
+              {!stop.passed && !stop.isCurrent && <View style={styles.upcomingStop} />}
+            </View>
+          );
+        })}
 
         {/* Bus Icon */}
-        <View style={styles.busIconContainer}>
+        <View style={[styles.busIconContainer, { left: `${activeTrip?.progress || 30}%` }]}>
           <Icon name="directions-bus" size={40} color="#2196F3" />
           <View style={styles.busPulse} />
         </View>
@@ -537,7 +738,7 @@ const TrackScreen = () => {
       <Text style={styles.stopsTitle}>STOP-BY-STOP PROGRESS</Text>
 
       <View style={styles.stopsList}>
-        {dummyStops.map((stop, index) => (
+        {stops.map((stop, index) => (
           <View key={stop.id} style={styles.stopItem}>
             {/* Timeline */}
             <View style={styles.timeline}>
@@ -551,7 +752,7 @@ const TrackScreen = () => {
                 {stop.isCurrent && <Icon name="directions-bus" size={12} color="#FFF" />}
                 {stop.isDestination && <Icon name="flag" size={12} color="#FFF" />}
               </View>
-              {index < dummyStops.length - 1 && (
+              {index < stops.length - 1 && (
                 <View style={[
                   styles.timelineLine,
                   stop.passed && styles.timelineLinePassed,
@@ -577,14 +778,14 @@ const TrackScreen = () => {
 
                 <View style={styles.stopTimeBadge}>
                   <Text style={styles.stopTime}>{stop.time}</Text>
-                  {stop.delay && (
+                  {stop.delay ? (
                     <Text style={[
                       styles.delayText,
                       stop.status === 'arriving' && styles.delayWarning,
                     ]}>
                       {stop.delay}
                     </Text>
-                  )}
+                  ) : null}
                 </View>
               </View>
 
@@ -595,29 +796,29 @@ const TrackScreen = () => {
                 stop.status === 'upcoming' && styles.statusUpcoming,
                 stop.status === 'destination' && styles.statusDestination,
               ]}>
-                {stop.status === 'departed' && `Departed ${stop.delay} late`}
+                {stop.status === 'departed' && `Departed ${stop.delay}`}
                 {stop.status === 'arriving' && `Arriving in ${activeTrip?.etaToNextStop}`}
-                {stop.status === 'upcoming' && `ETA: ${stop.delay} late`}
-                {stop.status === 'destination' && `ETA: ${stop.delay} late`}
+                {stop.status === 'upcoming' && `ETA: ${stop.delay}`}
+                {stop.status === 'destination' && `ETA: ${stop.delay}`}
               </Text>
 
-              {stop.isCurrent && stop.passengersToBoard && (
+              {stop.isCurrent && stop.passengersToBoard ? (
                 <View style={styles.passengersInfo}>
                   <Icon name="people" size={16} color="#666" />
                   <Text style={styles.passengersText}>
                     {stop.passengersToBoard} passengers to board
                   </Text>
                 </View>
-              )}
+              ) : null}
 
-              {stop.isCurrent && (
+              {stop.isCurrent ? (
                 <View style={styles.currentAlert}>
                   <Icon name="directions-bus" size={16} color="#2196F3" />
                   <Text style={styles.currentAlertText}>
                     Bus is approaching this stop
                   </Text>
                 </View>
-              )}
+              ) : null}
             </View>
           </View>
         ))}
@@ -642,7 +843,9 @@ const TrackScreen = () => {
 
         <View style={styles.tripStatus}>
           <Icon name="directions-bus" size={20} color="#2196F3" />
-          <Text style={styles.statusText}>🟢 ON ROUTE</Text>
+          <Text style={styles.statusText}>
+            {activeTrip?.delay === 'On time' ? '🟢 ON TIME' : '🟡 DELAYED'}
+          </Text>
         </View>
       </View>
 
@@ -715,31 +918,24 @@ const TrackScreen = () => {
         </TouchableOpacity>
       </View>
 
-      {dummyAlerts.map(alert => (
+      {alerts.map(alert => (
         <TouchableOpacity
           key={alert.id}
           style={[
             styles.alertItem,
             alert.severity === 'medium' && styles.alertMedium,
+            alert.severity === 'high' && styles.alertHigh,
             alert.severity === 'low' && styles.alertLow,
           ]}
-          onPress={() => {
-            Alert.alert(
-              'Alert Details',
-              alert.message,
-              [
-                { text: 'OK' },
-                { text: 'Mark as Read', onPress: () => {
-                  Alert.alert('Marked', 'Alert marked as read');
-                }}
-              ]
-            );
-          }}
+          onPress={() => handleAlertPress(alert)}
         >
           <Icon
             name={alert.type === 'delay' ? 'warning' : 'info'}
             size={20}
-            color={alert.severity === 'medium' ? '#FF9800' : '#2196F3'}
+            color={
+              alert.severity === 'high' ? '#F44336' :
+              alert.severity === 'medium' ? '#FF9800' : '#2196F3'
+            }
           />
           <View style={styles.alertContent}>
             <Text style={styles.alertMessage}>{alert.message}</Text>
@@ -794,6 +990,17 @@ const TrackScreen = () => {
     </View>
   );
 
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#4A90E2" />
+          <Text style={styles.loadingText}>Loading tracking data...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   if (!activeTrip) {
     return (
       <SafeAreaView style={styles.safeArea}>
@@ -824,7 +1031,17 @@ const TrackScreen = () => {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <ScrollView style={styles.container}>
+      <ScrollView
+        style={styles.container}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            colors={['#4A90E2']}
+            tintColor="#4A90E2"
+          />
+        }
+      >
         {/* Header */}
         <View style={styles.header}>
           <View style={styles.headerLeft}>
@@ -834,13 +1051,6 @@ const TrackScreen = () => {
               <Text style={styles.subtitle}>Live tracking & updates</Text>
             </View>
           </View>
-
-          <TouchableOpacity
-            style={styles.selectTripButton}
-            onPress={handleSelectTrip}
-          >
-            <Icon name="swap-horiz" size={24} color="#4A90E2" />
-          </TouchableOpacity>
         </View>
 
         {/* View Toggle */}
@@ -936,9 +1146,7 @@ const TrackScreen = () => {
   );
 };
 
-// Styles remain the same as your original
 const styles = StyleSheet.create({
-  // ... all your existing styles remain exactly the same
   safeArea: {
     flex: 1,
     backgroundColor: '#F8F9FA',
@@ -946,6 +1154,17 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     padding: 16,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#F8F9FA',
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: '#4A90E2',
   },
   header: {
     flexDirection: 'row',
@@ -971,9 +1190,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#666',
     marginTop: 4,
-  },
-  selectTripButton: {
-    padding: 8,
   },
   viewToggle: {
     flexDirection: 'row',
@@ -1008,7 +1224,6 @@ const styles = StyleSheet.create({
   viewOptionTextActive: {
     color: '#FFF',
   },
-  // Trip Info
   tripInfoCard: {
     backgroundColor: '#FFF',
     borderRadius: 16,
@@ -1092,7 +1307,6 @@ const styles = StyleSheet.create({
     color: '#1A1A1A',
     flex: 1,
   },
-  // Map View
   mapContainer: {
     backgroundColor: '#FFF',
     borderRadius: 16,
@@ -1186,7 +1400,6 @@ const styles = StyleSheet.create({
   },
   busIconContainer: {
     position: 'absolute',
-    left: '30%',
     top: '30%',
   },
   busPulse: {
@@ -1225,7 +1438,6 @@ const styles = StyleSheet.create({
     color: '#666',
     marginLeft: 8,
   },
-  // Stops View
   stopsContainer: {
     backgroundColor: '#FFF',
     borderRadius: 16,
@@ -1377,7 +1589,6 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     marginLeft: 8,
   },
-  // Stats
   statsCard: {
     backgroundColor: '#FFF',
     borderRadius: 16,
@@ -1419,7 +1630,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#666',
   },
-  // Alerts
   alertsCard: {
     backgroundColor: '#FFF',
     borderRadius: 16,
@@ -1455,6 +1665,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#F8F9FA',
     marginBottom: 12,
   },
+  alertHigh: {
+    backgroundColor: '#FFEBEE',
+  },
   alertMedium: {
     backgroundColor: '#FFF3E0',
   },
@@ -1474,7 +1687,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#666',
   },
-  // Quick Actions
   actionsCard: {
     backgroundColor: '#FFF',
     borderRadius: 16,
@@ -1528,7 +1740,6 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginLeft: 8,
   },
-  // Tracking Info
   trackingInfo: {
     backgroundColor: '#FFF',
     borderRadius: 16,
@@ -1551,7 +1762,6 @@ const styles = StyleSheet.create({
     marginLeft: 12,
     flex: 1,
   },
-  // No Trip State
   noTripContainer: {
     flex: 1,
     justifyContent: 'center',

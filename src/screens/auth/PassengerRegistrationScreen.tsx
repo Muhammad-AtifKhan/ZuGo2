@@ -209,7 +209,7 @@ const styles = StyleSheet.create({
   input:{borderWidth:1,borderColor:'#DADCE0',borderRadius:8,paddingHorizontal:16,paddingVertical:12,fontSize:16,color:'#202124',backgroundColor:'#fff'},
   inputNote:{fontSize:12,color:'#5f6368',marginTop:4,fontStyle:'italic'},
   termsContainer:{flexDirection:'row',alignItems:'flex-start',marginBottom:24},
-  checkbox:{width:20,height:20,borderWidth:2,borderColor:'#1a73e8',borderRadius:4,marginRight:12,justifyContent:'center',alignItems:'center'},
+  checkbox:{width:20,height:20,bhorderWidth:2,borderColor:'#1a73e8',borderRadius:4,marginRight:12,justifyContent:'center',alignItems:'center'},
   checkboxInner:{width:12,height:12,backgroundColor:'#1a73e8',borderRadius:2},
   termsText:{flex:1,fontSize:14,color:'#5f6368',lineHeight:20},
   termsLink:{color:'#1a73e8',fontWeight:'600'},

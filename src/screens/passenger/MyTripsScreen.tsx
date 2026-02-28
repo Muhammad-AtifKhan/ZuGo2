@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -12,190 +12,334 @@ import {
   TextInput,
   Linking,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { PassengerStackParamList } from '../../navigation/PassengerNavigator';
 import Icon from 'react-native-vector-icons/MaterialIcons';
+import firestore from '@react-native-firebase/firestore';
+import auth from '@react-native-firebase/auth';
 
 type MyTripsScreenNavigationProp = StackNavigationProp<PassengerStackParamList>;
 
+interface Trip {
+  id: string;
+  ticketNumber: string;
+  from: string;
+  to: string;
+  fromCode: string;
+  toCode: string;
+  date: string;
+  time: string;
+  departureTime: string;
+  arrivalTime: string;
+  busNumber: string;
+  busId: string;
+  seat: string;
+  seatIds: string[];
+  status: 'confirmed' | 'boarding' | 'completed' | 'cancelled';
+  statusText: string;
+  color: string;
+  boardingTime: string;
+  driver: string;
+  driverId: string;
+  driverContact: string;
+  fare: number;
+  serviceFee: number;
+  total: number;
+  qrCode: string;
+  stops: Stop[];
+  amenities: string[];
+  rating?: number;
+  canRate?: boolean;
+  feedback?: string;
+  bookingDate: any;
+  routeId: string;
+  routeName: string;
+  busType: string;
+}
+
+interface Stop {
+  name: string;
+  time: string;
+  order: number;
+}
+
+interface Driver {
+  id: string;
+  fullName: string;
+  contactNumber: string;
+  busNumber: string;
+}
+
 const MyTripsScreen = () => {
   const navigation = useNavigation<MyTripsScreenNavigationProp>();
-  const [selectedTab, setSelectedTab] = useState<'upcoming' | 'active' | 'past'>('upcoming');
+  const user = auth().currentUser;
+
+  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [selectedTrip, setSelectedTrip] = useState<any>(null);
+  const [selectedTab, setSelectedTab] = useState<'upcoming' | 'active' | 'past'>('upcoming');
+
+  // State for trips
+  const [upcomingTrips, setUpcomingTrips] = useState<Trip[]>([]);
+  const [activeTrips, setActiveTrips] = useState<Trip[]>([]);
+  const [pastTrips, setPastTrips] = useState<Trip[]>([]);
+  const [allTrips, setAllTrips] = useState<Trip[]>([]);
+
+  // Modal states
+  const [selectedTrip, setSelectedTrip] = useState<Trip | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
-  const [modalType, setModalType] = useState<'view' | 'cancel' | 'reschedule'>('view');
-  const [rescheduleDate, setRescheduleDate] = useState('');
-  const [rescheduleTime, setRescheduleTime] = useState('');
+  const [modalType, setModalType] = useState<'view' | 'cancel' | 'reschedule' | 'rate'>('view');
+
+  // Cancellation states
   const [cancellationReason, setCancellationReason] = useState('');
-  const [cancellationReasons] = useState([
+  const [selectedReason, setSelectedReason] = useState('');
+  const cancellationReasons = [
     'Change of plans',
     'Found cheaper option',
     'Bus timing not suitable',
     'Personal emergency',
     'Travel dates changed',
     'Other reason',
-  ]);
-  const [selectedReason, setSelectedReason] = useState('');
+  ];
 
-  // Dummy trip data
-  const [trips, setTrips] = useState({
-    upcoming: [
-      {
-        id: 'trip-001',
-        ticketNumber: 'TKT-2024-0157',
-        from: 'City Center',
-        to: 'Airport',
-        date: 'Today, 15 March',
-        time: '08:00 AM - 09:30 AM',
-        busNumber: 'B-001',
-        seat: '3A',
-        status: 'confirmed',
-        statusText: '✅ CONFIRMED',
-        color: '#4CAF50',
-        boardingTime: '07:45 AM',
-        driver: 'Ali Ahmed',
-        driverContact: '+923001112233',
-        fare: 12,
-        serviceFee: 1,
-        total: 13,
-        qrCode: 'QR-CODE-001',
-        stops: [
-          { name: 'City Center', time: '08:00 AM' },
-          { name: 'University', time: '08:30 AM' },
-          { name: 'Airport', time: '09:30 AM' },
-        ],
-        amenities: ['AC', 'WiFi', 'Water'],
-      },
-      {
-        id: 'trip-002',
-        ticketNumber: 'TKT-2024-0158',
-        from: 'Airport',
-        to: 'City Center',
-        date: 'Tomorrow, 16 March',
-        time: '09:00 AM - 10:30 AM',
-        busNumber: 'B-003',
-        seat: '5B',
-        status: 'confirmed',
-        statusText: '✅ CONFIRMED',
-        color: '#4CAF50',
-        boardingTime: '08:45 AM',
-        driver: 'Sara Khan',
-        driverContact: '+923002223344',
-        fare: 15,
-        serviceFee: 1,
-        total: 16,
-        qrCode: 'QR-CODE-002',
-        stops: [
-          { name: 'Airport', time: '09:00 AM' },
-          { name: 'Business District', time: '09:45 AM' },
-          { name: 'City Center', time: '10:30 AM' },
-        ],
-        amenities: ['AC', 'TV'],
-      },
-    ],
-    active: [
-      {
-        id: 'trip-003',
-        ticketNumber: 'TKT-2024-0159',
-        from: 'University',
-        to: 'Mall',
-        date: 'Now',
-        time: '02:00 PM - 03:00 PM',
-        busNumber: 'B-002',
-        seat: '7C',
-        status: 'boarding',
-        statusText: '🚌 BOARDING NOW',
-        color: '#2196F3',
-        boardingTime: '01:45 PM',
-        driver: 'Usman Ali',
-        driverContact: '+923003334455',
-        fare: 8,
-        serviceFee: 1,
-        total: 9,
-        qrCode: 'QR-CODE-003',
-        delay: '+10 minutes',
-        currentLocation: 'Near University',
-        nextStop: 'Stop 3',
-        eta: '15 minutes',
-        occupancy: '32/40 seats',
-        speed: '45 km/h',
-        busLocation: {
-          latitude: 31.5204,
-          longitude: 74.3587,
-          route: 'University → Mall Route',
-        },
-      },
-    ],
-    past: [
-      {
-        id: 'trip-004',
-        ticketNumber: 'TKT-2024-0156',
-        from: 'City Center',
-        to: 'Airport',
-        date: '14 March',
-        time: '10:00 AM - 11:30 AM',
-        busNumber: 'B-004',
-        seat: '2A',
-        status: 'completed',
-        statusText: '✅ COMPLETED',
+  // Reschedule states
+  const [rescheduleDate, setRescheduleDate] = useState('');
+  const [rescheduleTime, setRescheduleTime] = useState('');
+  const [availableSlots, setAvailableSlots] = useState<any[]>([]);
+
+  // Rating state
+  const [rating, setRating] = useState(0);
+  const [feedback, setFeedback] = useState('');
+
+  // Fetch user's trips from Firebase
+  useEffect(() => {
+    if (!user) {
+      setLoading(false);
+      return;
+    }
+
+    fetchUserTrips();
+  }, [user]);
+
+  const fetchUserTrips = async () => {
+    try {
+      setLoading(true);
+
+      // Get all bookings for this user
+      const snapshot = await firestore()
+        .collection('bookings')
+        .where('userId', '==', user?.uid)
+        .orderBy('bookingDate', 'desc')
+        .get();
+
+      const tripsList: Trip[] = [];
+
+      for (const doc of snapshot.docs) {
+        const data = doc.data();
+
+        // Get trip details
+        const tripSnapshot = await firestore()
+          .collection('trips')
+          .doc(data.tripId)
+          .get();
+
+        if (tripSnapshot.exists) {
+          const tripData = tripSnapshot.data();
+
+          // Get driver info
+          let driverName = 'Not assigned';
+          let driverContact = '';
+
+          if (tripData?.driverId) {
+            const driverSnapshot = await firestore()
+              .collection('drivers')
+              .doc(tripData.driverId)
+              .get();
+
+            if (driverSnapshot.exists) {
+              const driverData = driverSnapshot.data();
+              driverName = driverData?.fullName || 'Driver';
+              driverContact = driverData?.contactNumber || '';
+            }
+          }
+
+          // Determine trip status
+          const tripStatus = determineTripStatus(tripData?.status || 'scheduled', data.status);
+
+          tripsList.push({
+            id: doc.id,
+            ticketNumber: data.ticketNumber || `TKT-${doc.id.slice(0, 8)}`,
+            from: data.from || tripData?.from || '',
+            to: data.to || tripData?.to || '',
+            fromCode: data.fromCode || tripData?.fromCode || '',
+            toCode: data.toCode || tripData?.toCode || '',
+            date: formatDate(data.travelDate?.toDate?.() || new Date()),
+            time: `${tripData?.departureTime || '00:00'} - ${tripData?.arrivalTime || '00:00'}`,
+            departureTime: tripData?.departureTime || '00:00',
+            arrivalTime: tripData?.arrivalTime || '00:00',
+            busNumber: tripData?.busNumber || 'N/A',
+            busId: tripData?.busId || '',
+            seat: data.seatNumber || data.seatIds?.[0] || 'N/A',
+            seatIds: data.seatIds || [],
+            status: tripStatus.status,
+            statusText: tripStatus.text,
+            color: tripStatus.color,
+            boardingTime: tripData?.departureTime || '00:00',
+            driver: driverName,
+            driverId: tripData?.driverId || '',
+            driverContact: driverContact,
+            fare: data.fare || 0,
+            serviceFee: data.serviceFee || 1,
+            total: data.total || (data.fare || 0) + 1,
+            qrCode: data.qrCode || doc.id,
+            stops: tripData?.stops || [],
+            amenities: tripData?.amenities || ['AC', 'WiFi'],
+            rating: data.rating,
+            canRate: !data.rating && data.status === 'completed',
+            bookingDate: data.bookingDate,
+            routeId: data.routeId || '',
+            routeName: tripData?.name || '',
+            busType: tripData?.busType || 'Standard',
+          });
+        }
+      }
+
+      setAllTrips(tripsList);
+      filterTripsByStatus(tripsList);
+
+    } catch (error) {
+      console.error('Error fetching trips:', error);
+      Alert.alert('Error', 'Failed to load your trips');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  const determineTripStatus = (tripStatus: string, bookingStatus: string) => {
+    const now = new Date();
+    const currentHour = now.getHours();
+
+    if (bookingStatus === 'cancelled') {
+      return {
+        status: 'cancelled' as const,
+        text: '❌ CANCELLED',
+        color: '#F44336',
+      };
+    }
+
+    if (bookingStatus === 'completed') {
+      return {
+        status: 'completed' as const,
+        text: '✅ COMPLETED',
         color: '#9E9E9E',
-        driver: 'Ali Ahmed',
-        fare: 12,
-        serviceFee: 1,
-        total: 13,
-        rating: 4.5,
-        canRate: true,
-        feedback: '',
-      },
-    ],
-  });
+      };
+    }
+
+    switch (tripStatus) {
+      case 'in-progress':
+        return {
+          status: 'boarding' as const,
+          text: '🚌 BOARDING NOW',
+          color: '#2196F3',
+        };
+      case 'completed':
+        return {
+          status: 'completed' as const,
+          text: '✅ COMPLETED',
+          color: '#9E9E9E',
+        };
+      case 'scheduled':
+      default:
+        return {
+          status: 'confirmed' as const,
+          text: '✅ CONFIRMED',
+          color: '#4CAF50',
+        };
+    }
+  };
+
+  const formatDate = (date: Date) => {
+    const today = new Date();
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    if (date.toDateString() === today.toDateString()) {
+      return `Today, ${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
+    } else if (date.toDateString() === tomorrow.toDateString()) {
+      return `Tomorrow, ${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
+    } else {
+      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    }
+  };
+
+  const filterTripsByStatus = (trips: Trip[]) => {
+    const now = new Date();
+
+    const upcoming = trips.filter(trip => {
+      const tripDate = new Date(trip.date);
+      return tripDate >= now && trip.status === 'confirmed';
+    });
+
+    const active = trips.filter(trip => trip.status === 'boarding');
+
+    const past = trips.filter(trip => {
+      const tripDate = new Date(trip.date);
+      return tripDate < now || trip.status === 'completed' || trip.status === 'cancelled';
+    });
+
+    setUpcomingTrips(upcoming);
+    setActiveTrips(active);
+    setPastTrips(past);
+  };
 
   const onRefresh = () => {
     setRefreshing(true);
-    setTimeout(() => {
-      setRefreshing(false);
-      Alert.alert('Refreshed', 'Your trips have been updated');
-    }, 1500);
+    fetchUserTrips();
   };
 
-  const handleViewTicket = (trip: any) => {
+  const handleViewTicket = (trip: Trip) => {
     setSelectedTrip(trip);
     setModalType('view');
     setModalVisible(true);
   };
 
-  const handleCancelTrip = (trip: any) => {
+  const handleCancelTrip = (trip: Trip) => {
     setSelectedTrip(trip);
     setModalType('cancel');
+    setSelectedReason('');
+    setCancellationReason('');
     setModalVisible(true);
   };
 
-  const handleReschedule = (trip: any) => {
+  const handleReschedule = (trip: Trip) => {
     setSelectedTrip(trip);
     setModalType('reschedule');
-    setRescheduleDate('Tomorrow, 17 March');
-    setRescheduleTime('10:00 AM - 11:30 AM');
+    fetchAvailableSlots(trip);
     setModalVisible(true);
   };
 
-  const handleTrackBus = (trip: any) => {
-    // Navigate to Track screen with trip details
+  const handleRateTrip = (trip: Trip) => {
+    setSelectedTrip(trip);
+    setModalType('rate');
+    setRating(0);
+    setFeedback('');
+    setModalVisible(true);
+  };
+
+  const handleTrackBus = (trip: Trip) => {
     navigation.navigate('Track', {
       tripId: trip.id,
       busNumber: trip.busNumber,
       from: trip.from,
       to: trip.to,
-      busLocation: trip.busLocation,
-      currentLocation: trip.currentLocation,
-      nextStop: trip.nextStop,
-      eta: trip.eta,
+      routeId: trip.routeId,
     });
   };
 
-  const handleContactDriver = async (trip: any) => {
+  const handleContactDriver = async (trip: Trip) => {
     Alert.alert(
       'Contact Driver',
       `Driver: ${trip.driver}\nContact: ${trip.driverContact}`,
@@ -244,35 +388,37 @@ const MyTripsScreen = () => {
     );
   };
 
-  const handleRateTrip = (trip: any) => {
-    Alert.alert(
-      'Rate Your Trip',
-      `How was your trip ${trip.ticketNumber}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: '1 Star', onPress: () => updateTripRating(trip.id, 1) },
-        { text: '2 Stars', onPress: () => updateTripRating(trip.id, 2) },
-        { text: '3 Stars', onPress: () => updateTripRating(trip.id, 3) },
-        { text: '4 Stars', onPress: () => updateTripRating(trip.id, 4) },
-        { text: '5 Stars', onPress: () => updateTripRating(trip.id, 5) },
-      ]
-    );
+  const fetchAvailableSlots = async (trip: Trip) => {
+    try {
+      // Get available slots for the same route on different dates/times
+      const snapshot = await firestore()
+        .collection('trips')
+        .where('routeId', '==', trip.routeId)
+        .where('status', '==', 'scheduled')
+        .where('availableSeats', '>', 0)
+        .limit(5)
+        .get();
+
+      const slots: any[] = [];
+      snapshot.forEach(doc => {
+        const data = doc.data();
+        slots.push({
+          id: doc.id,
+          date: data.date,
+          departureTime: data.departureTime,
+          arrivalTime: data.arrivalTime,
+          busNumber: data.busNumber,
+          availableSeats: data.availableSeats,
+          fare: data.fare,
+        });
+      });
+      setAvailableSlots(slots);
+    } catch (error) {
+      console.error('Error fetching available slots:', error);
+    }
   };
 
-  const updateTripRating = (tripId: string, rating: number) => {
-    const updatedTrips = {
-      ...trips,
-      past: trips.past.map(trip =>
-        trip.id === tripId
-          ? { ...trip, rating, canRate: false }
-          : trip
-      ),
-    };
-    setTrips(updatedTrips);
-    Alert.alert('Thank You!', `You rated this trip ${rating} stars`);
-  };
-
-  const confirmCancellation = () => {
+  const confirmCancellation = async () => {
     if (!selectedReason && !cancellationReason.trim()) {
       Alert.alert('Reason Required', 'Please select or enter a cancellation reason');
       return;
@@ -283,7 +429,7 @@ const MyTripsScreen = () => {
 
     Alert.alert(
       'Confirm Cancellation',
-      `Cancel trip ${selectedTrip?.ticketNumber}?\n\nReason: ${reason}\nRefund: $${refundAmount} (90% refund)\n\nRefund will be processed within 3-5 business days.`,
+      `Cancel trip ${selectedTrip?.ticketNumber}?\n\nReason: ${reason}\nRefund: PKR ${refundAmount} (90% refund)\n\nRefund will be processed within 3-5 business days.`,
       [
         {
           text: 'Cancel',
@@ -292,29 +438,45 @@ const MyTripsScreen = () => {
         {
           text: 'Confirm Cancellation',
           style: 'destructive',
-          onPress: () => {
-            if (selectedTrip) {
-              const updatedTrips = {
-                ...trips,
-                upcoming: trips.upcoming.filter(t => t.id !== selectedTrip.id),
-                past: [
-                  {
-                    ...selectedTrip,
-                    status: 'cancelled',
-                    statusText: '❌ CANCELLED',
-                    color: '#F44336',
-                    refund: parseFloat(refundAmount),
-                    cancellationReason: reason,
-                  },
-                  ...trips.past,
-                ],
-              };
-              setTrips(updatedTrips);
-              setModalVisible(false);
-              Alert.alert(
-                'Trip Cancelled',
-                `Refund of $${refundAmount} will be processed.\n\nReason: ${reason}`
-              );
+          onPress: async () => {
+            if (selectedTrip && user) {
+              try {
+                // Update booking status in Firebase
+                await firestore().collection('bookings').doc(selectedTrip.id).update({
+                  status: 'cancelled',
+                  cancellationReason: reason,
+                  cancelledAt: firestore.FieldValue.serverTimestamp(),
+                  refundAmount: parseFloat(refundAmount),
+                });
+
+                // Update available seats in trip
+                if (selectedTrip.seatIds.length > 0) {
+                  await firestore().collection('trips').doc(selectedTrip.tripId).update({
+                    availableSeats: firestore.FieldValue.increment(selectedTrip.seatIds.length),
+                  });
+                }
+
+                // Create notification
+                await firestore().collection('notifications').add({
+                  userId: user.uid,
+                  type: 'booking',
+                  title: 'Trip Cancelled',
+                  message: `Your trip ${selectedTrip.ticketNumber} has been cancelled. Refund of PKR ${refundAmount} will be processed.`,
+                  timestamp: firestore.FieldValue.serverTimestamp(),
+                  read: false,
+                });
+
+                setModalVisible(false);
+                fetchUserTrips(); // Refresh trips
+
+                Alert.alert(
+                  'Trip Cancelled',
+                  `Refund of PKR ${refundAmount} will be processed.\n\nReason: ${reason}`
+                );
+              } catch (error) {
+                console.error('Error cancelling trip:', error);
+                Alert.alert('Error', 'Failed to cancel trip');
+              }
             }
           },
         },
@@ -322,7 +484,7 @@ const MyTripsScreen = () => {
     );
   };
 
-  const confirmReschedule = () => {
+  const confirmReschedule = async () => {
     if (!rescheduleDate || !rescheduleTime) {
       Alert.alert('Required', 'Please select new date and time');
       return;
@@ -338,27 +500,35 @@ const MyTripsScreen = () => {
         },
         {
           text: 'Confirm Reschedule',
-          onPress: () => {
-            if (selectedTrip) {
-              const updatedTrip = {
-                ...selectedTrip,
-                date: rescheduleDate,
-                time: rescheduleTime,
-                statusText: '🔄 RESCHEDULED',
-              };
+          onPress: async () => {
+            if (selectedTrip && user) {
+              try {
+                await firestore().collection('bookings').doc(selectedTrip.id).update({
+                  rescheduleDate: rescheduleDate,
+                  rescheduleTime: rescheduleTime,
+                  rescheduledAt: firestore.FieldValue.serverTimestamp(),
+                });
 
-              const updatedTrips = {
-                ...trips,
-                upcoming: trips.upcoming.map(t =>
-                  t.id === selectedTrip.id ? updatedTrip : t
-                ),
-              };
-              setTrips(updatedTrips);
-              setModalVisible(false);
-              Alert.alert(
-                'Trip Rescheduled',
-                `Your trip has been rescheduled to:\n${rescheduleDate} at ${rescheduleTime}`
-              );
+                await firestore().collection('notifications').add({
+                  userId: user.uid,
+                  type: 'booking',
+                  title: 'Trip Rescheduled',
+                  message: `Your trip ${selectedTrip.ticketNumber} has been rescheduled to ${rescheduleDate} at ${rescheduleTime}`,
+                  timestamp: firestore.FieldValue.serverTimestamp(),
+                  read: false,
+                });
+
+                setModalVisible(false);
+                fetchUserTrips();
+
+                Alert.alert(
+                  'Trip Rescheduled',
+                  `Your trip has been rescheduled to:\n${rescheduleDate} at ${rescheduleTime}`
+                );
+              } catch (error) {
+                console.error('Error rescheduling trip:', error);
+                Alert.alert('Error', 'Failed to reschedule trip');
+              }
             }
           },
         },
@@ -366,9 +536,37 @@ const MyTripsScreen = () => {
     );
   };
 
-  // Handle navigation to Home screen
+  const submitRating = async () => {
+    if (rating === 0) {
+      Alert.alert('Rating Required', 'Please select a rating');
+      return;
+    }
+
+    if (selectedTrip && user) {
+      try {
+        await firestore().collection('bookings').doc(selectedTrip.id).update({
+          rating: rating,
+          feedback: feedback,
+          ratedAt: firestore.FieldValue.serverTimestamp(),
+        });
+
+        setModalVisible(false);
+        fetchUserTrips();
+
+        Alert.alert('Thank You!', `You rated this trip ${rating} stars`);
+      } catch (error) {
+        console.error('Error submitting rating:', error);
+        Alert.alert('Error', 'Failed to submit rating');
+      }
+    }
+  };
+
   const handleBookNow = () => {
     navigation.navigate('HomeTab');
+  };
+
+  const formatCurrency = (amount: number) => {
+    return `PKR ${amount.toLocaleString()}`;
   };
 
   const renderViewTicketModal = () => (
@@ -394,7 +592,7 @@ const MyTripsScreen = () => {
         {/* Passenger Info */}
         <View style={styles.infoSection}>
           <Text style={styles.sectionLabel}>PASSENGER</Text>
-          <Text style={styles.sectionValue}>Ali Ahmed</Text>
+          <Text style={styles.sectionValue}>{user?.displayName || 'Passenger'}</Text>
         </View>
 
         {/* Journey Info */}
@@ -406,6 +604,7 @@ const MyTripsScreen = () => {
               <View>
                 <Text style={styles.locationLabel}>FROM</Text>
                 <Text style={styles.locationText}>{selectedTrip?.from}</Text>
+                <Text style={styles.locationCode}>{selectedTrip?.fromCode}</Text>
               </View>
             </View>
 
@@ -416,6 +615,7 @@ const MyTripsScreen = () => {
               <View>
                 <Text style={styles.locationLabel}>TO</Text>
                 <Text style={styles.locationText}>{selectedTrip?.to}</Text>
+                <Text style={styles.locationCode}>{selectedTrip?.toCode}</Text>
               </View>
             </View>
           </View>
@@ -434,7 +634,7 @@ const MyTripsScreen = () => {
             <View style={styles.detailItem}>
               <Icon name="schedule" size={18} color="#666" />
               <Text style={styles.detailLabel}>Time</Text>
-              <Text style={styles.detailValue}>{selectedTrip?.time}</Text>
+              <Text style={styles.detailValue}>{selectedTrip?.departureTime}</Text>
             </View>
 
             <View style={styles.detailItem}>
@@ -452,11 +652,11 @@ const MyTripsScreen = () => {
         </View>
 
         {/* Stops Information */}
-        {selectedTrip?.stops && (
+        {selectedTrip?.stops && selectedTrip.stops.length > 0 && (
           <View style={styles.infoSection}>
             <Text style={styles.sectionLabel}>STOPS</Text>
             <View style={styles.stopsContainer}>
-              {selectedTrip.stops.map((stop: any, index: number) => (
+              {selectedTrip.stops.map((stop: Stop, index: number) => (
                 <View key={index} style={styles.stopItem}>
                   <View style={styles.stopDot} />
                   <Text style={styles.stopName}>{stop.name}</Text>
@@ -486,15 +686,15 @@ const MyTripsScreen = () => {
           <Text style={styles.sectionLabel}>FARE BREAKDOWN</Text>
           <View style={styles.fareRow}>
             <Text style={styles.fareLabel}>Base Fare:</Text>
-            <Text style={styles.fareValue}>${selectedTrip?.fare}</Text>
+            <Text style={styles.fareValue}>{formatCurrency(selectedTrip?.fare || 0)}</Text>
           </View>
           <View style={styles.fareRow}>
             <Text style={styles.fareLabel}>Service Fee:</Text>
-            <Text style={styles.fareValue}>${selectedTrip?.serviceFee || 1}</Text>
+            <Text style={styles.fareValue}>{formatCurrency(selectedTrip?.serviceFee || 1)}</Text>
           </View>
           <View style={[styles.fareRow, styles.totalRow]}>
             <Text style={styles.totalLabel}>Total:</Text>
-            <Text style={styles.totalValue}>${selectedTrip?.total || selectedTrip?.fare + 1}</Text>
+            <Text style={styles.totalValue}>{formatCurrency(selectedTrip?.total || (selectedTrip?.fare || 0) + 1)}</Text>
           </View>
         </View>
 
@@ -545,7 +745,7 @@ const MyTripsScreen = () => {
           <Icon name="warning" size={40} color="#F44336" />
           <Text style={styles.cancelTitle}>Cancel Trip {selectedTrip?.ticketNumber}</Text>
           <Text style={styles.cancelSubtitle}>
-            You will receive a refund of ${selectedTrip ? (selectedTrip.fare * 0.9).toFixed(2) : '0'} (90%)
+            You will receive a refund of {formatCurrency(selectedTrip ? selectedTrip.fare * 0.9 : 0)} (90%)
           </Text>
         </View>
 
@@ -553,18 +753,18 @@ const MyTripsScreen = () => {
           <Text style={styles.refundTitle}>Refund Details:</Text>
           <View style={styles.refundRow}>
             <Text style={styles.refundLabel}>Original Amount:</Text>
-            <Text style={styles.refundValue}>${selectedTrip?.fare}</Text>
+            <Text style={styles.refundValue}>{formatCurrency(selectedTrip?.fare || 0)}</Text>
           </View>
           <View style={styles.refundRow}>
             <Text style={styles.refundLabel}>Cancellation Fee (10%):</Text>
             <Text style={styles.refundValue}>
-              -${selectedTrip ? (selectedTrip.fare * 0.1).toFixed(2) : '0'}
+              -{formatCurrency(selectedTrip ? selectedTrip.fare * 0.1 : 0)}
             </Text>
           </View>
           <View style={[styles.refundRow, styles.refundTotal]}>
             <Text style={styles.refundTotalLabel}>Refund Amount:</Text>
             <Text style={styles.refundTotalValue}>
-              ${selectedTrip ? (selectedTrip.fare * 0.9).toFixed(2) : '0'}
+              {formatCurrency(selectedTrip ? selectedTrip.fare * 0.9 : 0)}
             </Text>
           </View>
           <Text style={styles.refundNote}>
@@ -664,7 +864,7 @@ const MyTripsScreen = () => {
             </View>
             <View style={styles.bookingRow}>
               <Icon name="schedule" size={18} color="#666" />
-              <Text style={styles.bookingText}>{selectedTrip?.time}</Text>
+              <Text style={styles.bookingText}>{selectedTrip?.departureTime}</Text>
             </View>
             <View style={styles.bookingRow}>
               <Icon name="directions-bus" size={18} color="#666" />
@@ -678,58 +878,29 @@ const MyTripsScreen = () => {
         </View>
 
         <View style={styles.newScheduleSection}>
-          <Text style={styles.sectionTitle}>Select New Schedule</Text>
+          <Text style={styles.sectionTitle}>Available Slots</Text>
 
-          <View style={styles.dateInputContainer}>
-            <Text style={styles.inputLabel}>New Date</Text>
-            <TouchableOpacity style={styles.dateInput}>
-              <Icon name="calendar-today" size={20} color="#4A90E2" />
-              <Text style={styles.dateInputText}>
-                {rescheduleDate || 'Select new date'}
-              </Text>
-              <Icon name="arrow-drop-down" size={24} color="#666" />
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.timeInputContainer}>
-            <Text style={styles.inputLabel}>New Time Slot</Text>
-            <TouchableOpacity style={styles.timeInput}>
-              <Icon name="schedule" size={20} color="#4A90E2" />
-              <Text style={styles.timeInputText}>
-                {rescheduleTime || 'Select new time'}
-              </Text>
-              <Icon name="arrow-drop-down" size={24} color="#666" />
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.availableOptions}>
-            <Text style={styles.optionsTitle}>Available Options:</Text>
+          {availableSlots.map((slot, index) => (
             <TouchableOpacity
-              style={styles.optionCard}
+              key={index}
+              style={[
+                styles.optionCard,
+                rescheduleTime === slot.departureTime && styles.optionCardSelected
+              ]}
               onPress={() => {
-                setRescheduleDate('Tomorrow, 17 March');
-                setRescheduleTime('10:00 AM - 11:30 AM');
+                setRescheduleDate(slot.date);
+                setRescheduleTime(slot.departureTime);
               }}
             >
-              <Text style={styles.optionTime}>10:00 AM - 11:30 AM</Text>
-              <Text style={styles.optionDate}>Tomorrow, 17 March</Text>
-              <Text style={styles.optionBus}>Bus B-006 • 12 seats available</Text>
-              <Text style={styles.optionFare}>Fare: $12</Text>
+              <Text style={styles.optionTime}>{slot.departureTime} - {slot.arrivalTime}</Text>
+              <Text style={styles.optionDate}>{slot.date}</Text>
+              <View style={styles.optionDetails}>
+                <Text style={styles.optionBus}>Bus {slot.busNumber}</Text>
+                <Text style={styles.optionSeats}>{slot.availableSeats} seats available</Text>
+              </View>
+              <Text style={styles.optionFare}>{formatCurrency(slot.fare)}</Text>
             </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.optionCard}
-              onPress={() => {
-                setRescheduleDate('Tomorrow, 17 March');
-                setRescheduleTime('02:00 PM - 03:30 PM');
-              }}
-            >
-              <Text style={styles.optionTime}>02:00 PM - 03:30 PM</Text>
-              <Text style={styles.optionDate}>Tomorrow, 17 March</Text>
-              <Text style={styles.optionBus}>Bus B-007 • 8 seats available</Text>
-              <Text style={styles.optionFare}>Fare: $15 (Premium)</Text>
-            </TouchableOpacity>
-          </View>
+          ))}
 
           <View style={styles.rescheduleNote}>
             <Icon name="info" size={18} color="#FF9800" />
@@ -760,6 +931,77 @@ const MyTripsScreen = () => {
     </View>
   );
 
+  const renderRateModal = () => (
+    <View style={styles.modalContent}>
+      <View style={styles.modalHeader}>
+        <Text style={styles.modalTitle}>RATE YOUR TRIP</Text>
+        <TouchableOpacity onPress={() => setModalVisible(false)}>
+          <Icon name="close" size={24} color="#666" />
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView style={styles.modalBody}>
+        <View style={styles.rateInfo}>
+          <Icon name="star" size={50} color="#FFD700" />
+          <Text style={styles.rateTitle}>
+            How was your trip {selectedTrip?.ticketNumber}?
+          </Text>
+          <Text style={styles.rateSubtitle}>
+            Your feedback helps us improve our service
+          </Text>
+        </View>
+
+        <View style={styles.starsContainer}>
+          {[1, 2, 3, 4, 5].map((star) => (
+            <TouchableOpacity
+              key={star}
+              onPress={() => setRating(star)}
+              style={styles.starButton}
+            >
+              <Icon
+                name={star <= rating ? "star" : "star-border"}
+                size={40}
+                color={star <= rating ? "#FFD700" : "#DDD"}
+              />
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        <View style={styles.feedbackSection}>
+          <Text style={styles.feedbackLabel}>Additional Feedback (Optional)</Text>
+          <TextInput
+            style={styles.feedbackInput}
+            placeholder="Share your experience..."
+            placeholderTextColor="#999"
+            value={feedback}
+            onChangeText={setFeedback}
+            multiline
+            numberOfLines={4}
+            textAlignVertical="top"
+          />
+        </View>
+      </ScrollView>
+
+      <View style={styles.modalFooter}>
+        <TouchableOpacity
+          style={[styles.modalButton, styles.cancelModalButton]}
+          onPress={() => setModalVisible(false)}
+        >
+          <Text style={styles.cancelModalButtonText}>Cancel</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.modalButton, styles.submitRateButton]}
+          onPress={submitRating}
+          disabled={rating === 0}
+        >
+          <Icon name="send" size={20} color="#FFF" />
+          <Text style={styles.submitRateButtonText}>Submit Rating</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+
   const renderModalContent = () => {
     switch (modalType) {
       case 'view':
@@ -768,12 +1010,14 @@ const MyTripsScreen = () => {
         return renderCancelModal();
       case 'reschedule':
         return renderRescheduleModal();
+      case 'rate':
+        return renderRateModal();
       default:
         return null;
     }
   };
 
-  const renderTripCard = (trip: any) => {
+  const renderTripCard = (trip: Trip) => {
     return (
       <View key={trip.id} style={styles.tripCard}>
         {/* Trip Header */}
@@ -781,7 +1025,7 @@ const MyTripsScreen = () => {
           <View style={styles.tripTime}>
             <Icon name="schedule" size={20} color="#4A90E2" />
             <Text style={styles.tripDateTime}>
-              {trip.date} • {trip.time}
+              {trip.date} • {trip.departureTime}
             </Text>
           </View>
 
@@ -905,6 +1149,17 @@ const MyTripsScreen = () => {
     );
   };
 
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#4A90E2" />
+          <Text style={styles.loadingText}>Loading your trips...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView
@@ -940,7 +1195,7 @@ const MyTripsScreen = () => {
               styles.tabText,
               selectedTab === 'upcoming' && styles.tabTextActive,
             ]}>
-              Upcoming ({trips.upcoming.length})
+              Upcoming ({upcomingTrips.length})
             </Text>
           </TouchableOpacity>
 
@@ -955,14 +1210,14 @@ const MyTripsScreen = () => {
               styles.tabText,
               selectedTab === 'active' && styles.tabTextActive,
             ]}>
-              Active ({trips.active.length})
+              Active ({activeTrips.length})
             </Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={[
               styles.tab,
-              selectedTrip === 'past' && styles.tabActive,
+              selectedTab === 'past' && styles.tabActive,
             ]}
             onPress={() => setSelectedTab('past')}
           >
@@ -970,20 +1225,20 @@ const MyTripsScreen = () => {
               styles.tabText,
               selectedTab === 'past' && styles.tabTextActive,
             ]}>
-              Past ({trips.past.length})
+              Past ({pastTrips.length})
             </Text>
           </TouchableOpacity>
         </View>
 
         {/* Trips List */}
         <View style={styles.tripsContainer}>
-          {selectedTab === 'upcoming' && trips.upcoming.map(renderTripCard)}
-          {selectedTab === 'active' && trips.active.map(renderTripCard)}
-          {selectedTab === 'past' && trips.past.map(renderTripCard)}
+          {selectedTab === 'upcoming' && upcomingTrips.map(renderTripCard)}
+          {selectedTab === 'active' && activeTrips.map(renderTripCard)}
+          {selectedTab === 'past' && pastTrips.map(renderTripCard)}
 
-          {((selectedTab === 'upcoming' && trips.upcoming.length === 0) ||
-            (selectedTab === 'active' && trips.active.length === 0) ||
-            (selectedTab === 'past' && trips.past.length === 0)) && (
+          {((selectedTab === 'upcoming' && upcomingTrips.length === 0) ||
+            (selectedTab === 'active' && activeTrips.length === 0) ||
+            (selectedTab === 'past' && pastTrips.length === 0)) && (
             <View style={styles.emptyState}>
               <Icon name="inbox" size={60} color="#DDD" />
               <Text style={styles.emptyStateText}>
@@ -1019,7 +1274,6 @@ const MyTripsScreen = () => {
   );
 };
 
-// Styles remain the same...
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
@@ -1028,6 +1282,16 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     padding: 16,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: '#4A90E2',
   },
   header: {
     flexDirection: 'row',
@@ -1145,6 +1409,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#1A1A1A',
+  },
+  locationCode: {
+    fontSize: 12,
+    color: '#4A90E2',
+    marginTop: 2,
   },
   dottedLine: {
     height: 20,
@@ -1670,55 +1939,6 @@ const styles = StyleSheet.create({
     color: '#1A237E',
     marginBottom: 16,
   },
-  dateInputContainer: {
-    marginBottom: 16,
-  },
-  inputLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#666',
-    marginBottom: 8,
-  },
-  dateInput: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#E3E8EF',
-    borderRadius: 8,
-    padding: 14,
-  },
-  dateInputText: {
-    fontSize: 16,
-    color: '#1A1A1A',
-    flex: 1,
-    marginLeft: 12,
-  },
-  timeInputContainer: {
-    marginBottom: 24,
-  },
-  timeInput: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#E3E8EF',
-    borderRadius: 8,
-    padding: 14,
-  },
-  timeInputText: {
-    fontSize: 16,
-    color: '#1A1A1A',
-    flex: 1,
-    marginLeft: 12,
-  },
-  availableOptions: {
-    marginBottom: 20,
-  },
-  optionsTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1A237E',
-    marginBottom: 12,
-  },
   optionCard: {
     backgroundColor: '#FFF',
     borderWidth: 1,
@@ -1726,6 +1946,10 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 16,
     marginBottom: 12,
+  },
+  optionCardSelected: {
+    borderColor: '#4A90E2',
+    backgroundColor: '#F0F8FF',
   },
   optionTime: {
     fontSize: 16,
@@ -1738,15 +1962,24 @@ const styles = StyleSheet.create({
     color: '#666',
     marginBottom: 4,
   },
+  optionDetails: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 4,
+  },
   optionBus: {
     fontSize: 14,
     color: '#4A90E2',
-    marginBottom: 4,
+  },
+  optionSeats: {
+    fontSize: 14,
+    color: '#2E7D32',
   },
   optionFare: {
     fontSize: 14,
     fontWeight: '600',
     color: '#4CAF50',
+    marginTop: 4,
   },
   rescheduleNote: {
     flexDirection: 'row',
@@ -1760,6 +1993,57 @@ const styles = StyleSheet.create({
     color: '#FF9800',
     marginLeft: 8,
     flex: 1,
+  },
+  // Rate Modal
+  rateInfo: {
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  rateTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#1A237E',
+    marginTop: 12,
+    marginBottom: 4,
+  },
+  rateSubtitle: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+  },
+  starsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginBottom: 24,
+  },
+  starButton: {
+    marginHorizontal: 4,
+  },
+  feedbackSection: {
+    marginBottom: 20,
+  },
+  feedbackLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1A237E',
+    marginBottom: 12,
+  },
+  feedbackInput: {
+    borderWidth: 1,
+    borderColor: '#E3E8EF',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 14,
+    color: '#1A1A1A',
+    minHeight: 100,
+  },
+  submitRateButton: {
+    backgroundColor: '#FF9800',
+    borderColor: '#FF9800',
+  },
+  submitRateButtonText: {
+    color: '#FFF',
+    marginLeft: 8,
   },
 });
 
