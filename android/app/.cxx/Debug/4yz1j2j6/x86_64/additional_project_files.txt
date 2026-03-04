@@ -1,3 +1,9 @@
+D:\MyProjects\ZuGo2\android\app\.cxx\Debug\4yz1j2j6\x86_64\rnasyncstorage_autolinked_build\CMakeFiles\react_codegen_rnasyncstorage.dir\react\renderer\components\rnasyncstorage\ComponentDescriptors.cpp.o
+D:\MyProjects\ZuGo2\android\app\.cxx\Debug\4yz1j2j6\x86_64\rnasyncstorage_autolinked_build\CMakeFiles\react_codegen_rnasyncstorage.dir\react\renderer\components\rnasyncstorage\EventEmitters.cpp.o
+D:\MyProjects\ZuGo2\android\app\.cxx\Debug\4yz1j2j6\x86_64\rnasyncstorage_autolinked_build\CMakeFiles\react_codegen_rnasyncstorage.dir\react\renderer\components\rnasyncstorage\Props.cpp.o
+D:\MyProjects\ZuGo2\android\app\.cxx\Debug\4yz1j2j6\x86_64\rnasyncstorage_autolinked_build\CMakeFiles\react_codegen_rnasyncstorage.dir\react\renderer\components\rnasyncstorage\ShadowNodes.cpp.o
+D:\MyProjects\ZuGo2\android\app\.cxx\Debug\4yz1j2j6\x86_64\rnasyncstorage_autolinked_build\CMakeFiles\react_codegen_rnasyncstorage.dir\react\renderer\components\rnasyncstorage\States.cpp.o
+D:\MyProjects\ZuGo2\android\app\.cxx\Debug\4yz1j2j6\x86_64\rnasyncstorage_autolinked_build\CMakeFiles\react_codegen_rnasyncstorage.dir\rnasyncstorage-generated.cpp.o
 D:\MyProjects\ZuGo2\android\app\.cxx\Debug\4yz1j2j6\x86_64\RNDateTimePickerCGen_autolinked_build\CMakeFiles\react_codegen_RNDateTimePickerCGen.dir\RNDateTimePickerCGen-generated.cpp.o
 D:\MyProjects\ZuGo2\android\app\.cxx\Debug\4yz1j2j6\x86_64\RNDateTimePickerCGen_autolinked_build\CMakeFiles\react_codegen_RNDateTimePickerCGen.dir\react\renderer\components\RNDateTimePickerCGen\ComponentDescriptors.cpp.o
 D:\MyProjects\ZuGo2\android\app\.cxx\Debug\4yz1j2j6\x86_64\RNDateTimePickerCGen_autolinked_build\CMakeFiles\react_codegen_RNDateTimePickerCGen.dir\react\renderer\components\RNDateTimePickerCGen\EventEmitters.cpp.o

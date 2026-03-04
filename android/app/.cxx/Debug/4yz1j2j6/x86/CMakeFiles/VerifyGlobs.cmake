@@ -12,6 +12,30 @@ if(NOT "${NEW_GLOB}" STREQUAL "${OLD_GLOB}")
   file(TOUCH_NOCREATE "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86/CMakeFiles/cmake.verify_globs")
 endif()
 
+# react_codegen_SRCS at D:/MyProjects/ZuGo2/node_modules/@react-native-async-storage/async-storage/android/build/generated/source/codegen/jni/CMakeLists.txt:9 (file)
+file(GLOB NEW_GLOB LIST_DIRECTORIES true "D:/MyProjects/ZuGo2/node_modules/@react-native-async-storage/async-storage/android/build/generated/source/codegen/jni/*.cpp")
+set(OLD_GLOB
+  "D:/MyProjects/ZuGo2/node_modules/@react-native-async-storage/async-storage/android/build/generated/source/codegen/jni/rnasyncstorage-generated.cpp"
+  )
+if(NOT "${NEW_GLOB}" STREQUAL "${OLD_GLOB}")
+  message("-- GLOB mismatch!")
+  file(TOUCH_NOCREATE "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86/CMakeFiles/cmake.verify_globs")
+endif()
+
+# react_codegen_SRCS at D:/MyProjects/ZuGo2/node_modules/@react-native-async-storage/async-storage/android/build/generated/source/codegen/jni/CMakeLists.txt:9 (file)
+file(GLOB NEW_GLOB LIST_DIRECTORIES true "D:/MyProjects/ZuGo2/node_modules/@react-native-async-storage/async-storage/android/build/generated/source/codegen/jni/react/renderer/components/rnasyncstorage/*.cpp")
+set(OLD_GLOB
+  "D:/MyProjects/ZuGo2/node_modules/@react-native-async-storage/async-storage/android/build/generated/source/codegen/jni/react/renderer/components/rnasyncstorage/ComponentDescriptors.cpp"
+  "D:/MyProjects/ZuGo2/node_modules/@react-native-async-storage/async-storage/android/build/generated/source/codegen/jni/react/renderer/components/rnasyncstorage/EventEmitters.cpp"
+  "D:/MyProjects/ZuGo2/node_modules/@react-native-async-storage/async-storage/android/build/generated/source/codegen/jni/react/renderer/components/rnasyncstorage/Props.cpp"
+  "D:/MyProjects/ZuGo2/node_modules/@react-native-async-storage/async-storage/android/build/generated/source/codegen/jni/react/renderer/components/rnasyncstorage/ShadowNodes.cpp"
+  "D:/MyProjects/ZuGo2/node_modules/@react-native-async-storage/async-storage/android/build/generated/source/codegen/jni/react/renderer/components/rnasyncstorage/States.cpp"
+  )
+if(NOT "${NEW_GLOB}" STREQUAL "${OLD_GLOB}")
+  message("-- GLOB mismatch!")
+  file(TOUCH_NOCREATE "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86/CMakeFiles/cmake.verify_globs")
+endif()
+
 # react_codegen_SRCS at D:/MyProjects/ZuGo2/node_modules/@react-native-community/datetimepicker/android/build/generated/source/codegen/jni/CMakeLists.txt:9 (file)
 file(GLOB NEW_GLOB LIST_DIRECTORIES true "D:/MyProjects/ZuGo2/node_modules/@react-native-community/datetimepicker/android/build/generated/source/codegen/jni/*.cpp")
 set(OLD_GLOB

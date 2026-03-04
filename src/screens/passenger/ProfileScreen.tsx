@@ -260,6 +260,7 @@ const ProfileScreen = () => {
     }
   };
 
+  // ✅ FIXED: Logout function - navigation reset REMOVED
   const handleLogout = () => {
     Alert.alert(
       'Logout',
@@ -273,11 +274,7 @@ const ProfileScreen = () => {
             setLogoutLoading(true);
             try {
               await auth().signOut();
-              // Reset navigation to Login screen
-              navigation.reset({
-                index: 0,
-                routes: [{ name: 'Login' }],
-              });
+              // ✅ RootNavigator automatically shows AuthNavigator
             } catch (error) {
               console.error('Logout error:', error);
               Alert.alert('Error', 'Failed to logout. Please try again.');
@@ -588,6 +585,7 @@ const ProfileScreen = () => {
     navigation.navigate('TermsConditions');
   };
 
+  // ✅ FIXED: Delete Account function - navigation reset REMOVED
   const handleDeleteAccount = () => {
     Alert.alert(
       'Delete Account',
@@ -608,10 +606,7 @@ const ProfileScreen = () => {
               await user.delete();
 
               Alert.alert('Account Deleted', 'Your account has been deleted');
-              navigation.reset({
-                index: 0,
-                routes: [{ name: 'Login' }],
-              });
+              // ✅ No navigation needed - user becomes null, RootNavigator shows AuthNavigator
             } catch (error) {
               console.error('Error deleting account:', error);
               Alert.alert('Error', 'Failed to delete account');

@@ -1,6 +1,9 @@
 D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/CMakeFiles/appmodules.dir
 D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/CMakeFiles/edit_cache.dir
 D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/CMakeFiles/rebuild_cache.dir
+D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/rnasyncstorage_autolinked_build/CMakeFiles/react_codegen_rnasyncstorage.dir
+D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/rnasyncstorage_autolinked_build/CMakeFiles/edit_cache.dir
+D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/rnasyncstorage_autolinked_build/CMakeFiles/rebuild_cache.dir
 D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/RNDateTimePickerCGen_autolinked_build/CMakeFiles/react_codegen_RNDateTimePickerCGen.dir
 D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/RNDateTimePickerCGen_autolinked_build/CMakeFiles/edit_cache.dir
 D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/RNDateTimePickerCGen_autolinked_build/CMakeFiles/rebuild_cache.dir

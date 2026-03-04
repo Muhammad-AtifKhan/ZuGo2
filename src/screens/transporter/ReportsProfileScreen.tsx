@@ -405,47 +405,33 @@ const ReportsProfileScreen = () => {
   };
 
   // ========== LOGOUT FUNCTION ==========
-// ReportsProfileScreen.tsx - Replace the handleLogout function
-
-   const handleLogout = () => {
-     Alert.alert(
-       'Logout',
-       'Are you sure you want to logout?',
-       [
-         {
-           text: 'Cancel',
-           style: 'cancel',
-         },
-         {
-           text: 'Logout',
-           style: 'destructive',
-           onPress: async () => {
-             setLogoutLoading(true);
-             try {
-               await auth().signOut();
-
-               // 👇 Use CommonActions.reset
-               navigation.dispatch(
-                 CommonActions.reset({
-                   index: 0,
-                   routes: [
-                     { name: 'Login' },
-                   ],
-                 })
-               );
-
-             } catch (error) {
-               console.error('Logout error:', error);
-               Alert.alert('Error', 'Failed to logout. Please try again.');
-             } finally {
-               setLogoutLoading(false);
-             }
-           },
-         },
-       ],
-       { cancelable: true }
-     );
-   };
+  const handleLogout = () => {
+  Alert.alert(
+    'Logout',
+    'Are you sure you want to logout?',
+    [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Logout',
+        style: 'destructive',
+        onPress: async () => {
+          setLogoutLoading(true);
+          try {
+            await auth().signOut();
+            // 🚫 DO NOT NAVIGATE
+            // RootNavigator will auto-switch to AuthNavigator
+          } catch (error) {
+            console.error('Logout error:', error);
+            Alert.alert('Error', 'Failed to logout.');
+          } finally {
+            setLogoutLoading(false);
+          }
+        },
+      },
+    ],
+    { cancelable: true }
+  );
+};
 
   // ========== RENDER FUNCTIONS ==========
   const renderBarChart = (data: any[], maxValue: number, color: string, label: string) => {

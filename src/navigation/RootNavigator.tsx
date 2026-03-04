@@ -1,6 +1,7 @@
 import 'react-native-gesture-handler';
 import React, { useEffect, useState, useContext } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import firestore from '@react-native-firebase/firestore';
 import { AuthContext } from '../context/AuthContext';
 
@@ -13,77 +14,71 @@ import SplashScreen from '../screens/auth/SplashScreen';
 
 export default function RootNavigator() {
   const { user, loading } = useContext(AuthContext);
+
   const [userRole, setUserRole] = useState<string | null>(null);
-  const [hasOnboarded, setHasOnboarded] = useState<boolean | null>(null);
   const [checkingRole, setCheckingRole] = useState(true);
+  const [firstLaunch, setFirstLaunch] = useState<boolean | null>(null);
   const [splashVisible, setSplashVisible] = useState(true);
 
+  // 🔥 CHECK FIRST LAUNCH (DEVICE LEVEL)
   useEffect(() => {
-    const fetchUserData = async () => {
-      if (user) {
-        try {
-          const doc = await firestore()
-            .collection('users')
-            .doc(user.uid)
-            .get();
+    const checkFirstLaunch = async () => {
+      const value = await AsyncStorage.getItem('alreadyLaunched');
 
-          if (doc.exists) {
-            const data = doc.data();
-            setUserRole(data?.userType || null);
-            setHasOnboarded(data?.hasOnboarded || false);
-          } else {
-            setUserRole(null);
-            setHasOnboarded(false);
-          }
-        } catch (error) {
-          console.error('Error fetching user data:', error);
-        }
+      if (value === null) {
+        await AsyncStorage.setItem('alreadyLaunched', 'true');
+        setFirstLaunch(true);
+      } else {
+        setFirstLaunch(false);
+      }
+    };
+
+    checkFirstLaunch();
+  }, []);
+
+  // 🔥 FETCH USER ROLE
+  useEffect(() => {
+    const fetchUserRole = async () => {
+      if (user) {
+        const doc = await firestore()
+          .collection('users')
+          .doc(user.uid)
+          .get();
+
+        setUserRole(doc.data()?.userType?.toLowerCase() ?? null);
       } else {
         setUserRole(null);
-        setHasOnboarded(false);
       }
+
       setCheckingRole(false);
     };
 
-    fetchUserData();
+    fetchUserRole();
   }, [user]);
 
-  // Splash minimum duration - 2 seconds
+  // Splash timer
   useEffect(() => {
-    if (!loading && !checkingRole && hasOnboarded !== null) {
+    if (!loading && !checkingRole && firstLaunch !== null) {
       const timer = setTimeout(() => {
         setSplashVisible(false);
       }, 2000);
 
       return () => clearTimeout(timer);
     }
-  }, [loading, checkingRole, hasOnboarded]);
+  }, [loading, checkingRole, firstLaunch]);
 
-  // Jab tak sab load ho raha hai, splash dikhao
-  if (splashVisible || loading || checkingRole || hasOnboarded === null) {
+  if (loading || checkingRole || firstLaunch === null || splashVisible) {
     return <SplashScreen />;
   }
-
-  const handleOnboardingComplete = async () => {
-    if (user) {
-      await firestore().collection('users').doc(user.uid).update({
-        hasOnboarded: true,
-        updatedAt: firestore.FieldValue.serverTimestamp(),
-      });
-      setHasOnboarded(true);
-    }
-  };
 
   return (
     <NavigationContainer>
       {!user ? (
-        // 👇 USER LOGGED OUT - AUTH FLOW
-        <AuthNavigator />
-      ) : !hasOnboarded ? (
-        // 👇 USER LOGGED IN BUT ONBOARDING COMPLETE NAHI
-        <OnboardingNavigator
-          onOnboardingComplete={handleOnboardingComplete}  // 👈 YEH SAHI HAI
-        />
+        firstLaunch ? (
+          <OnboardingNavigator />
+        ) : (
+          <AuthNavigator />
+        )
       ) : userRole === 'passenger' ? (
         <PassengerNavigator />
       ) : userRole === 'driver' ? (
@@ -91,7 +86,6 @@ export default function RootNavigator() {
       ) : userRole === 'transporter' ? (
         <TransporterNavigator />
       ) : (
-        // 👇 FALLBACK
         <AuthNavigator />
       )}
     </NavigationContainer>

@@ -1,4 +1,3 @@
-// src/screens/auth/TransporterRegistrationScreen.tsx - FIREBASE INTEGRATED
 import React, { useState } from 'react';
 import {
   View,
@@ -18,20 +17,15 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 
-// Define navigation types
-type StackParamList = {
-  TransporterRegistration: undefined;
-  OTPVerification: { phone: string; role: string };
+type AuthStackParamList = {
   Login: undefined;
-  Home: undefined;
+  RoleSelection: undefined;
+  PassengerRegistration: { role: 'passenger' };
+  TransporterRegistration: { role: 'transporter' };
 };
 
-type NavigationProp = NativeStackNavigationProp<StackParamList>;
-
-// Route params type
-type RouteParams = {
-  role?: 'passenger' | 'driver' | 'transporter';
-};
+type NavigationProp = NativeStackNavigationProp<AuthStackParamList>;
+type RouteParams = { role?: 'transporter' };
 
 export default function TransporterRegistrationScreen() {
   const navigation = useNavigation<NavigationProp>();
@@ -40,11 +34,11 @@ export default function TransporterRegistrationScreen() {
 
   const [formData, setFormData] = useState({
     companyName: '',
+    contactPerson: '',
     businessEmail: '',
     contactPhone: '',
     businessAddress: '',
     taxNumber: '',
-    contactPerson: '',
     password: '',
     confirmPassword: '',
   });
@@ -56,94 +50,44 @@ export default function TransporterRegistrationScreen() {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
-  // Validate email format
   const isValidEmail = (email: string) => {
-    const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return re.test(email);
-  };
-
-  // Validate phone number
-  const isValidPhone = (phone: string) => {
-    const re = /^[0-9]{10,15}$/;
-    return re.test(phone.replace(/\D/g, ''));
-  };
-
-  // Format phone number
-  const formatPhoneNumber = (phone: string) => {
-    const cleaned = phone.replace(/\D/g, '');
-    if (cleaned.startsWith('0')) {
-      return `+92${cleaned.substring(1)}`; // Pakistan country code
-    }
-    return `+${cleaned}`;
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
   };
 
   const handleSubmit = async () => {
     // Validation
     if (!formData.companyName.trim()) {
-      Alert.alert('Error', 'Please enter company name');
-      return;
+      return Alert.alert('Error', 'Please enter company name');
     }
-
     if (!formData.contactPerson.trim()) {
-      Alert.alert('Error', 'Please enter contact person name');
-      return;
+      return Alert.alert('Error', 'Please enter contact person name');
     }
-
-    if (!formData.businessEmail.trim()) {
-      Alert.alert('Error', 'Please enter business email');
-      return;
+    if (!formData.businessEmail.trim() || !isValidEmail(formData.businessEmail)) {
+      return Alert.alert('Error', 'Please enter a valid business email');
     }
-
-    if (!isValidEmail(formData.businessEmail)) {
-      Alert.alert('Error', 'Please enter a valid business email address');
-      return;
-    }
-
     if (!formData.contactPhone.trim()) {
-      Alert.alert('Error', 'Please enter contact phone number');
-      return;
+      return Alert.alert('Error', 'Please enter contact phone number');
     }
-
-    const cleanedPhone = formData.contactPhone.replace(/\D/g, '');
-    if (!isValidPhone(cleanedPhone)) {
-      Alert.alert('Error', 'Please enter a valid phone number (10-15 digits)');
-      return;
-    }
-
     if (!formData.businessAddress.trim()) {
-      Alert.alert('Error', 'Please enter business address');
-      return;
+      return Alert.alert('Error', 'Please enter business address');
     }
-
     if (!formData.taxNumber.trim()) {
-      Alert.alert('Error', 'Please enter tax/registration number');
-      return;
+      return Alert.alert('Error', 'Please enter tax/registration number');
     }
-
-    if (!formData.password) {
-      Alert.alert('Error', 'Please enter password');
-      return;
+    if (!formData.password || formData.password.length < 6) {
+      return Alert.alert('Error', 'Password must be at least 6 characters');
     }
-
-    if (formData.password.length < 6) {
-      Alert.alert('Error', 'Password must be at least 6 characters');
-      return;
-    }
-
     if (formData.password !== formData.confirmPassword) {
-      Alert.alert('Error', 'Passwords do not match');
-      return;
+      return Alert.alert('Error', 'Passwords do not match');
     }
-
     if (!termsAccepted) {
-      Alert.alert('Error', 'Please accept terms and conditions');
-      return;
+      return Alert.alert('Error', 'Please accept terms and conditions');
     }
 
     setLoading(true);
 
     try {
-      // 1. Create user in Firebase Authentication
+      // Create user in Firebase Authentication
       const userCredential = await auth().createUserWithEmailAndPassword(
         formData.businessEmail.trim().toLowerCase(),
         formData.password
@@ -151,17 +95,15 @@ export default function TransporterRegistrationScreen() {
 
       const user = userCredential.user;
 
-      // 2. Update user profile with company name
+      // Update profile with company name
       await user.updateProfile({
         displayName: formData.companyName.trim(),
       });
 
-      // 3. Send email verification
+      // Send email verification
       await user.sendEmailVerification();
 
-      // 4. Store transporter data in Firestore
-      const formattedPhone = formatPhoneNumber(formData.contactPhone);
-
+      // Store transporter data in Firestore
       await firestore()
         .collection('users')
         .doc(user.uid)
@@ -170,86 +112,65 @@ export default function TransporterRegistrationScreen() {
           companyName: formData.companyName.trim(),
           contactPerson: formData.contactPerson.trim(),
           email: formData.businessEmail.trim().toLowerCase(),
-          phone: formattedPhone,
-          phoneLocal: formData.contactPhone.trim(),
+          phone: formData.contactPhone.trim(),
           businessAddress: formData.businessAddress.trim(),
           taxNumber: formData.taxNumber.trim().toUpperCase(),
           userType: 'transporter',
-          businessType: 'transport',
           emailVerified: false,
-          profileComplete: false,
-          fleetSize: 0,
-          driversCount: 0,
-          status: 'pending_verification', // Admin verification needed
+          profileComplete: true,
+          status: 'pending_verification',
           createdAt: firestore.FieldValue.serverTimestamp(),
           updatedAt: firestore.FieldValue.serverTimestamp(),
         });
 
-      // 5. Also create a transporter document in separate collection
-      await firestore()
-        .collection('transporters')
-        .doc(user.uid)
-        .set({
-          uid: user.uid,
-          companyName: formData.companyName.trim(),
-          contactPerson: formData.contactPerson.trim(),
-          email: formData.businessEmail.trim().toLowerCase(),
-          phone: formattedPhone,
-          businessAddress: formData.businessAddress.trim(),
-          taxNumber: formData.taxNumber.trim().toUpperCase(),
-          registrationDate: firestore.FieldValue.serverTimestamp(),
-          status: 'pending',
-          documents: {
-            taxCertificate: false,
-            businessLicense: false,
-            insurance: false,
-          },
-          rating: 0,
-          totalRides: 0,
-        });
+      // Sign out immediately so user must verify email before login
+      await auth().signOut();
 
-      // 6. Navigate to OTP Verification Screen
-      navigation.reset({
-        index: 0,
-        routes: [
+      // Show success message
+      Alert.alert(
+        'Registration Successful! 🎉',
+        `Business account created for ${formData.businessEmail}\n\n📧 A verification email has been sent.\n\nPlease verify your email before logging in.`,
+        [
           {
-            name: 'OTPVerification',
-            params: {
-              email: formData.businessEmail.trim().toLowerCase(),
-              phone: formData.contactPhone.trim(),
-              role: 'transporter',
-              userId: user.uid,
-            },
-          },
-        ],
+            text: 'Go to Login',
+            onPress: () => {
+              navigation.reset({
+                index: 0,
+                routes: [{ name: 'Login' }],
+              });
+            }
+          }
+        ]
+      );
+
+      // Reset form
+      setFormData({
+        companyName: '',
+        contactPerson: '',
+        businessEmail: '',
+        contactPhone: '',
+        businessAddress: '',
+        taxNumber: '',
+        password: '',
+        confirmPassword: '',
       });
+      setTermsAccepted(false);
 
     } catch (error: any) {
       console.error('Transporter Registration Error:', error);
 
-      let errorMessage = 'Registration failed. Please try again.';
-
-      switch (error.code) {
-        case 'auth/email-already-in-use':
-          errorMessage = 'This email is already registered. Please login or use a different email.';
-          break;
-        case 'auth/invalid-email':
-          errorMessage = 'The email address is not valid.';
-          break;
-        case 'auth/operation-not-allowed':
-          errorMessage = 'Email/password accounts are not enabled. Please contact support.';
-          break;
-        case 'auth/weak-password':
-          errorMessage = 'The password is too weak. Please use a stronger password.';
-          break;
-        case 'auth/network-request-failed':
-          errorMessage = 'Network error. Please check your internet connection.';
-          break;
-        default:
-          errorMessage = error.message || 'An unknown error occurred.';
+      let message = 'Registration failed. Please try again.';
+      if (error.code === 'auth/email-already-in-use') {
+        message = 'This email is already registered. Please login instead.';
+      } else if (error.code === 'auth/invalid-email') {
+        message = 'Invalid email address.';
+      } else if (error.code === 'auth/weak-password') {
+        message = 'Password is too weak. Use at least 6 characters.';
+      } else if (error.code === 'auth/network-request-failed') {
+        message = 'Network error. Check your internet connection.';
       }
 
-      Alert.alert('Registration Failed', errorMessage);
+      Alert.alert('Registration Failed', message);
     } finally {
       setLoading(false);
     }
@@ -272,21 +193,20 @@ export default function TransporterRegistrationScreen() {
               <Text style={styles.roleLabel}>Transport Business Registration</Text>
             </View>
 
-            <Text style={styles.title}>Register Your Transport Business</Text>
+            <Text style={styles.title}>Register Your Business</Text>
             <Text style={styles.subtitle}>
               Fill in your business details to get started
             </Text>
 
-            <View style={styles.firebaseIndicator}>
-              <Text style={styles.firebaseIndicatorText}>
-                🔒 Secure Business Registration
+            <View style={styles.verifyBadge}>
+              <Text style={styles.verifyBadgeText}>
+                📧 Email verification required
               </Text>
             </View>
           </View>
 
           {/* Form */}
           <View style={styles.form}>
-            {/* Company Name */}
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Company Name *</Text>
               <TextInput
@@ -299,9 +219,8 @@ export default function TransporterRegistrationScreen() {
               />
             </View>
 
-            {/* Contact Person */}
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Contact Person Name *</Text>
+              <Text style={styles.label}>Contact Person *</Text>
               <TextInput
                 style={styles.input}
                 placeholder="John Doe"
@@ -312,7 +231,6 @@ export default function TransporterRegistrationScreen() {
               />
             </View>
 
-            {/* Business Email */}
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Business Email *</Text>
               <TextInput
@@ -325,11 +243,10 @@ export default function TransporterRegistrationScreen() {
                 editable={!loading}
               />
               <Text style={styles.inputNote}>
-                Official business email for verification
+                We'll send verification link to this email
               </Text>
             </View>
 
-            {/* Contact Phone */}
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Contact Phone *</Text>
               <TextInput
@@ -338,46 +255,35 @@ export default function TransporterRegistrationScreen() {
                 value={formData.contactPhone}
                 onChangeText={value => handleChange('contactPhone', value)}
                 keyboardType="phone-pad"
-                maxLength={15}
                 editable={!loading}
               />
-              <Text style={styles.inputNote}>
-                Primary contact number
-              </Text>
             </View>
 
-            {/* Business Address */}
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Business Address *</Text>
               <TextInput
                 style={[styles.input, styles.textArea]}
-                placeholder="Full business address with city"
+                placeholder="Full business address"
                 value={formData.businessAddress}
                 onChangeText={value => handleChange('businessAddress', value)}
                 multiline
-                numberOfLines={3}
-                textAlignVertical="top"
+                numberOfLines={2}
                 editable={!loading}
               />
             </View>
 
-            {/* Tax/Registration Number */}
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Tax/Registration Number *</Text>
               <TextInput
                 style={styles.input}
-                placeholder="e.g., NTN-XXXXXX or Registration No."
+                placeholder="NTN-XXXXXX"
                 value={formData.taxNumber}
                 onChangeText={value => handleChange('taxNumber', value)}
                 autoCapitalize="characters"
                 editable={!loading}
               />
-              <Text style={styles.inputNote}>
-                For business verification purposes
-              </Text>
             </View>
 
-            {/* Password */}
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Password *</Text>
               <TextInput
@@ -388,12 +294,8 @@ export default function TransporterRegistrationScreen() {
                 secureTextEntry
                 editable={!loading}
               />
-              <Text style={styles.inputNote}>
-                Strong password recommended for business account
-              </Text>
             </View>
 
-            {/* Confirm Password */}
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Confirm Password *</Text>
               <TextInput
@@ -406,44 +308,29 @@ export default function TransporterRegistrationScreen() {
               />
             </View>
 
-            {/* Terms & Conditions */}
+            {/* Terms */}
             <TouchableOpacity
               style={styles.termsContainer}
               onPress={() => setTermsAccepted(!termsAccepted)}
               activeOpacity={0.7}
               disabled={loading}
             >
-              <View style={styles.checkbox}>
-                {termsAccepted && <View style={styles.checkboxInner} />}
+              <View style={[styles.checkbox, termsAccepted && styles.checkboxActive]}>
+                {termsAccepted && <Text style={styles.checkmark}>✓</Text>}
               </View>
               <Text style={styles.termsText}>
-                I agree to the{' '}
-                <Text style={styles.termsLink}>Terms & Conditions</Text> and{' '}
-                <Text style={styles.termsLink}>Privacy Policy</Text>
+                I agree to the <Text style={styles.termsLink}>Terms & Conditions</Text>
               </Text>
             </TouchableOpacity>
 
-            {/* Business Registration Info */}
-            <View style={styles.registrationInfo}>
-              <Text style={styles.registrationInfoTitle}>Business Registration Process:</Text>
-              <Text style={styles.registrationInfoText}>
-                1. Submit registration form{'\n'}
-                2. Verify your email address{'\n'}
-                3. Admin review and approval{'\n'}
-                4. Account activation notification{'\n'}
-                5. Start managing your fleet
-              </Text>
-            </View>
-
-            {/* Firebase Security Info */}
-            <View style={styles.firebaseInfo}>
-              <Text style={styles.firebaseInfoTitle}>🔐 Business Account Security</Text>
-              <Text style={styles.firebaseInfoText}>
-                • Enterprise-grade security{'\n'}
-                • Encrypted data storage{'\n'}
-                • Email verification required{'\n'}
-                • Admin approval process{'\n'}
-                • Audit trail maintained
+            {/* Email Verification Info */}
+            <View style={styles.infoBox}>
+              <Text style={styles.infoTitle}>📧 After Registration:</Text>
+              <Text style={styles.infoText}>
+                1. You'll receive a verification email{'\n'}
+                2. Click the link in the email{'\n'}
+                3. Return to login page{'\n'}
+                4. Sign in with your credentials
               </Text>
             </View>
 
@@ -457,44 +344,21 @@ export default function TransporterRegistrationScreen() {
                 <ActivityIndicator color="#FFFFFF" />
               ) : (
                 <Text style={styles.registerButtonText}>
-                  Submit Business Registration
+                  Register Business
                 </Text>
               )}
             </TouchableOpacity>
 
-            {/* Already have account */}
+            {/* Login Link */}
             <TouchableOpacity
               style={styles.loginLink}
               onPress={() => navigation.navigate('Login')}
               disabled={loading}
             >
               <Text style={styles.loginText}>
-                Already have an account? <Text style={styles.loginBold}>Login</Text>
+                Already have an account? <Text style={styles.loginBold}>Sign In</Text>
               </Text>
             </TouchableOpacity>
-          </View>
-
-          {/* Business Benefits */}
-          <View style={styles.benefitsContainer}>
-            <Text style={styles.benefitsTitle}>Benefits for Transport Businesses:</Text>
-            <View style={styles.benefitsGrid}>
-              <View style={styles.benefitCard}>
-                <Text style={styles.benefitEmoji}>🚚</Text>
-                <Text style={styles.benefitText}>Fleet Management</Text>
-              </View>
-              <View style={styles.benefitCard}>
-                <Text style={styles.benefitEmoji}>📊</Text>
-                <Text style={styles.benefitText}>Analytics Dashboard</Text>
-              </View>
-              <View style={styles.benefitCard}>
-                <Text style={styles.benefitEmoji}>👥</Text>
-                <Text style={styles.benefitText}>Driver Management</Text>
-              </View>
-              <View style={styles.benefitCard}>
-                <Text style={styles.benefitEmoji}>💰</Text>
-                <Text style={styles.benefitText}>Payment Tracking</Text>
-              </View>
-            </View>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -550,14 +414,14 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 12,
   },
-  firebaseIndicator: {
-    backgroundColor: '#FFA000',
+  verifyBadge: {
+    backgroundColor: '#E8F0FE',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 16,
   },
-  firebaseIndicatorText: {
-    color: '#FFFFFF',
+  verifyBadgeText: {
+    color: '#1a73e8',
     fontSize: 12,
     fontWeight: '600',
   },
@@ -584,8 +448,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
   },
   textArea: {
-    minHeight: 100,
-    paddingTop: 12,
+    minHeight: 80,
+    textAlignVertical: 'top',
   },
   inputNote: {
     fontSize: 12,
@@ -595,12 +459,12 @@ const styles = StyleSheet.create({
   },
   termsContainer: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: 16,
+    alignItems: 'center',
+    marginBottom: 24,
   },
   checkbox: {
-    width: 20,
-    height: 20,
+    width: 22,
+    height: 22,
     borderWidth: 2,
     borderColor: '#ea4335',
     borderRadius: 4,
@@ -608,42 +472,24 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  checkboxInner: {
-    width: 12,
-    height: 12,
+  checkboxActive: {
     backgroundColor: '#ea4335',
-    borderRadius: 2,
+  },
+  checkmark: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: 'bold',
   },
   termsText: {
     flex: 1,
     fontSize: 14,
     color: '#5f6368',
-    lineHeight: 20,
   },
   termsLink: {
     color: '#ea4335',
     fontWeight: '600',
   },
-  registrationInfo: {
-    backgroundColor: '#FCE8E6',
-    padding: 16,
-    borderRadius: 8,
-    marginBottom: 16,
-    borderLeftWidth: 4,
-    borderLeftColor: '#ea4335',
-  },
-  registrationInfoTitle: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#ea4335',
-    marginBottom: 8,
-  },
-  registrationInfoText: {
-    fontSize: 12,
-    color: '#ea4335',
-    lineHeight: 18,
-  },
-  firebaseInfo: {
+  infoBox: {
     backgroundColor: '#E8F0FE',
     padding: 16,
     borderRadius: 8,
@@ -651,16 +497,16 @@ const styles = StyleSheet.create({
     borderLeftWidth: 4,
     borderLeftColor: '#1a73e8',
   },
-  firebaseInfoTitle: {
+  infoTitle: {
     fontSize: 14,
     fontWeight: 'bold',
     color: '#1a73e8',
     marginBottom: 8,
   },
-  firebaseInfoText: {
-    fontSize: 12,
+  infoText: {
+    fontSize: 13,
     color: '#1a73e8',
-    lineHeight: 18,
+    lineHeight: 20,
   },
   registerButton: {
     backgroundColor: '#ea4335',
@@ -687,44 +533,5 @@ const styles = StyleSheet.create({
   loginBold: {
     color: '#1a73e8',
     fontWeight: '600',
-  },
-  benefitsContainer: {
-    backgroundColor: '#F8F9FA',
-    padding: 20,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#E8EAED',
-  },
-  benefitsTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#202124',
-    marginBottom: 16,
-    textAlign: 'center',
-  },
-  benefitsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-  },
-  benefitCard: {
-    width: '48%',
-    backgroundColor: '#FFFFFF',
-    padding: 16,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#E8EAED',
-  },
-  benefitEmoji: {
-    fontSize: 24,
-    marginBottom: 8,
-  },
-  benefitText: {
-    fontSize: 12,
-    color: '#5f6368',
-    textAlign: 'center',
-    fontWeight: '500',
   },
 });

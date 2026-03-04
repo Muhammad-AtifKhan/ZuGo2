@@ -1,35 +1,23 @@
-// src/navigation/AuthNavigator.tsx - FULLY UPDATED
 import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+
 import LoginScreen from '../screens/auth/LoginScreen';
 import RoleSelectionScreen from '../screens/auth/RoleSelectionScreen';
 import PassengerRegistrationScreen from '../screens/auth/PassengerRegistrationScreen';
 import TransporterRegistrationScreen from '../screens/auth/TransporterRegistrationScreen';
-import OTPVerificationScreen from '../screens/auth/OTPVerificationScreen';
 import ForgotPasswordScreen from '../screens/auth/ForgotPasswordScreen';
 
-// Updated navigation param list
 export type AuthStackParamList = {
-  Login: { preFilledEmail?: string } | undefined;
+  Login: undefined;
   RoleSelection: undefined;
-  PassengerRegistration: undefined;
-  TransporterRegistration: undefined;
-  OTPVerification: {
-    phone: string;
-    role: 'passenger' | 'driver' | 'transporter';
-    email: string;
-    userId: string;
-  };
+  PassengerRegistration: { role: 'passenger' };
+  TransporterRegistration: { role: 'transporter' };
   ForgotPassword: undefined;
 };
 
 const Stack = createNativeStackNavigator<AuthStackParamList>();
 
-interface AuthNavigatorProps {
-  setUserRole: (role: 'passenger' | 'driver' | 'transporter' | null) => void;
-}
-
-export default function AuthNavigator({ setUserRole }: AuthNavigatorProps) {
+export default function AuthNavigator() {
   return (
     <Stack.Navigator
       screenOptions={{
@@ -37,19 +25,20 @@ export default function AuthNavigator({ setUserRole }: AuthNavigatorProps) {
         animation: 'slide_from_right',
       }}
     >
-      <Stack.Screen name="Login">
-        {() => <LoginScreen setUserRole={setUserRole} />}
-      </Stack.Screen>
-
+      <Stack.Screen name="Login" component={LoginScreen} />
       <Stack.Screen name="RoleSelection" component={RoleSelectionScreen} />
-
-      <Stack.Screen name="PassengerRegistration" component={PassengerRegistrationScreen} />
-
-      <Stack.Screen name="TransporterRegistration" component={TransporterRegistrationScreen} />
-
-      <Stack.Screen name="OTPVerification" component={OTPVerificationScreen} />
-
-      <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
+      <Stack.Screen
+        name="PassengerRegistration"
+        component={PassengerRegistrationScreen}
+      />
+      <Stack.Screen
+        name="TransporterRegistration"
+        component={TransporterRegistrationScreen}
+      />
+      <Stack.Screen
+        name="ForgotPassword"
+        component={ForgotPasswordScreen}
+      />
     </Stack.Navigator>
   );
 }

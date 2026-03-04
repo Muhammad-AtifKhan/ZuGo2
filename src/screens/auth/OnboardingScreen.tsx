@@ -1,4 +1,4 @@
-// src/screens/auth/OnboardingScreen.tsx
+// src/screens/auth/OnboardingScreen.tsx - FIXED
 import React, { useState } from 'react';
 import {
   View,
@@ -9,17 +9,15 @@ import {
   StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width } = Dimensions.get('window');
 
-// 👇 PROPS DEFINE KARO
 interface Props {
-  onComplete?: () => void;  // OPTIONAL PROP - AGAR NA HO TO NAVIGATION USE KARO
+  onComplete?: () => void;  // This will be called from RootNavigator
 }
 
 export default function OnboardingScreen({ onComplete }: Props) {
-  const navigation = useNavigation<any>();
   const [currentIndex, setCurrentIndex] = useState(0);
 
   const slides = [
@@ -46,28 +44,32 @@ export default function OnboardingScreen({ onComplete }: Props) {
     },
   ];
 
+  const handleOnboardingComplete = async () => {
+    // ✅ Mark onboarding as completed in AsyncStorage
+    try {
+      await AsyncStorage.setItem('alreadyLaunched', 'true');
+
+      // Call the onComplete prop to tell RootNavigator we're done
+      if (onComplete) {
+        onComplete();
+      }
+    } catch (error) {
+      console.error('Error saving onboarding status:', error);
+    }
+  };
+
   const handleNext = () => {
     if (currentIndex < slides.length - 1) {
       setCurrentIndex(currentIndex + 1);
     } else {
-      // 👇 LAST SLIDE - ONBOARDING COMPLETE
-      if (onComplete) {
-        // AGAR onComplete PROP DI HAI TO USE KARO
-        onComplete();
-      } else {
-        // WARNA NAVIGATION SE LOGIN PE JAO (FALLBACK)
-        navigation.replace('Login');
-      }
+      // LAST SLIDE - ONBOARDING COMPLETE
+      handleOnboardingComplete();
     }
   };
 
   const handleSkip = () => {
-    // 👇 SKIP KARNE PAR BHI ONBOARDING COMPLETE
-    if (onComplete) {
-      onComplete();
-    } else {
-      navigation.replace('Login');
-    }
+    // SKIP - ONBOARDING COMPLETE
+    handleOnboardingComplete();
   };
 
   return (

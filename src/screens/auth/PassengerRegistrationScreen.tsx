@@ -1,4 +1,3 @@
-// src/screens/auth/PassengerRegistrationScreen.tsx - FIREBASE INTEGRATED
 import React, { useState } from 'react';
 import {
   View,
@@ -18,16 +17,15 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 
-type StackParamList = {
-  PassengerRegistration: undefined;
-  OTPVerification: { phone: string; role: string };
+type AuthStackParamList = {
   Login: undefined;
-  Home: undefined;
+  RoleSelection: undefined;
+  PassengerRegistration: { role: 'passenger' };
+  TransporterRegistration: { role: 'transporter' };
 };
 
-type NavigationProp = NativeStackNavigationProp<StackParamList>;
-
-type RouteParams = { role?: 'passenger' | 'driver' | 'transporter' };
+type NavigationProp = NativeStackNavigationProp<AuthStackParamList>;
+type RouteParams = { role?: 'passenger' };
 
 export default function PassengerRegistrationScreen() {
   const navigation = useNavigation<NavigationProp>();
@@ -43,148 +41,267 @@ export default function PassengerRegistrationScreen() {
   });
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [selectedRole, setSelectedRole] = useState<'passenger' | 'driver' | 'transporter'>(
-    params?.role || 'passenger'
-  );
 
-  const handleChange = (field: string, value: string) => setFormData(prev => ({ ...prev, [field]: value }));
-  const isValidEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-  const isValidPhone = (phone: string) => /^[0-9]{10,15}$/.test(phone.replace(/\D/g, ''));
-  const formatPhoneNumber = (phone: string) => {
-    const cleaned = phone.replace(/\D/g, '');
-    return cleaned.startsWith('0') ? `+92${cleaned.substring(1)}` : `+${cleaned}`;
+  const handleChange = (field: string, value: string) => {
+    setFormData(prev => ({ ...prev, [field]: value }));
+  };
+
+  const isValidEmail = (email: string) => {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
   };
 
   const handleSubmit = async () => {
-    if (!formData.name.trim()) return Alert.alert('Error', 'Enter full name');
-    if (!formData.email.trim() || !isValidEmail(formData.email)) return Alert.alert('Error', 'Enter valid email');
-    if (!formData.phone.trim() || !isValidPhone(formData.phone)) return Alert.alert('Error', 'Enter valid phone');
-    if (!formData.password || formData.password.length < 6) return Alert.alert('Error', 'Password too short');
-    if (formData.password !== formData.confirmPassword) return Alert.alert('Error', 'Passwords do not match');
-    if (!termsAccepted) return Alert.alert('Error', 'Accept terms & conditions');
+    // Validation
+    if (!formData.name.trim()) {
+      return Alert.alert('Error', 'Please enter your full name');
+    }
+    if (!formData.email.trim() || !isValidEmail(formData.email)) {
+      return Alert.alert('Error', 'Please enter a valid email address');
+    }
+    if (!formData.phone.trim()) {
+      return Alert.alert('Error', 'Please enter your phone number');
+    }
+    if (!formData.password || formData.password.length < 6) {
+      return Alert.alert('Error', 'Password must be at least 6 characters');
+    }
+    if (formData.password !== formData.confirmPassword) {
+      return Alert.alert('Error', 'Passwords do not match');
+    }
+    if (!termsAccepted) {
+      return Alert.alert('Error', 'Please accept terms and conditions');
+    }
 
     setLoading(true);
     try {
-      const userCredential = await auth().createUserWithEmailAndPassword(formData.email.trim().toLowerCase(), formData.password);
-      const user = userCredential.user;
-      await user.updateProfile({ displayName: formData.name.trim() });
-      await user.sendEmailVerification();
+      // Create user in Firebase Authentication
+      const userCredential = await auth().createUserWithEmailAndPassword(
+        formData.email.trim().toLowerCase(),
+        formData.password
+      );
 
-      const formattedPhone = formatPhoneNumber(formData.phone);
-      await firestore().collection('users').doc(user.uid).set({
-        uid: user.uid,
-        fullName: formData.name.trim(),
-        email: formData.email.trim().toLowerCase(),
-        phone: formattedPhone,
-        phoneLocal: formData.phone.trim(),
-        userType: selectedRole,
-        emailVerified: false,
-        profileComplete: false,
-        createdAt: firestore.FieldValue.serverTimestamp(),
-        updatedAt: firestore.FieldValue.serverTimestamp(),
-        status: 'active',
+      const user = userCredential.user;
+
+      // Update profile with name
+      await user.updateProfile({
+        displayName: formData.name.trim(),
       });
 
+      // Send email verification
+      await user.sendEmailVerification();
+
+      // Store user data in Firestore
+      await firestore()
+        .collection('users')
+        .doc(user.uid)
+        .set({
+          uid: user.uid,
+          fullName: formData.name.trim(),
+          email: formData.email.trim().toLowerCase(),
+          phone: formData.phone.trim(),
+          userType: 'passenger',
+          emailVerified: false,
+          profileComplete: true,
+          createdAt: firestore.FieldValue.serverTimestamp(),
+          updatedAt: firestore.FieldValue.serverTimestamp(),
+          status: 'pending_verification',
+        });
+
+      // Sign out immediately so user must verify email before login
+      await auth().signOut();
+
+      // Show success message
       Alert.alert(
         'Registration Successful! 🎉',
-        `Your ${selectedRole} account has been created! Verification email sent to ${formData.email}`,
+        `Account created for ${formData.email}\n\n📧 A verification email has been sent to your email address.\n\nPlease verify your email before logging in.`,
         [
           {
-            text: 'Login Now',
+            text: 'Go to Login',
             onPress: () => {
-              setFormData({ name: '', email: '', phone: '', password: '', confirmPassword: '' });
-              setTermsAccepted(false);
-              navigation.reset({ index: 0, routes: [{ name: 'Login', params: { preFilledEmail: formData.email } }] });
-            },
-          },
+              navigation.reset({
+                index: 0,
+                routes: [{ name: 'Login' }],
+              });
+            }
+          }
         ]
       );
+
+      // Reset form
+      setFormData({
+        name: '',
+        email: '',
+        phone: '',
+        password: '',
+        confirmPassword: '',
+      });
+      setTermsAccepted(false);
+
     } catch (error: any) {
       console.error('Registration Error:', error);
-      let message = 'Registration failed. Try again.';
-      switch (error.code) {
-        case 'auth/email-already-in-use': message = 'Email already registered'; break;
-        case 'auth/invalid-email': message = 'Invalid email'; break;
-        case 'auth/weak-password': message = 'Weak password'; break;
-        case 'auth/network-request-failed': message = 'Network error'; break;
+
+      let message = 'Registration failed. Please try again.';
+      if (error.code === 'auth/email-already-in-use') {
+        message = 'This email is already registered. Please login instead.';
+      } else if (error.code === 'auth/invalid-email') {
+        message = 'Invalid email address.';
+      } else if (error.code === 'auth/weak-password') {
+        message = 'Password is too weak. Use at least 6 characters.';
+      } else if (error.code === 'auth/network-request-failed') {
+        message = 'Network error. Check your internet connection.';
       }
+
       Alert.alert('Registration Failed', message);
-    } finally { setLoading(false); }
+    } finally {
+      setLoading(false);
+    }
   };
-
-  const handleOTPVerification = () => Alert.alert('Phone Verification', 'Coming soon!', [{ text: 'OK' }]);
-
-  const roleBadges = {
-    passenger: { color: '#4285f4', label: 'Passenger', emoji: '🧑‍💼' },
-    driver: { color: '#fbbc04', label: 'Driver', emoji: '🚗' },
-    transporter: { color: '#ea4335', label: 'Transporter', emoji: '🏢' },
-  };
-  const currentRole = roleBadges[selectedRole];
 
   return (
     <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={{ flex: 1 }}
+      >
+        <ScrollView
+          contentContainerStyle={styles.scrollContainer}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Header */}
           <View style={styles.header}>
-            <View style={[styles.roleBadge, { backgroundColor: currentRole.color }]}>
-              <Text style={styles.roleEmoji}>{currentRole.emoji}</Text>
-              <Text style={styles.roleLabel}>{currentRole.label} Registration</Text>
+            <View style={styles.roleBadge}>
+              <Text style={styles.roleEmoji}>🧑‍💼</Text>
+              <Text style={styles.roleLabel}>Passenger Registration</Text>
             </View>
+
             <Text style={styles.title}>Create Your Account</Text>
-            <Text style={styles.subtitle}>Fill in your details to get started as a {currentRole.label.toLowerCase()}</Text>
-            <View style={styles.firebaseIndicator}>
-              <Text style={styles.firebaseIndicatorText}>🔒 Secure Firebase Registration</Text>
+            <Text style={styles.subtitle}>
+              Fill in your details to get started as a passenger
+            </Text>
+
+            <View style={styles.verifyBadge}>
+              <Text style={styles.verifyBadgeText}>
+                📧 Email verification required
+              </Text>
             </View>
           </View>
 
+          {/* Form */}
           <View style={styles.form}>
-            {['name','email','phone','password','confirmPassword'].map((field,index) => (
-              <View style={styles.inputGroup} key={index}>
-                <Text style={styles.label}>{field === 'name' ? 'Full Name' : field === 'email' ? 'Email Address' : field === 'phone' ? 'Phone Number' : field === 'password' ? 'Password' : 'Confirm Password'} *</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder={field==='name'?'John Doe':field==='email'?'john@example.com':field==='phone'?'03XX XXXXXXX':field==='password'?'At least 6 characters':'Re-enter your password'}
-                  value={formData[field as keyof typeof formData]}
-                  onChangeText={value=>handleChange(field,value)}
-                  keyboardType={field==='email'?'email-address':field==='phone'?'phone-pad':'default'}
-                  autoCapitalize={field==='name'?'words':'none'}
-                  secureTextEntry={field==='password'||field==='confirmPassword'}
-                  editable={!loading}
-                />
-                {(field==='email'||field==='phone'||field==='password') && <Text style={styles.inputNote}>
-                  {field==='email'?"We'll send verification to this email":field==='phone'?"Pakistani format: 03XX-XXXXXXX":"Use a strong password with letters, numbers, and symbols"}
-                </Text>}
-              </View>
-            ))}
-
-            <TouchableOpacity style={styles.termsContainer} onPress={()=>setTermsAccepted(!termsAccepted)} activeOpacity={0.7} disabled={loading}>
-              <View style={styles.checkbox}>{termsAccepted && <View style={styles.checkboxInner} />}</View>
-              <Text style={styles.termsText}>I agree to the <Text style={styles.termsLink}>Terms & Conditions</Text> and <Text style={styles.termsLink}>Privacy Policy</Text></Text>
-            </TouchableOpacity>
-
-            <View style={styles.firebaseInfo}>
-              <Text style={styles.firebaseInfoTitle}>🔐 Firebase Security</Text>
-              <Text style={styles.firebaseInfoText}>• Email verification required{'\n'}• Secure password encryption{'\n'}• Real-time data sync{'\n'}• Encrypted user data storage</Text>
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Full Name *</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="John Doe"
+                value={formData.name}
+                onChangeText={value => handleChange('name', value)}
+                autoCapitalize="words"
+                editable={!loading}
+              />
             </View>
 
-            <TouchableOpacity style={[styles.registerButton, loading&&styles.buttonDisabled]} onPress={handleSubmit} disabled={loading}>
-              {loading ? <ActivityIndicator color="#FFFFFF"/> : <Text style={styles.registerButtonText}>Create {currentRole.label} Account</Text>}
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Email Address *</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="john@example.com"
+                value={formData.email}
+                onChangeText={value => handleChange('email', value)}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                editable={!loading}
+              />
+              <Text style={styles.inputNote}>
+                We'll send verification link to this email
+              </Text>
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Phone Number *</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="03XX XXXXXXX"
+                value={formData.phone}
+                onChangeText={value => handleChange('phone', value)}
+                keyboardType="phone-pad"
+                editable={!loading}
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Password *</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="At least 6 characters"
+                value={formData.password}
+                onChangeText={value => handleChange('password', value)}
+                secureTextEntry
+                editable={!loading}
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Confirm Password *</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Re-enter your password"
+                value={formData.confirmPassword}
+                onChangeText={value => handleChange('confirmPassword', value)}
+                secureTextEntry
+                editable={!loading}
+              />
+            </View>
+
+            {/* Terms */}
+            <TouchableOpacity
+              style={styles.termsContainer}
+              onPress={() => setTermsAccepted(!termsAccepted)}
+              activeOpacity={0.7}
+              disabled={loading}
+            >
+              <View style={[styles.checkbox, termsAccepted && styles.checkboxActive]}>
+                {termsAccepted && <Text style={styles.checkmark}>✓</Text>}
+              </View>
+              <Text style={styles.termsText}>
+                I agree to the <Text style={styles.termsLink}>Terms & Conditions</Text>
+              </Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.otpButton} onPress={handleOTPVerification} disabled={loading}>
-              <Text style={styles.otpButtonText}>📱 Verify Phone Number (Optional)</Text>
+            {/* Email Verification Info */}
+            <View style={styles.infoBox}>
+              <Text style={styles.infoTitle}>📧 After Registration:</Text>
+              <Text style={styles.infoText}>
+                1. You'll receive a verification email{'\n'}
+                2. Click the link in the email{'\n'}
+                3. Return to login page{'\n'}
+                4. Sign in with your credentials
+              </Text>
+            </View>
+
+            {/* Register Button */}
+            <TouchableOpacity
+              style={[styles.registerButton, loading && styles.buttonDisabled]}
+              onPress={handleSubmit}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={styles.registerButtonText}>
+                  Create Passenger Account
+                </Text>
+              )}
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.loginLink} onPress={()=>navigation.navigate('Login')} disabled={loading}>
-              <Text style={styles.loginText}>Already have an account? <Text style={styles.loginBold}>Login</Text></Text>
+            {/* Login Link */}
+            <TouchableOpacity
+              style={styles.loginLink}
+              onPress={() => navigation.navigate('Login')}
+              disabled={loading}
+            >
+              <Text style={styles.loginText}>
+                Already have an account? <Text style={styles.loginBold}>Sign In</Text>
+              </Text>
             </TouchableOpacity>
-          </View>
-
-          <View style={styles.roleInfo}>
-            <Text style={styles.roleInfoTitle}>About {currentRole.label} Account:</Text>
-            {selectedRole==='passenger' && <Text style={styles.roleInfoText}>• Book rides across the city{'\n'}• Track your rides in real-time{'\n'}• Multiple payment options{'\n'}• Ride history and receipts{'\n'}• 24/7 customer support</Text>}
-            {selectedRole==='driver' && <Text style={styles.roleInfoText}>• Accept ride requests{'\n'}• Earn money on your schedule{'\n'}• Track your earnings{'\n'}• Get passenger ratings{'\n'}• Flexible working hours</Text>}
-            {selectedRole==='transporter' && <Text style={styles.roleInfoText}>• Manage fleet of vehicles{'\n'}• Monitor driver performance{'\n'}• Track business analytics{'\n'}• Manage payments{'\n'}• Scale your transport business</Text>}
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -193,38 +310,164 @@ export default function PassengerRegistrationScreen() {
 }
 
 const styles = StyleSheet.create({
-  container:{flex:1,backgroundColor:'#fff'},
-  scrollContainer:{flexGrow:1,padding:24},
-  header:{marginBottom:32,alignItems:'center'},
-  roleBadge:{flexDirection:'row',alignItems:'center',paddingHorizontal:16,paddingVertical:8,borderRadius:20,marginBottom:16},
-  roleEmoji:{fontSize:20,marginRight:8},
-  roleLabel:{color:'#fff',fontSize:14,fontWeight:'bold'},
-  title:{fontSize:28,fontWeight:'bold',color:'#202124',marginBottom:8,textAlign:'center'},
-  subtitle:{fontSize:16,color:'#5f6368',textAlign:'center',marginBottom:12},
-  firebaseIndicator:{backgroundColor:'#FFA000',paddingHorizontal:12,paddingVertical:6,borderRadius:16},
-  firebaseIndicatorText:{color:'#fff',fontSize:12,fontWeight:'600'},
-  form:{marginBottom:24},
-  inputGroup:{marginBottom:20},
-  label:{fontSize:14,fontWeight:'600',color:'#202124',marginBottom:8},
-  input:{borderWidth:1,borderColor:'#DADCE0',borderRadius:8,paddingHorizontal:16,paddingVertical:12,fontSize:16,color:'#202124',backgroundColor:'#fff'},
-  inputNote:{fontSize:12,color:'#5f6368',marginTop:4,fontStyle:'italic'},
-  termsContainer:{flexDirection:'row',alignItems:'flex-start',marginBottom:24},
-  checkbox:{width:20,height:20,bhorderWidth:2,borderColor:'#1a73e8',borderRadius:4,marginRight:12,justifyContent:'center',alignItems:'center'},
-  checkboxInner:{width:12,height:12,backgroundColor:'#1a73e8',borderRadius:2},
-  termsText:{flex:1,fontSize:14,color:'#5f6368',lineHeight:20},
-  termsLink:{color:'#1a73e8',fontWeight:'600'},
-  firebaseInfo:{backgroundColor:'#E8F0FE',padding:16,borderRadius:8,marginBottom:24,borderLeftWidth:4,borderLeftColor:'#1a73e8'},
-  firebaseInfoTitle:{fontSize:14,fontWeight:'bold',color:'#1a73e8',marginBottom:8},
-  firebaseInfoText:{fontSize:12,color:'#1a73e8',lineHeight:18},
-  registerButton:{backgroundColor:'#1a73e8',paddingVertical:16,borderRadius:8,alignItems:'center',marginBottom:12},
-  buttonDisabled:{backgroundColor:'#6c8bc7'},
-  registerButtonText:{color:'#fff',fontSize:18,fontWeight:'600'},
-  otpButton:{backgroundColor:'#34A853',paddingVertical:12,borderRadius:8,alignItems:'center',marginBottom:24},
-  otpButtonText:{color:'#fff',fontSize:14,fontWeight:'600'},
-  loginLink:{alignItems:'center'},
-  loginText:{fontSize:16,color:'#5f6368'},
-  loginBold:{color:'#1a73e8',fontWeight:'600'},
-  roleInfo:{backgroundColor:'#F8F9FA',padding:20,borderRadius:12,borderWidth:1,borderColor:'#E8EAED'},
-  roleInfoTitle:{fontSize:16,fontWeight:'bold',color:'#202124',marginBottom:12},
-  roleInfoText:{fontSize:14,color:'#5f6368',lineHeight:22},
+  container: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
+  scrollContainer: {
+    flexGrow: 1,
+    padding: 24,
+  },
+  header: {
+    marginBottom: 32,
+    alignItems: 'center',
+  },
+  roleBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#4285f4',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    marginBottom: 16,
+  },
+  roleEmoji: {
+    fontSize: 20,
+    marginRight: 8,
+    color: '#FFFFFF',
+  },
+  roleLabel: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  title: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#202124',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  subtitle: {
+    fontSize: 16,
+    color: '#5f6368',
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  verifyBadge: {
+    backgroundColor: '#E8F0FE',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+  },
+  verifyBadgeText: {
+    color: '#1a73e8',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  form: {
+    marginBottom: 24,
+  },
+  inputGroup: {
+    marginBottom: 20,
+  },
+  label: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#202124',
+    marginBottom: 8,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: '#DADCE0',
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    fontSize: 16,
+    color: '#202124',
+    backgroundColor: '#FFFFFF',
+  },
+  inputNote: {
+    fontSize: 12,
+    color: '#5f6368',
+    marginTop: 4,
+    fontStyle: 'italic',
+  },
+  termsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderWidth: 2,
+    borderColor: '#4285f4',
+    borderRadius: 4,
+    marginRight: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  checkboxActive: {
+    backgroundColor: '#4285f4',
+  },
+  checkmark: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  termsText: {
+    flex: 1,
+    fontSize: 14,
+    color: '#5f6368',
+  },
+  termsLink: {
+    color: '#4285f4',
+    fontWeight: '600',
+  },
+  infoBox: {
+    backgroundColor: '#E8F0FE',
+    padding: 16,
+    borderRadius: 8,
+    marginBottom: 24,
+    borderLeftWidth: 4,
+    borderLeftColor: '#1a73e8',
+  },
+  infoTitle: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#1a73e8',
+    marginBottom: 8,
+  },
+  infoText: {
+    fontSize: 13,
+    color: '#1a73e8',
+    lineHeight: 20,
+  },
+  registerButton: {
+    backgroundColor: '#4285f4',
+    paddingVertical: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  buttonDisabled: {
+    backgroundColor: '#6c8bc7',
+  },
+  registerButtonText: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  loginLink: {
+    alignItems: 'center',
+  },
+  loginText: {
+    fontSize: 16,
+    color: '#5f6368',
+  },
+  loginBold: {
+    color: '#1a73e8',
+    fontWeight: '600',
+  },
 });

@@ -18,6 +18,9 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 
+// 🔥 UPDATED SERVICE IMPORT
+import { createDriverWithSecondaryApp } from '../../../services/driverAuthService';
+
 // Types
 import { Driver } from '../../../types/driver.types';
 
@@ -27,10 +30,9 @@ import { COLORS, SIZES, SHADOWS } from '../../../constants/theme';
 const AddDriverScreen = () => {
   const navigation = useNavigation();
   const route = useRoute();
-  const { mode, driver, transporterId } = route.params as {
+  const { mode, driver } = route.params as {
     mode: 'add' | 'edit';
     driver?: Driver;
-    transporterId?: string;
   };
 
   // Date picker states
@@ -125,7 +127,7 @@ const AddDriverScreen = () => {
     { id: 'suspended', label: 'Suspended', color: '#8E8E93' },
   ];
 
-  // ========== DATE PICKER FUNCTIONS ==========
+  // DATE PICKER FUNCTIONS
   const handleDatePress = (field: string) => {
     if (loading) return;
     setCurrentDateField(field);
@@ -138,75 +140,62 @@ const AddDriverScreen = () => {
   };
 
   const handleDateChange = (event: any, date: Date | undefined) => {
-    if (Platform.OS === 'android') {
-      setShowDatePicker(false);
-    }
-
+    if (Platform.OS === 'android') setShowDatePicker(false);
     if (date) {
       setSelectedDate(date);
       const formattedDate = date.toISOString().split('T')[0];
-
-      if (currentDateField === 'licenseExpiry') {
-        setFormData({...formData, licenseExpiry: formattedDate});
-      } else if (currentDateField === 'joiningDate') {
-        setFormData({...formData, joiningDate: formattedDate});
-      }
+      setFormData({
+        ...formData,
+        [currentDateField]: formattedDate,
+      });
     }
   };
 
   const handleAndroidDateConfirm = () => {
     const formattedDate = selectedDate.toISOString().split('T')[0];
-
-    if (currentDateField === 'licenseExpiry') {
-      setFormData({...formData, licenseExpiry: formattedDate});
-    } else if (currentDateField === 'joiningDate') {
-      setFormData({...formData, joiningDate: formattedDate});
-    }
-
+    setFormData({
+      ...formData,
+      [currentDateField]: formattedDate,
+    });
     setShowDatePicker(false);
   };
 
-  // ========== VALIDATION FUNCTIONS ==========
+  // VALIDATION
   const validateForm = () => {
-    // Basic validation
     if (!formData.fullName.trim()) {
       Alert.alert('Error', 'Please enter driver full name');
       return false;
     }
 
+    // Phone validation
+    const phoneRegex = /^[0-9]{10,15}$/;
+    const cleanedPhone = formData.contactNumber.replace(/\D/g, '');
     if (!formData.contactNumber.trim()) {
       Alert.alert('Error', 'Please enter contact number');
       return false;
     }
-
-    // Validate phone number
-    const phoneRegex = /^[0-9]{10,15}$/;
-    const cleanedPhone = formData.contactNumber.replace(/\D/g, '');
     if (!phoneRegex.test(cleanedPhone)) {
       Alert.alert('Error', 'Please enter a valid phone number (10-15 digits)');
       return false;
     }
 
-    // ✅ EMAIL IS NOW REQUIRED
+    // Email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!formData.email.trim()) {
       Alert.alert('Error', 'Please enter driver email address');
       return false;
     }
-
-    // Validate email format
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(formData.email)) {
       Alert.alert('Error', 'Please enter a valid email address');
       return false;
     }
 
+    // CNIC validation
+    const cnicRegex = /^[0-9]{5}-[0-9]{7}-[0-9]{1}$/;
     if (!formData.cnic.trim()) {
       Alert.alert('Error', 'Please enter CNIC number');
       return false;
     }
-
-    // Validate CNIC format (Pakistan)
-    const cnicRegex = /^[0-9]{5}-[0-9]{7}-[0-9]{1}$/;
     if (!cnicRegex.test(formData.cnic)) {
       Alert.alert('Error', 'Please enter CNIC in correct format: 42301-1234567-8');
       return false;
@@ -222,236 +211,29 @@ const AddDriverScreen = () => {
       return false;
     }
 
-    // Password validation for new drivers
     if (mode === 'add') {
       if (!formData.password) {
         Alert.alert('Error', 'Please enter password for driver');
         return false;
       }
-
       if (formData.password.length < 6) {
         Alert.alert('Error', 'Password must be at least 6 characters');
         return false;
       }
-
       if (formData.password !== formData.confirmPassword) {
         Alert.alert('Error', 'Passwords do not match');
         return false;
       }
     }
-
     return true;
   };
 
-  // ========== FIREBASE FUNCTIONS ==========
-  const createDriverAccount = async (driverData: any) => {
-    try {
-      // Use the password provided by transporter
-      const driverPassword = driverData.password;
-
-      // ✅ Use ACTUAL EMAIL provided by transporter
-      const driverEmail = driverData.email.trim().toLowerCase();
-
-      console.log('Creating driver account with:', {
-        email: driverEmail,
-      });
-
-      // Create driver user account in Firebase Auth
-      const userCredential = await auth().createUserWithEmailAndPassword(
-        driverEmail,
-        driverPassword
-      );
-
-      const driverId = userCredential.user.uid;
-
-      // Update user profile with driver name
-      await userCredential.user.updateProfile({
-        displayName: driverData.fullName,
-      });
-
-      console.log('Driver account created successfully:', driverId);
-
-      return {
-        driverId,
-        email: driverEmail,
-        password: driverPassword
-      };
-
-    } catch (error: any) {
-      console.error('Driver account creation error:', error);
-
-      if (error.code === 'auth/email-already-in-use') {
-        Alert.alert(
-          'Email Already Exists',
-          `The email ${driverData.email} is already registered.\n\nPlease use a different email address for this driver.`,
-          [{ text: 'OK' }]
-        );
-        throw new Error('EMAIL_ALREADY_EXISTS');
-      }
-      throw error;
-    }
-  };
-
-  const saveDriverToFirestore = async (
-    driverId: string,
-    driverData: any,
-    transporterId: string,
-    password: string
-  ) => {
-    // ✅ Store ACTUAL EMAIL in Firestore
-    const driverEmail = driverData.email.trim().toLowerCase();
-
-    const driverDataWithMeta = {
-      fullName: driverData.fullName,
-      contactNumber: driverData.contactNumber,
-      email: driverEmail,
-      cnic: driverData.cnic,
-      licenseNumber: driverData.licenseNumber,
-      licenseType: driverData.licenseType,
-      licenseExpiry: driverData.licenseExpiry,
-      address: driverData.address,
-      emergencyContact: driverData.emergencyContact,
-      joiningDate: driverData.joiningDate || new Date().toISOString().split('T')[0],
-      salary: parseInt(driverData.salary) || 0,
-      employmentType: driverData.employmentType,
-      vehicleAssigned: driverData.vehicleAssigned || '',
-      status: driverData.status,
-      uid: driverId,
-      transporterId: transporterId,
-      passwordSetByTransporter: true,
-      passwordSetDate: new Date().toISOString(),
-      createdAt: firestore.FieldValue.serverTimestamp(),
-      updatedAt: firestore.FieldValue.serverTimestamp(),
-      accountCreated: true,
-      lastLogin: null,
-      totalRides: 0,
-      rating: 0,
-      earnings: 0,
-      documents: {
-        cnicFront: null,
-        cnicBack: null,
-        license: null,
-        photo: null,
-      },
-      assignedVehicles: [],
-      currentLocation: null,
-    };
-
-    console.log('Saving driver to Firestore:', {
-      driverId,
-      email: driverEmail,
-      transporterId
-    });
-
-    // Save to drivers collection
-    await firestore()
-      .collection('drivers')
-      .doc(driverId)
-      .set(driverDataWithMeta);
-
-    // Also add to users collection for unified querying
-    await firestore()
-      .collection('users')
-      .doc(driverId)
-      .set({
-        uid: driverId,
-        fullName: driverData.fullName,
-        email: driverEmail,
-        phone: `+92${driverData.contactNumber.replace(/\D/g, '').slice(1)}`,
-        userType: 'driver',
-        transporterId: transporterId,
-        status: driverData.status || 'active',
-        createdAt: firestore.FieldValue.serverTimestamp(),
-        updatedAt: firestore.FieldValue.serverTimestamp(),
-      });
-
-    // Save credentials securely in separate collection
-    await firestore()
-      .collection('driver_credentials')
-      .doc(driverId)
-      .set({
-        driverId,
-        transporterId,
-        email: driverEmail,
-        password: password,
-        driverName: driverData.fullName,
-        phone: driverData.contactNumber,
-        createdAt: firestore.FieldValue.serverTimestamp(),
-        accessAllowed: [transporterId],
-      });
-
-    // Update transporter's drivers count
-    const transporterRef = firestore().collection('transporters').doc(transporterId);
-    const transporterDoc = await transporterRef.get();
-
-    if (transporterDoc.exists) {
-      await transporterRef.update({
-        driversCount: firestore.FieldValue.increment(1),
-        updatedAt: firestore.FieldValue.serverTimestamp(),
-      });
-    } else {
-      await transporterRef.set({
-        transporterId,
-        driversCount: 1,
-        createdAt: firestore.FieldValue.serverTimestamp(),
-        updatedAt: firestore.FieldValue.serverTimestamp(),
-      });
-    }
-
-    console.log('Driver saved to Firestore successfully');
-    return driverDataWithMeta;
-  };
-
-  const updateDriverInFirestore = async (driverId: string, driverData: any) => {
-    const updateData = {
-      fullName: driverData.fullName,
-      contactNumber: driverData.contactNumber,
-      email: driverData.email.trim().toLowerCase(),
-      cnic: driverData.cnic,
-      licenseNumber: driverData.licenseNumber,
-      licenseType: driverData.licenseType,
-      licenseExpiry: driverData.licenseExpiry,
-      address: driverData.address,
-      emergencyContact: driverData.emergencyContact,
-      joiningDate: driverData.joiningDate,
-      salary: parseInt(driverData.salary) || 0,
-      employmentType: driverData.employmentType,
-      vehicleAssigned: driverData.vehicleAssigned || '',
-      status: driverData.status,
-      updatedAt: firestore.FieldValue.serverTimestamp(),
-    };
-
-    // Update in drivers collection
-    await firestore()
-      .collection('drivers')
-      .doc(driverId)
-      .update(updateData);
-
-    // Also update in users collection
-    await firestore()
-      .collection('users')
-      .doc(driverId)
-      .update({
-        fullName: driverData.fullName,
-        email: driverData.email.trim().toLowerCase(),
-        phone: `+92${driverData.contactNumber.replace(/\D/g, '').slice(1)}`,
-        status: driverData.status || 'active',
-        updatedAt: firestore.FieldValue.serverTimestamp(),
-      });
-
-    return updateData;
-  };
-
-  // ========== FORM SUBMISSION ==========
+  // 🔥 SUBMIT HANDLER
   const handleSubmit = async () => {
-    if (!validateForm()) {
-      return;
-    }
-
+    if (!validateForm()) return;
     setLoading(true);
 
     try {
-      // Get current transporter (logged in user)
       const currentUser = auth().currentUser;
       if (!currentUser) {
         Alert.alert('Error', 'You must be logged in to add drivers');
@@ -459,112 +241,150 @@ const AddDriverScreen = () => {
         setLoading(false);
         return;
       }
-
       const transporterId = currentUser.uid;
 
       if (mode === 'add') {
-        // Create new driver with transporter-provided email and password
-        const driverAccount = await createDriverAccount(formData);
-        await saveDriverToFirestore(
-          driverAccount.driverId,
-          formData,
-          transporterId,
-          driverAccount.password
+        // 🔥 Secondary Firebase auth
+        const driverUID = await createDriverWithSecondaryApp(
+          formData.email,
+          formData.password,
+          formData.fullName
         );
 
-        const successMessage = `✅ Driver Added Successfully!\n\n📋 Driver Login Credentials:\n\n📧 Email: ${driverAccount.email}\n🔑 Password: ${driverAccount.password}\n\n⚠️ Important Instructions:\n1. Share these EXACT credentials with the driver\n2. Driver must use this EXACT email to login\n3. Save this information securely\n4. Driver can login immediately`;
+        // Firestore writes
+        await firestore().collection('drivers').doc(driverUID).set({
+          fullName: formData.fullName,
+          contactNumber: formData.contactNumber,
+          email: formData.email.trim().toLowerCase(),
+          cnic: formData.cnic,
+          licenseNumber: formData.licenseNumber,
+          licenseType: formData.licenseType,
+          licenseExpiry: formData.licenseExpiry,
+          address: formData.address,
+          emergencyContact: formData.emergencyContact,
+          joiningDate: formData.joiningDate || new Date().toISOString().split('T')[0],
+          salary: parseInt(formData.salary) || 0,
+          employmentType: formData.employmentType,
+          vehicleAssigned: formData.vehicleAssigned || '',
+          status: formData.status,
+          uid: driverUID,
+          transporterId: transporterId,
+          role: 'driver',
+          createdAt: firestore.FieldValue.serverTimestamp(),
+          updatedAt: firestore.FieldValue.serverTimestamp(),
+        });
+
+        await firestore().collection('users').doc(driverUID).set({
+          uid: driverUID,
+          fullName: formData.fullName,
+          email: formData.email.trim().toLowerCase(),
+          phone: formData.contactNumber,
+          userType: 'driver',
+          transporterId: transporterId,
+          status: formData.status || 'active',
+          createdAt: firestore.FieldValue.serverTimestamp(),
+          updatedAt: firestore.FieldValue.serverTimestamp(),
+        });
+
+        // Save credentials reference
+        await firestore().collection('driver_credentials').doc(driverUID).set({
+          driverId: driverUID,
+          transporterId,
+          email: formData.email.trim().toLowerCase(),
+          driverName: formData.fullName,
+          phone: formData.contactNumber,
+          createdAt: firestore.FieldValue.serverTimestamp(),
+        });
+
+        // Increment transporter driver count
+        const transporterRef = firestore().collection('transporters').doc(transporterId);
+        const transporterDoc = await transporterRef.get();
+        if (transporterDoc.exists) {
+          await transporterRef.update({
+            driversCount: firestore.FieldValue.increment(1),
+            updatedAt: firestore.FieldValue.serverTimestamp(),
+          });
+        } else {
+          await transporterRef.set({
+            transporterId,
+            driversCount: 1,
+            createdAt: firestore.FieldValue.serverTimestamp(),
+            updatedAt: firestore.FieldValue.serverTimestamp(),
+          });
+        }
 
         Alert.alert(
           'Success',
-          successMessage,
+          `Driver Added Successfully!\n\n📧 Email: ${formData.email}\n🔑 Password: ${formData.password}`,
           [
             {
               text: 'OK',
               onPress: () => navigation.goBack()
-            },
-            {
-              text: '📋 Show Credentials',
-              onPress: () => {
-                Alert.alert(
-                  'Driver Credentials',
-                  `Email: ${driverAccount.email}\nPassword: ${driverAccount.password}`,
-                  [
-                    { text: 'OK' },
-                    {
-                      text: 'Copy',
-                      onPress: () => {
-                        // You can add copy functionality here
-                        Alert.alert('Copied', 'Credentials copied to clipboard');
-                      }
-                    }
-                  ]
-                );
-              }
             }
           ]
         );
-
       } else {
         // Update existing driver
-        if (!driver?.id) {
-          Alert.alert('Error', 'Driver ID not found');
-          setLoading(false);
-          return;
-        }
+        if (!driver?.id) throw new Error('Driver ID not found');
 
-        await updateDriverInFirestore(driver.id, formData);
+        await firestore().collection('drivers').doc(driver.id).update({
+          fullName: formData.fullName,
+          contactNumber: formData.contactNumber,
+          email: formData.email.trim().toLowerCase(),
+          cnic: formData.cnic,
+          licenseNumber: formData.licenseNumber,
+          licenseType: formData.licenseType,
+          licenseExpiry: formData.licenseExpiry,
+          address: formData.address,
+          emergencyContact: formData.emergencyContact,
+          joiningDate: formData.joiningDate,
+          salary: parseInt(formData.salary) || 0,
+          employmentType: formData.employmentType,
+          vehicleAssigned: formData.vehicleAssigned || '',
+          status: formData.status,
+          updatedAt: firestore.FieldValue.serverTimestamp(),
+        });
 
-        Alert.alert(
-          'Success',
-          'Driver updated successfully!',
-          [{ text: 'OK', onPress: () => navigation.goBack() }]
-        );
+        await firestore().collection('users').doc(driver.id).update({
+          fullName: formData.fullName,
+          email: formData.email.trim().toLowerCase(),
+          phone: formData.contactNumber,
+          status: formData.status || 'active',
+          updatedAt: firestore.FieldValue.serverTimestamp(),
+        });
+
+        Alert.alert('Success', 'Driver updated successfully!', [
+          { text: 'OK', onPress: () => navigation.goBack() },
+        ]);
       }
-
     } catch (error: any) {
-      setLoading(false);
-      console.error('Driver save error:', error);
+      console.error('❌ Driver save error:', error);
 
-      if (error.message === 'EMAIL_ALREADY_EXISTS') {
-        // Already handled in createDriverAccount
-        return;
-      }
-
-      let errorMessage = 'Failed to save driver. Please try again.';
-
-      switch (error.code) {
-        case 'auth/email-already-in-use':
-          errorMessage = 'This email is already registered. Please use a different email.';
-          break;
-        case 'auth/invalid-email':
-          errorMessage = 'Invalid email address format.';
-          break;
-        case 'auth/weak-password':
-          errorMessage = 'Password is too weak. Please use stronger password.';
-          break;
-        case 'permission-denied':
-          errorMessage = 'You do not have permission to add drivers.';
-          break;
-        default:
-          errorMessage = error.message || 'An unknown error occurred.';
+      let errorMessage = 'Failed to save driver.';
+      if (error.code === 'auth/email-already-in-use') {
+        errorMessage = 'This email is already registered. Please use a different email.';
+      } else if (error.code === 'auth/invalid-email') {
+        errorMessage = 'Invalid email address format.';
+      } else if (error.code === 'auth/weak-password') {
+        errorMessage = 'Password is too weak. Please use stronger password.';
+      } else if (error.message) {
+        errorMessage = error.message;
       }
 
       Alert.alert('Error', errorMessage);
+    } finally {
+      setLoading(false);
     }
   };
 
-  // Generate random password
+  // Password generator
   const generateRandomPassword = () => {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%';
     let password = '';
     for (let i = 0; i < 10; i++) {
       password += chars.charAt(Math.floor(Math.random() * chars.length));
     }
-    setFormData({
-      ...formData,
-      password: password,
-      confirmPassword: password
-    });
+    setFormData({ ...formData, password, confirmPassword: password });
     Alert.alert('Password Generated', `Generated: ${password}`);
   };
 
@@ -595,25 +415,24 @@ const AddDriverScreen = () => {
     );
   };
 
+  // Loading state
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color={COLORS.primary} />
-        <Text style={styles.loadingText}>Saving driver...</Text>
+        <Text style={styles.loadingText}>Creating driver account...</Text>
+        <Text style={styles.loadingSubText}>Using secure secondary Firebase instance</Text>
       </View>
     );
   }
 
+  // ========== MAIN RENDER ==========
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => {
-            if (!loading) {
-              navigation.goBack();
-            }
-          }}>
+          <TouchableOpacity onPress={() => navigation.goBack()} disabled={loading}>
             <Text style={styles.backButton}>←</Text>
           </TouchableOpacity>
           <Text style={styles.title}>
@@ -622,16 +441,29 @@ const AddDriverScreen = () => {
           <View style={styles.headerRight} />
         </View>
 
-        {/* Form */}
+        {/* Service Info Banner (only for add mode) */}
+        {mode === 'add' && (
+          <View style={styles.serviceInfoBanner}>
+            <Text style={styles.serviceInfoIcon}>🔐</Text>
+            <View style={styles.serviceInfoContent}>
+              <Text style={styles.serviceInfoTitle}>Using DriverAuthService</Text>
+              <Text style={styles.serviceInfoText}>
+                Secondary Firebase app instance - Transporter stays logged in
+              </Text>
+            </View>
+          </View>
+        )}
+
+        {/* Form Container */}
         <View style={styles.formContainer}>
-          {/* Personal Information */}
+          {/* ===== PERSONAL INFORMATION ===== */}
           <Text style={styles.sectionTitle}>👤 Personal Information</Text>
 
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Full Name *</Text>
             <TextInput
               style={styles.input}
-              placeholder="Ali Ahmed"
+              placeholder="Enter driver's full name"
               value={formData.fullName}
               onChangeText={(text) => setFormData({...formData, fullName: text})}
               editable={!loading}
@@ -677,6 +509,7 @@ const AddDriverScreen = () => {
               onChangeText={(text) => setFormData({...formData, cnic: text})}
               editable={!loading}
             />
+            <Text style={styles.inputNote}>Format: 12345-1234567-1</Text>
           </View>
 
           <View style={styles.inputGroup}>
@@ -693,7 +526,7 @@ const AddDriverScreen = () => {
           </View>
 
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Emergency Contact</Text>
+            <Text style={styles.label}>Emergency Contact (Optional)</Text>
             <TextInput
               style={styles.input}
               placeholder="03009876543"
@@ -704,7 +537,7 @@ const AddDriverScreen = () => {
             />
           </View>
 
-          {/* Login Credentials (Only for new drivers) */}
+          {/* ===== LOGIN CREDENTIALS (Only for add mode) ===== */}
           {mode === 'add' && (
             <>
               <Text style={styles.sectionTitle}>🔐 Login Credentials</Text>
@@ -761,19 +594,17 @@ const AddDriverScreen = () => {
               </View>
 
               <View style={styles.passwordInfo}>
-                <Text style={styles.passwordInfoTitle}>📝 Important Instructions:</Text>
+                <Text style={styles.passwordInfoTitle}>📝 Important:</Text>
                 <Text style={styles.passwordInfoText}>
-                  1. Set a password for the driver{'\n'}
-                  2. Share credentials securely with driver{'\n'}
-                  3. Driver will use the email above to login{'\n'}
-                  4. Driver can change password later{'\n'}
-                  5. Keep credentials confidential
+                  • Driver will use email & password to login{'\n'}
+                  • Share credentials securely with driver{'\n'}
+                  • Driver can change password later after login
                 </Text>
               </View>
             </>
           )}
 
-          {/* License Information */}
+          {/* ===== LICENSE INFORMATION ===== */}
           <Text style={styles.sectionTitle}>📄 License Details</Text>
 
           <View style={styles.inputGroup}>
@@ -797,11 +628,7 @@ const AddDriverScreen = () => {
                     styles.optionButton,
                     formData.licenseType === type.id && styles.optionButtonSelected
                   ]}
-                  onPress={() => {
-                    if (!loading) {
-                      setFormData({...formData, licenseType: type.id});
-                    }
-                  }}
+                  onPress={() => setFormData({...formData, licenseType: type.id})}
                   disabled={loading}
                 >
                   <Text style={styles.optionIcon}>{type.icon}</Text>
@@ -829,7 +656,7 @@ const AddDriverScreen = () => {
             </TouchableOpacity>
           </View>
 
-          {/* Employment Information */}
+          {/* ===== EMPLOYMENT INFORMATION ===== */}
           <Text style={styles.sectionTitle}>💼 Employment Details</Text>
 
           <View style={styles.inputGroup}>
@@ -867,11 +694,7 @@ const AddDriverScreen = () => {
                       styles.employmentButton,
                       formData.employmentType === type.id && styles.employmentButtonSelected
                     ]}
-                    onPress={() => {
-                      if (!loading) {
-                        setFormData({...formData, employmentType: type.id});
-                      }
-                    }}
+                    onPress={() => setFormData({...formData, employmentType: type.id})}
                     disabled={loading}
                   >
                     <Text style={[
@@ -902,15 +725,11 @@ const AddDriverScreen = () => {
             />
           </View>
 
-          {/* Action Buttons */}
+          {/* ===== ACTION BUTTONS ===== */}
           <View style={styles.actionButtons}>
             <TouchableOpacity
               style={[styles.actionButton, styles.cancelButton]}
-              onPress={() => {
-                if (!loading) {
-                  navigation.goBack();
-                }
-              }}
+              onPress={() => navigation.goBack()}
               disabled={loading}
             >
               <Text style={styles.cancelButtonText}>Cancel</Text>
@@ -931,20 +750,22 @@ const AddDriverScreen = () => {
             </TouchableOpacity>
           </View>
 
-          {/* Information Note */}
-          <View style={styles.infoNote}>
-            <Text style={styles.infoNoteTitle}>⚠️ Important:</Text>
-            <Text style={styles.infoNoteText}>
-              • Driver will use the provided email and password to login{'\n'}
-              • Share credentials securely with driver{'\n'}
-              • Driver can change password after login{'\n'}
-              • Keep a record of driver credentials
-            </Text>
-          </View>
+          {/* ===== SERVICE NOTE (only for add mode) ===== */}
+          {mode === 'add' && (
+            <View style={styles.serviceNote}>
+              <Text style={styles.serviceNoteTitle}>🔧 Using DriverAuthService</Text>
+              <Text style={styles.serviceNoteText}>
+                • Secondary Firebase app instance{'\n'}
+                • Transporter session preserved{'\n'}
+                • Secure account creation{'\n'}
+                • Automatic cleanup after creation
+              </Text>
+            </View>
+          )}
         </View>
       </ScrollView>
 
-      {/* Date Picker Modal */}
+      {/* ===== DATE PICKER MODAL ===== */}
       {showDatePicker && (
         <Modal
           transparent={true}
@@ -990,6 +811,7 @@ const AddDriverScreen = () => {
   );
 };
 
+// ========== STYLES ==========
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -1005,6 +827,12 @@ const styles = StyleSheet.create({
     marginTop: SIZES.sm,
     fontSize: 16,
     color: COLORS.primary,
+    fontWeight: '600',
+  },
+  loadingSubText: {
+    marginTop: 4,
+    fontSize: 12,
+    color: COLORS.textLight,
   },
   scrollContent: {
     flexGrow: 1,
@@ -1029,6 +857,34 @@ const styles = StyleSheet.create({
   },
   headerRight: {
     width: 24,
+  },
+  serviceInfoBanner: {
+    flexDirection: 'row',
+    backgroundColor: '#E8F0FE',
+    padding: SIZES.md,
+    marginHorizontal: SIZES.md,
+    marginTop: SIZES.md,
+    borderRadius: SIZES.xs,
+    borderLeftWidth: 4,
+    borderLeftColor: COLORS.primary,
+    alignItems: 'center',
+  },
+  serviceInfoIcon: {
+    fontSize: 24,
+    marginRight: SIZES.sm,
+  },
+  serviceInfoContent: {
+    flex: 1,
+  },
+  serviceInfoTitle: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: COLORS.primary,
+    marginBottom: 2,
+  },
+  serviceInfoText: {
+    fontSize: 12,
+    color: COLORS.primary,
   },
   formContainer: {
     padding: SIZES.md,
@@ -1069,6 +925,12 @@ const styles = StyleSheet.create({
   },
   row: {
     flexDirection: 'row',
+  },
+  inputNote: {
+    fontSize: 11,
+    color: COLORS.textLight,
+    marginTop: 4,
+    fontStyle: 'italic',
   },
   optionsContainer: {
     flexDirection: 'row',
@@ -1176,7 +1038,6 @@ const styles = StyleSheet.create({
     color: COLORS.text,
     fontWeight: '500',
   },
-  // Password section styles
   passwordHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1229,13 +1090,6 @@ const styles = StyleSheet.create({
     color: '#5D4037',
     lineHeight: 18,
   },
-  // Input note for email
-  inputNote: {
-    fontSize: 11,
-    color: COLORS.textLight,
-    marginTop: 4,
-    fontStyle: 'italic',
-  },
   actionButtons: {
     flexDirection: 'row',
     marginTop: SIZES.xxxl,
@@ -1267,26 +1121,25 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontSize: 16,
   },
-  infoNote: {
-    backgroundColor: '#E8F0FE',
+  serviceNote: {
+    backgroundColor: '#F3E5F5',
     padding: SIZES.md,
     borderRadius: SIZES.xs,
     marginTop: SIZES.md,
     borderLeftWidth: 4,
-    borderLeftColor: COLORS.primary,
+    borderLeftColor: '#9C27B0',
   },
-  infoNoteTitle: {
+  serviceNoteTitle: {
     fontSize: 14,
     fontWeight: 'bold',
-    color: COLORS.primary,
+    color: '#9C27B0',
     marginBottom: SIZES.xs,
   },
-  infoNoteText: {
+  serviceNoteText: {
     fontSize: 12,
-    color: COLORS.primary,
+    color: '#9C27B0',
     lineHeight: 18,
   },
-  // Modal styles
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
