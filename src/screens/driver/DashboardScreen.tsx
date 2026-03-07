@@ -14,7 +14,8 @@ import { DrawerNavigationProp } from '@react-navigation/drawer';
 import firestore from '@react-native-firebase/firestore';
 import auth from '@react-native-firebase/auth';
 
-// ❌ YE LINE DELETE KARO - import { useAuth } from '../../context/AuthContext';
+// ✅ Import notification service
+import { requestPermissionAndSaveToken, listenForTokenRefresh } from '../../services/notificationService';
 
 type RootDrawerParamList = {
   Main: undefined;
@@ -48,6 +49,13 @@ interface Duty {
   date: string;
   bookedSeats: number;
   totalSeats: number;
+  // New fields from your trip document
+  startDate?: string;
+  endDate?: string;
+  repeatType?: string;
+  days?: string[];
+  departureTime?: string;
+  arrivalTime?: string;
 }
 
 interface DriverStats {
@@ -59,7 +67,6 @@ interface DriverStats {
 }
 
 const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
-  // ✅ DIRECT FIREBASE AUTH - useAuth ki jagah
   const user = auth().currentUser;
 
   const [driverStatus, setDriverStatus] = useState<'ACTIVE' | 'INACTIVE'>('ACTIVE');
@@ -89,6 +96,24 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
   });
   const [driverName, setDriverName] = useState('');
 
+  // ✅ Initialize Firebase Cloud Messaging when component mounts
+  useEffect(() => {
+    if (!user) return;
+
+    // Request permission and save token (fire and forget - no need to await in useEffect)
+    requestPermissionAndSaveToken(user.uid);
+
+    // Set up token refresh listener and get unsubscribe function
+    const unsubscribe = listenForTokenRefresh(user.uid);
+
+    // Clean up listener when component unmounts
+    return () => {
+      if (unsubscribe) {
+        unsubscribe();
+      }
+    };
+  }, [user]);
+
   // Update time every minute
   useEffect(() => {
     const timer = setInterval(() => {
@@ -100,6 +125,66 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
 
     return () => clearInterval(timer);
   }, []);
+
+  // ✅ FIXED: Trip filtering logic based on your document structure
+  const filterTodayTrips = (trips: any[]) => {
+    const today = new Date();
+    const todayDate = today.toISOString().split('T')[0]; // YYYY-MM-DD
+    const todayDay = today.toLocaleDateString('en-US', { weekday: 'short' }); // Mon, Tue, etc.
+
+    console.log('Filtering trips for:', { todayDate, todayDay });
+
+    return trips.filter(trip => {
+      // Check if trip belongs to today based on date range
+      const withinDateRange =
+        trip.startDate <= todayDate &&
+        trip.endDate >= todayDate;
+
+      if (!withinDateRange) return false;
+
+      // Check if today is a valid day based on repeat type
+      if (trip.repeatType === 'daily') {
+        return true; // Daily trips run every day
+      } else if (trip.repeatType === 'weekly') {
+        // Weekly trips run only on specified days
+        return trip.days?.includes(todayDay);
+      } else if (trip.repeatType === 'one-time') {
+        // One-time trips run only on exact start date
+        return trip.startDate === todayDate;
+      }
+
+      return false;
+    });
+  };
+
+  // ✅ FIXED: Map Firebase trip to Duty interface
+  const mapTripToDuty = (doc: any): Duty => {
+    const data = doc.data();
+    return {
+      id: doc.id,
+      busNumber: data.busNumber || 'N/A',
+      busModel: data.busModel || 'Standard Bus',
+      routeName: data.routeName || 'Unknown Route',
+      timeSlot: `${data.departureTime || '00:00'} - ${data.arrivalTime || '00:00'}`,
+      passengers: `${data.bookedSeats || 0}/${data.totalSeats || 0}`,
+      status: mapTripStatus(data.status),
+      startTime: data.departureTime || '00:00',
+      endTime: data.arrivalTime || '00:00',
+      busId: data.busId || '',
+      routeId: data.routeId || '',
+      driverId: data.driverId || '',
+      date: data.startDate || new Date().toISOString().split('T')[0],
+      bookedSeats: data.bookedSeats || 0,
+      totalSeats: data.totalSeats || 0,
+      // New fields
+      startDate: data.startDate,
+      endDate: data.endDate,
+      repeatType: data.repeatType,
+      days: data.days,
+      departureTime: data.departureTime,
+      arrivalTime: data.arrivalTime,
+    };
+  };
 
   // Fetch driver data
   useEffect(() => {
@@ -131,40 +216,28 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
           });
         }
 
-        // Listen to today's trips
-        const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-
+        // ✅ FIXED: Listen to all driver trips (without date filter in query)
         const unsubscribeTrips = firestore()
           .collection('trips')
           .where('driverId', '==', user.uid)
-          .where('date', '==', today)
-          .orderBy('departureTime', 'asc')
           .onSnapshot(
             (snapshot) => {
-              const tripsData: Duty[] = [];
+              // First, map all trips
+              const allTripsData: Duty[] = [];
               snapshot.forEach(doc => {
-                const data = doc.data();
-                tripsData.push({
-                  id: doc.id,
-                  busNumber: data.busNumber || 'N/A',
-                  busModel: data.busModel || 'Standard Bus',
-                  routeName: data.routeName || 'Unknown Route',
-                  timeSlot: `${data.departureTime} - ${data.arrivalTime}`,
-                  passengers: `${data.bookedSeats || 0}/${data.totalSeats || 0}`,
-                  status: mapTripStatus(data.status),
-                  startTime: data.departureTime || '00:00',
-                  endTime: data.arrivalTime || '00:00',
-                  busId: data.busId || '',
-                  routeId: data.routeId || '',
-                  driverId: data.driverId || '',
-                  date: data.date || today,
-                  bookedSeats: data.bookedSeats || 0,
-                  totalSeats: data.totalSeats || 0,
-                });
+                allTripsData.push(mapTripToDuty(doc));
               });
 
-              setAllDuties(tripsData);
-              setDuties(tripsData.slice(0, 3)); // First 3 for today's view
+              console.log('Total trips from Firestore:', allTripsData.length);
+
+              // ✅ Filter trips for today using JavaScript
+              const todayTrips = filterTodayTrips(allTripsData);
+
+              // Sort by departure time
+              todayTrips.sort((a, b) => a.startTime.localeCompare(b.startTime));
+
+              setAllDuties(allTripsData); // Store all trips
+              setDuties(todayTrips.slice(0, 3)); // First 3 for today's view
               setLoading(false);
               setRefreshing(false);
             },
@@ -188,14 +261,16 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
     fetchDriverData();
   }, [user]);
 
-  // Map trip status from Firebase to local status
+  // ✅ FIXED: Map trip status from Firebase to local status
   const mapTripStatus = (firebaseStatus: string): Duty['status'] => {
     switch (firebaseStatus) {
       case 'scheduled':
+      case 'upcoming': // Your Firestore has 'upcoming'
         return 'UPCOMING';
       case 'ready':
         return 'READY';
       case 'in-progress':
+      case 'active': // Some might use 'active'
         return 'ACTIVE';
       case 'completed':
         return 'COMPLETED';
@@ -208,7 +283,7 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
   const mapToFirebaseStatus = (localStatus: Duty['status']): string => {
     switch (localStatus) {
       case 'UPCOMING':
-        return 'scheduled';
+        return 'upcoming'; // Your Firestore uses 'upcoming'
       case 'READY':
         return 'ready';
       case 'ACTIVE':
@@ -216,7 +291,7 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
       case 'COMPLETED':
         return 'completed';
       default:
-        return 'scheduled';
+        return 'upcoming';
     }
   };
 
@@ -243,7 +318,7 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
 
       // If becoming active, check for any active duty
       if (newStatus === 'ACTIVE') {
-        const activeDuty = allDuties.find(d => d.status === 'ACTIVE');
+        const activeDuty = duties.find(d => d.status === 'ACTIVE');
         if (activeDuty) {
           Alert.alert(
             'Active Duty Found',
@@ -552,7 +627,7 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
       title: 'Start Next Duty',
       emoji: '🚀',
       action: () => {
-        const nextDuty = allDuties.find(d => d.status === 'UPCOMING' || d.status === 'READY');
+        const nextDuty = duties.find(d => d.status === 'UPCOMING' || d.status === 'READY');
         if (nextDuty) {
           handleStartDuty(nextDuty.id);
         } else {
@@ -825,8 +900,8 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
             </TouchableOpacity>
           </View>
 
-          {allDuties.filter(d => d.status === 'UPCOMING' || d.status === 'READY').length > 0 ? (
-            allDuties
+          {duties.filter(d => d.status === 'UPCOMING' || d.status === 'READY').length > 0 ? (
+            duties
               .filter(d => d.status === 'UPCOMING' || d.status === 'READY')
               .slice(0, 3)
               .map(duty => (
@@ -894,7 +969,7 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
             <TouchableOpacity
               style={styles.quickNavItem}
               onPress={() => {
-                const activeDuty = allDuties.find(d => d.status === 'ACTIVE');
+                const activeDuty = duties.find(d => d.status === 'ACTIVE');
                 if (activeDuty) {
                   navigation.navigate('Route', { tripId: activeDuty.id });
                 } else {

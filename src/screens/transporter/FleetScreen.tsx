@@ -10,8 +10,11 @@ import {
   Alert,
   ActivityIndicator,
   RefreshControl,
+  FlatList,
+  Modal,
+  TextInput,
 } from 'react-native';
-import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 import { StackNavigationProp } from '@react-navigation/stack';
@@ -25,6 +28,75 @@ import { COLORS, SIZES, SHADOWS } from '../../constants/theme';
 
 type FleetScreenNavigationProp = StackNavigationProp<TransporterStackParamList, 'Fleet'>;
 
+// Maintenance Schedule Modal Component
+const MaintenanceScheduleModal = ({
+  visible,
+  onClose,
+  onSchedule,
+  busNumber
+}: {
+  visible: boolean;
+  onClose: () => void;
+  onSchedule: (days: number) => void;
+  busNumber: string;
+}) => {
+  const [days, setDays] = useState('7');
+
+  const handleSchedule = () => {
+    const daysNum = parseInt(days);
+    if (isNaN(daysNum) || daysNum <= 0) {
+      Alert.alert('Invalid Input', 'Please enter a valid number of days');
+      return;
+    }
+    onSchedule(daysNum);
+    setDays('7');
+    onClose();
+  };
+
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={onClose}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContent}>
+          <Text style={styles.modalTitle}>📅 Schedule Maintenance</Text>
+          <Text style={styles.modalSubtitle}>
+            Bus: {busNumber}
+          </Text>
+          <Text style={styles.modalLabel}>
+            Enter number of days from now:
+          </Text>
+          <TextInput
+            style={styles.modalInput}
+            value={days}
+            onChangeText={setDays}
+            keyboardType="numeric"
+            placeholder="e.g., 7"
+            autoFocus
+          />
+          <View style={styles.modalButtons}>
+            <TouchableOpacity
+              style={[styles.modalButton, styles.modalCancelButton]}
+              onPress={onClose}
+            >
+              <Text style={styles.modalCancelText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.modalButton, styles.modalScheduleButton]}
+              onPress={handleSchedule}
+            >
+              <Text style={styles.modalScheduleText}>Schedule</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+};
+
 const FleetScreen = () => {
   const navigation = useNavigation<FleetScreenNavigationProp>();
   const route = useRoute();
@@ -34,19 +106,22 @@ const FleetScreen = () => {
   const [filter, setFilter] = useState<BusStatus | 'all'>('all');
   const [transporterName, setTransporterName] = useState('');
 
+  // Maintenance modal state
+  const [maintenanceModal, setMaintenanceModal] = useState({
+    visible: false,
+    bus: null as Bus | null,
+  });
+
   const user = auth().currentUser;
 
   // 🔥 IMPORTANT: useEffect for opening AddBusScreen automatically
-  useFocusEffect(
-    useCallback(() => {
-      const params = route.params as any;
-      if (params?.openAddBus) {
-        handleAddBus();
-        // IMPORTANT: param clear karo
-        navigation.setParams({ openAddBus: false });
-      }
-    }, [route.params])
-  );
+  useEffect(() => {
+    const params = route.params as any;
+    if (params?.openAddBus) {
+      handleAddBus();
+      navigation.setParams({ openAddBus: false });
+    }
+  }, [route.params, navigation]);
 
   // Fetch transporter name
   useEffect(() => {
@@ -90,7 +165,26 @@ const FleetScreen = () => {
         },
         (error) => {
           console.error('Error fetching buses:', error);
-          Alert.alert('Error', 'Failed to load buses. Please try again.');
+
+          if (error.message?.includes('index')) {
+            Alert.alert(
+              'Database Index Required',
+              'Please create the required index in Firebase Console:\n\n' +
+              'Collection: buses\n' +
+              'Fields: transporterId (Ascending), createdAt (Descending)',
+              [
+                { text: 'OK' },
+                {
+                  text: 'Open Console',
+                  onPress: () => {
+                    // Linking.openURL('https://console.firebase.google.com');
+                  }
+                }
+              ]
+            );
+          } else {
+            Alert.alert('Error', 'Failed to load buses. Please try again.');
+          }
           setLoading(false);
           setRefreshing(false);
         }
@@ -102,7 +196,6 @@ const FleetScreen = () => {
   // Manual refresh
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    // Listener will auto-update
   }, []);
 
   // Stats calculation
@@ -121,22 +214,26 @@ const FleetScreen = () => {
 
   // Add Bus button handler
   const handleAddBus = () => {
+    if (!user) return;
     navigation.navigate('AddBusScreen', {
       mode: 'add',
       transporterId: user?.uid,
     });
   };
 
-  // Bus press handler - Navigate to AddBusScreen in edit mode
+  // Bus press handler
   const handleBusPress = (bus: Bus) => {
+    if (!user) return;
     navigation.navigate('AddBusScreen', {
       mode: 'edit',
       bus: bus,
     });
   };
 
-  // 📋 DETAILS BUTTON FUNCTIONALITY
+  // Details button
   const handleViewDetails = (bus: Bus) => {
+    if (!user) return;
+
     const formatDate = (dateStr: string) => {
       if (!dateStr) return 'N/A';
       return dateStr;
@@ -157,13 +254,14 @@ const FleetScreen = () => {
       [
         { text: 'OK', style: 'default' },
         { text: 'Edit Details', onPress: () => handleBusPress(bus) },
-        { text: 'Assign Driver', onPress: () => handleAssignDriver(bus) }
       ]
     );
   };
 
-  // 🔧 MAINTENANCE BUTTON FUNCTIONALITY
+  // Maintenance button
   const handleMaintenance = (bus: Bus) => {
+    if (!user) return;
+
     Alert.alert(
       '🔧 Maintenance Options',
       `Select maintenance action for ${bus.busNumber}:`,
@@ -171,7 +269,7 @@ const FleetScreen = () => {
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Schedule Maintenance',
-          onPress: () => scheduleMaintenance(bus)
+          onPress: () => setMaintenanceModal({ visible: true, bus })
         },
         {
           text: 'Log Maintenance Done',
@@ -185,61 +283,43 @@ const FleetScreen = () => {
     );
   };
 
-  const scheduleMaintenance = (bus: Bus) => {
-    Alert.prompt(
-      '📅 Schedule Maintenance',
-      'Enter number of days from now:',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Schedule',
-          onPress: async (days) => {
-            if (!user) return;
+  const scheduleMaintenance = async (days: number) => {
+    if (!user || !maintenanceModal.bus) return;
 
-            if (days && !isNaN(parseInt(days))) {
-              const daysNum = parseInt(days);
+    const bus = maintenanceModal.bus;
 
-              try {
-                // Update bus status to maintenance
-                await firestore()
-                  .collection('buses')
-                  .doc(bus.id)
-                  .update({
-                    status: 'maintenance',
-                    updatedAt: firestore.FieldValue.serverTimestamp(),
-                  });
+    try {
+      await firestore()
+        .collection('buses')
+        .doc(bus.id)
+        .update({
+          status: 'maintenance',
+          updatedAt: firestore.FieldValue.serverTimestamp(),
+        });
 
-                // Create maintenance record
-                await firestore()
-                  .collection('maintenance')
-                  .add({
-                    busId: bus.id,
-                    busNumber: bus.busNumber,
-                    date: firestore.FieldValue.serverTimestamp(),
-                    type: 'routine',
-                    description: `Scheduled maintenance for ${daysNum} days from now`,
-                    transporterId: user.uid,
-                    createdAt: firestore.FieldValue.serverTimestamp(),
-                  });
+      await firestore()
+        .collection('maintenance')
+        .add({
+          busId: bus.id,
+          busNumber: bus.busNumber,
+          date: firestore.FieldValue.serverTimestamp(),
+          type: 'routine',
+          description: `Scheduled maintenance for ${days} days from now`,
+          transporterId: user.uid,
+          createdAt: firestore.FieldValue.serverTimestamp(),
+        });
 
-                Alert.alert(
-                  '✅ Scheduled',
-                  `Maintenance scheduled for ${daysNum} days from now\nBus status changed to MAINTENANCE`
-                );
-              } catch (error) {
-                console.error('Error scheduling maintenance:', error);
-                Alert.alert('Error', 'Failed to schedule maintenance');
-              }
-            }
-          }
-        }
-      ],
-      'plain-text',
-      '7'
-    );
+      Alert.alert(
+        '✅ Scheduled',
+        `Maintenance scheduled for ${days} days from now\nBus status changed to MAINTENANCE`
+      );
+    } catch (error) {
+      console.error('Error scheduling maintenance:', error);
+      Alert.alert('Error', 'Failed to schedule maintenance');
+    }
   };
 
-  const logMaintenanceDone = (bus: Bus) => {
+  const logMaintenanceDone = async (bus: Bus) => {
     if (!user) return;
 
     Alert.alert(
@@ -251,7 +331,6 @@ const FleetScreen = () => {
           text: 'Confirm',
           onPress: async () => {
             try {
-              // Update bus status back to active
               await firestore()
                 .collection('buses')
                 .doc(bus.id)
@@ -260,7 +339,6 @@ const FleetScreen = () => {
                   updatedAt: firestore.FieldValue.serverTimestamp(),
                 });
 
-              // Create maintenance record
               await firestore()
                 .collection('maintenance')
                 .add({
@@ -317,12 +395,11 @@ const FleetScreen = () => {
     }
   };
 
-  // ▶️ ACTIVATE/DEACTIVATE BUTTON FUNCTIONALITY
+  // Activate/Deactivate button
   const handleChangeStatus = (bus: Bus) => {
     if (!user) return;
 
     if (bus.status === 'active') {
-      // Deactivate
       Alert.alert(
         '⏸️ Deactivate Bus',
         `Are you sure you want to deactivate ${bus.busNumber}?`,
@@ -343,6 +420,17 @@ const FleetScreen = () => {
                     updatedAt: firestore.FieldValue.serverTimestamp(),
                   });
 
+                if (bus.driverId) {
+                  await firestore()
+                    .collection('drivers')
+                    .doc(bus.driverId)
+                    .update({
+                      busAssignedId: null,
+                      busNumber: null,
+                      updatedAt: firestore.FieldValue.serverTimestamp(),
+                    });
+                }
+
                 Alert.alert('✅ Deactivated', `${bus.busNumber} has been deactivated`);
               } catch (error) {
                 console.error('Error deactivating bus:', error);
@@ -353,7 +441,6 @@ const FleetScreen = () => {
         ]
       );
     } else {
-      // Activate
       Alert.alert(
         '▶️ Activate Bus',
         `Activate ${bus.busNumber} back to service?`,
@@ -383,12 +470,11 @@ const FleetScreen = () => {
     }
   };
 
-  // 👤 ASSIGN DRIVER FUNCTION
+  // Assign Driver function (FIXED)
   const handleAssignDriver = async (bus: Bus) => {
     if (!user) return;
 
     try {
-      // Fetch available drivers
       const driversSnapshot = await firestore()
         .collection('drivers')
         .where('transporterId', '==', user.uid)
@@ -404,13 +490,26 @@ const FleetScreen = () => {
         id: doc.id,
         name: doc.data().fullName,
         status: doc.data().status,
+        currentBusId: doc.data().busAssignedId,
       }));
 
-      // Create alert options
       const alertOptions = drivers.map(driver => ({
-        text: `${driver.name} (${driver.status})`,
+        text: `${driver.name} (${driver.status})${driver.currentBusId ? ' - Currently Assigned' : ''}`,
         onPress: async () => {
           try {
+            // Remove from previous bus if assigned
+            if (driver.currentBusId) {
+              await firestore()
+                .collection('buses')
+                .doc(driver.currentBusId)
+                .update({
+                  driverId: null,
+                  driverName: null,
+                  updatedAt: firestore.FieldValue.serverTimestamp(),
+                });
+            }
+
+            // Assign to new bus
             await firestore()
               .collection('buses')
               .doc(bus.id)
@@ -420,7 +519,7 @@ const FleetScreen = () => {
                 updatedAt: firestore.FieldValue.serverTimestamp(),
               });
 
-            // Also update driver's assigned bus
+            // Update driver record
             await firestore()
               .collection('drivers')
               .doc(driver.id)
@@ -445,7 +544,7 @@ const FleetScreen = () => {
           ...alertOptions,
           { text: 'Cancel', style: 'cancel' },
           ...(bus.driverId ? [{
-            text: 'Unassign Driver',
+            text: 'Unassign Current Driver',
             onPress: async () => {
               try {
                 await firestore()
@@ -457,7 +556,6 @@ const FleetScreen = () => {
                     updatedAt: firestore.FieldValue.serverTimestamp(),
                   });
 
-                // Update driver's assigned bus
                 await firestore()
                   .collection('drivers')
                   .doc(bus.driverId!)
@@ -507,6 +605,97 @@ const FleetScreen = () => {
     return dateStr;
   };
 
+  // Render bus item
+  const renderBusItem = ({ item: bus }: { item: Bus }) => (
+    <View key={bus.id} style={[styles.busCard, SHADOWS.medium]}>
+      <TouchableOpacity
+        style={styles.busInfoSection}
+        onPress={() => handleBusPress(bus)}
+        activeOpacity={0.7}
+      >
+        <View style={styles.busHeader}>
+          <View style={styles.busInfo}>
+            <Text style={styles.busNumber}>{bus.busNumber}</Text>
+            <Text style={styles.busRegistration}>{bus.registrationNumber}</Text>
+          </View>
+          <View style={[styles.statusBadge, { backgroundColor: getStatusColor(bus.status) }]}>
+            <Text style={styles.statusText}>
+              {getStatusIcon(bus.status)} {bus.status.toUpperCase()}
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.busDetails}>
+          <View style={styles.detailItem}>
+            <Text style={styles.detailLabel}>Capacity:</Text>
+            <Text style={styles.detailValue}>{bus.capacity} seats</Text>
+          </View>
+          <View style={styles.detailItem}>
+            <Text style={styles.detailLabel}>Driver:</Text>
+            <Text style={styles.detailValue}>{bus.driverName || 'Not assigned'}</Text>
+          </View>
+          <View style={styles.detailItem}>
+            <Text style={styles.detailLabel}>Insurance:</Text>
+            <Text style={[
+              styles.detailValue,
+              bus.insuranceExpiry && new Date(bus.insuranceExpiry) < new Date() ? styles.overdueText : null
+            ]}>
+              {formatDate(bus.insuranceExpiry)}
+            </Text>
+          </View>
+          <View style={styles.detailItem}>
+            <Text style={styles.detailLabel}>Fitness:</Text>
+            <Text style={[
+              styles.detailValue,
+              bus.fitnessExpiry && new Date(bus.fitnessExpiry) < new Date() ? styles.overdueText : null
+            ]}>
+              {formatDate(bus.fitnessExpiry)}
+            </Text>
+          </View>
+        </View>
+      </TouchableOpacity>
+
+      {/* Action Buttons */}
+      <View style={styles.actionButtons}>
+        <TouchableOpacity
+          style={styles.actionButton}
+          onPress={() => handleViewDetails(bus)}
+        >
+          <Text style={styles.actionButtonText}>📋 Details</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.actionButton}
+          onPress={() => handleAssignDriver(bus)}
+        >
+          <Text style={styles.actionButtonText}>👤 Driver</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.actionButton}
+          onPress={() => handleMaintenance(bus)}
+        >
+          <Text style={styles.actionButtonText}>🔧 Maintain</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[
+            styles.actionButton,
+            bus.status === 'active' ? styles.deactivateButton : styles.activateButton
+          ]}
+          onPress={() => handleChangeStatus(bus)}
+        >
+          <Text style={[
+            styles.actionButtonText,
+            bus.status === 'active' ? styles.deactivateText : styles.activateText
+          ]}>
+            {bus.status === 'active' ? '⏸️' : '▶️'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -518,6 +707,14 @@ const FleetScreen = () => {
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* Maintenance Schedule Modal */}
+      <MaintenanceScheduleModal
+        visible={maintenanceModal.visible}
+        onClose={() => setMaintenanceModal({ visible: false, bus: null })}
+        onSchedule={scheduleMaintenance}
+        busNumber={maintenanceModal.bus?.busNumber || ''}
+      />
+
       {/* Header */}
       <View style={styles.header}>
         <View>
@@ -572,115 +769,42 @@ const FleetScreen = () => {
       </View>
 
       {/* Bus List */}
-      <ScrollView
-        style={styles.listContainer}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-        contentContainerStyle={styles.listContent}
-      >
-        {filteredBuses.length === 0 ? (
-          <View style={styles.emptyContainer}>
-            <Text style={styles.emptyIcon}>🚌</Text>
-            <Text style={styles.emptyTitle}>No Buses Found</Text>
-            <Text style={styles.emptyText}>
-              {filter === 'all'
-                ? 'Add your first bus to get started'
-                : `No ${filter} buses available`}
-            </Text>
-            <TouchableOpacity
-              style={styles.emptyButton}
-              onPress={handleAddBus}
-            >
-              <Text style={styles.emptyButtonText}>Add Bus</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          filteredBuses.map((bus) => (
-            <View key={bus.id} style={[styles.busCard, SHADOWS.medium]}>
-              <TouchableOpacity
-                style={styles.busInfoSection}
-                onPress={() => handleBusPress(bus)}
-                activeOpacity={0.7}
-              >
-                <View style={styles.busHeader}>
-                  <View style={styles.busInfo}>
-                    <Text style={styles.busNumber}>{bus.busNumber}</Text>
-                    <Text style={styles.busRegistration}>{bus.registrationNumber}</Text>
-                  </View>
-                  <View style={[styles.statusBadge, { backgroundColor: getStatusColor(bus.status) }]}>
-                    <Text style={styles.statusText}>
-                      {getStatusIcon(bus.status)} {bus.status.toUpperCase()}
-                    </Text>
-                  </View>
-                </View>
-
-                <View style={styles.busDetails}>
-                  <View style={styles.detailItem}>
-                    <Text style={styles.detailLabel}>Capacity:</Text>
-                    <Text style={styles.detailValue}>{bus.capacity} seats</Text>
-                  </View>
-                  <View style={styles.detailItem}>
-                    <Text style={styles.detailLabel}>Driver:</Text>
-                    <Text style={styles.detailValue}>{bus.driverName || 'Not assigned'}</Text>
-                  </View>
-                  <View style={styles.detailItem}>
-                    <Text style={styles.detailLabel}>Insurance:</Text>
-                    <Text style={[
-                      styles.detailValue,
-                      bus.insuranceExpiry && new Date(bus.insuranceExpiry) < new Date() ? styles.overdueText : null
-                    ]}>
-                      {formatDate(bus.insuranceExpiry)}
-                    </Text>
-                  </View>
-                  <View style={styles.detailItem}>
-                    <Text style={styles.detailLabel}>Fitness:</Text>
-                    <Text style={[
-                      styles.detailValue,
-                      bus.fitnessExpiry && new Date(bus.fitnessExpiry) < new Date() ? styles.overdueText : null
-                    ]}>
-                      {formatDate(bus.fitnessExpiry)}
-                    </Text>
-                  </View>
-                </View>
-              </TouchableOpacity>
-
-              {/* Action Buttons */}
-              <View style={styles.actionButtons}>
-                <TouchableOpacity
-                  style={styles.actionButton}
-                  onPress={() => handleViewDetails(bus)}
-                >
-                  <Text style={styles.actionButtonText}>📋 Details</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.actionButton}
-                  onPress={() => handleMaintenance(bus)}
-                >
-                  <Text style={styles.actionButtonText}>🔧 Maintain</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[
-                    styles.actionButton,
-                    bus.status === 'active' ? styles.deactivateButton : styles.activateButton
-                  ]}
-                  onPress={() => handleChangeStatus(bus)}
-                >
-                  <Text style={[
-                    styles.actionButtonText,
-                    bus.status === 'active' ? styles.deactivateText : styles.activateText
-                  ]}>
-                    {bus.status === 'active' ? '⏸️ Deactivate' : '▶️ Activate'}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          ))
-        )}
-      </ScrollView>
+      {filteredBuses.length === 0 ? (
+        <ScrollView
+          contentContainerStyle={styles.emptyContainer}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
+        >
+          <Text style={styles.emptyIcon}>🚌</Text>
+          <Text style={styles.emptyTitle}>No Buses Found</Text>
+          <Text style={styles.emptyText}>
+            {filter === 'all'
+              ? 'Add your first bus to get started'
+              : `No ${filter} buses available`}
+          </Text>
+          <TouchableOpacity
+            style={styles.emptyButton}
+            onPress={handleAddBus}
+          >
+            <Text style={styles.emptyButtonText}>Add Bus</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      ) : (
+        <FlatList
+          data={filteredBuses}
+          keyExtractor={(item) => item.id}
+          renderItem={renderBusItem}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
+          initialNumToRender={10}
+          maxToRenderPerBatch={10}
+          windowSize={5}
+        />
+      )}
     </SafeAreaView>
   );
 };
@@ -774,6 +898,7 @@ const styles = StyleSheet.create({
     paddingBottom: 30,
   },
   emptyContainer: {
+    flexGrow: 1,
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 60,
@@ -896,6 +1021,68 @@ const styles = StyleSheet.create({
   },
   activateText: {
     color: COLORS.success,
+  },
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    backgroundColor: COLORS.white,
+    borderRadius: SIZES.md,
+    padding: SIZES.lg,
+    width: '80%',
+    maxWidth: 400,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: COLORS.primary,
+    marginBottom: SIZES.sm,
+  },
+  modalSubtitle: {
+    fontSize: 16,
+    color: COLORS.text,
+    marginBottom: SIZES.md,
+  },
+  modalLabel: {
+    fontSize: 14,
+    color: COLORS.textLight,
+    marginBottom: SIZES.xs,
+  },
+  modalInput: {
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: SIZES.xs,
+    padding: SIZES.sm,
+    fontSize: 16,
+    marginBottom: SIZES.lg,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+  },
+  modalButton: {
+    paddingHorizontal: SIZES.md,
+    paddingVertical: SIZES.sm,
+    borderRadius: SIZES.xs,
+    marginLeft: SIZES.sm,
+  },
+  modalCancelButton: {
+    backgroundColor: COLORS.greyLight,
+  },
+  modalScheduleButton: {
+    backgroundColor: COLORS.primary,
+  },
+  modalCancelText: {
+    color: COLORS.text,
+    fontWeight: '600',
+  },
+  modalScheduleText: {
+    color: COLORS.white,
+    fontWeight: '600',
   },
 });
 

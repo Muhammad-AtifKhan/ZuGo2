@@ -64,6 +64,63 @@ interface QuickBooking {
   icon?: string;
 }
 
+// Pakistan Cities Data (Hardcoded as backup)
+const PAKISTAN_CITIES = [
+  // Punjab
+  { name: 'Lahore', code: 'LHE', province: 'Punjab', popular: true },
+  { name: 'Faisalabad', code: 'FSD', province: 'Punjab', popular: true },
+  { name: 'Rawalpindi', code: 'RWP', province: 'Punjab', popular: true },
+  { name: 'Multan', code: 'MUX', province: 'Punjab', popular: true },
+  { name: 'Gujranwala', code: 'GRW', province: 'Punjab', popular: false },
+  { name: 'Sialkot', code: 'SKT', province: 'Punjab', popular: false },
+  { name: 'Bahawalpur', code: 'BHV', province: 'Punjab', popular: false },
+  { name: 'Sargodha', code: 'SGD', province: 'Punjab', popular: false },
+  { name: 'Sheikhupura', code: 'SKP', province: 'Punjab', popular: false },
+  { name: 'Rahim Yar Khan', code: 'RYK', province: 'Punjab', popular: false },
+  { name: 'Jhang', code: 'JHG', province: 'Punjab', popular: false },
+  { name: 'Dera Ghazi Khan', code: 'DGK', province: 'Punjab', popular: false },
+  { name: 'Gujrat', code: 'GRT', province: 'Punjab', popular: false },
+  { name: 'Sahiwal', code: 'SWL', province: 'Punjab', popular: false },
+  { name: 'Kasur', code: 'KSR', province: 'Punjab', popular: false },
+
+  // Sindh
+  { name: 'Karachi', code: 'KHI', province: 'Sindh', popular: true },
+  { name: 'Hyderabad', code: 'HDD', province: 'Sindh', popular: true },
+  { name: 'Sukkur', code: 'SKZ', province: 'Sindh', popular: false },
+  { name: 'Larkana', code: 'LRK', province: 'Sindh', popular: false },
+  { name: 'Nawabshah', code: 'NWS', province: 'Sindh', popular: false },
+  { name: 'Mirpur Khas', code: 'MPK', province: 'Sindh', popular: false },
+  { name: 'Jacobabad', code: 'JCB', province: 'Sindh', popular: false },
+
+  // Khyber Pakhtunkhwa
+  { name: 'Peshawar', code: 'PEW', province: 'KPK', popular: true },
+  { name: 'Mardan', code: 'MRD', province: 'KPK', popular: false },
+  { name: 'Abbottabad', code: 'ABT', province: 'KPK', popular: false },
+  { name: 'Mingora', code: 'MNG', province: 'KPK', popular: false },
+  { name: 'Kohat', code: 'KHT', province: 'KPK', popular: false },
+  { name: 'Bannu', code: 'BNU', province: 'KPK', popular: false },
+  { name: 'Dera Ismail Khan', code: 'DIK', province: 'KPK', popular: false },
+
+  // Balochistan
+  { name: 'Quetta', code: 'UET', province: 'Balochistan', popular: true },
+  { name: 'Turbat', code: 'TBT', province: 'Balochistan', popular: false },
+  { name: 'Gwadar', code: 'GWD', province: 'Balochistan', popular: false },
+  { name: 'Khuzdar', code: 'KZD', province: 'Balochistan', popular: false },
+  { name: 'Chaman', code: 'CMN', province: 'Balochistan', popular: false },
+
+  // Islamabad
+  { name: 'Islamabad', code: 'ISB', province: 'Islamabad', popular: true },
+
+  // Gilgit-Baltistan
+  { name: 'Gilgit', code: 'GIL', province: 'Gilgit-Baltistan', popular: false },
+  { name: 'Skardu', code: 'SKD', province: 'Gilgit-Baltistan', popular: false },
+  { name: 'Hunza', code: 'HNZ', province: 'Gilgit-Baltistan', popular: false },
+
+  // Azad Kashmir
+  { name: 'Muzaffarabad', code: 'MZF', province: 'Azad Kashmir', popular: false },
+  { name: 'Mirpur', code: 'MRP', province: 'Azad Kashmir', popular: false },
+];
+
 const HomeScreen = () => {
   const navigation = useNavigation<HomeScreenNavigationProp>();
   const user = auth().currentUser;
@@ -93,7 +150,7 @@ const HomeScreen = () => {
   const [quickBookings, setQuickBookings] = useState<QuickBooking[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // Fetch cities from Firebase
+  // Fetch cities from Firebase or use hardcoded data
   useEffect(() => {
     fetchCities();
     fetchPopularRoutes();
@@ -108,24 +165,46 @@ const HomeScreen = () => {
         .orderBy('name')
         .get();
 
-      const citiesList: City[] = [];
-      snapshot.forEach(doc => {
-        const data = doc.data();
-        citiesList.push({
-          id: doc.id,
-          name: data.name,
-          code: data.code,
-          province: data.province,
-          popular: data.popular || false,
-          lat: data.lat,
-          lng: data.lng,
+      if (!snapshot.empty) {
+        const citiesList: City[] = [];
+        snapshot.forEach(doc => {
+          const data = doc.data();
+          citiesList.push({
+            id: doc.id,
+            name: data.name,
+            code: data.code,
+            province: data.province,
+            popular: data.popular || false,
+            lat: data.lat,
+            lng: data.lng,
+          });
         });
-      });
-      setCities(citiesList);
-      setFilteredCities(citiesList);
+        setCities(citiesList);
+        setFilteredCities(citiesList);
+      } else {
+        // If no cities in Firebase, use hardcoded Pakistan cities
+        const hardcodedCities: City[] = PAKISTAN_CITIES.map((city, index) => ({
+          id: `city-${index}`,
+          name: city.name,
+          code: city.code,
+          province: city.province,
+          popular: city.popular,
+        }));
+        setCities(hardcodedCities);
+        setFilteredCities(hardcodedCities);
+      }
     } catch (error) {
       console.error('Error fetching cities:', error);
-      Alert.alert('Error', 'Failed to load cities');
+      // Fallback to hardcoded cities
+      const hardcodedCities: City[] = PAKISTAN_CITIES.map((city, index) => ({
+        id: `city-${index}`,
+        name: city.name,
+        code: city.code,
+        province: city.province,
+        popular: city.popular,
+      }));
+      setCities(hardcodedCities);
+      setFilteredCities(hardcodedCities);
     } finally {
       setLoadingCities(false);
     }
@@ -170,7 +249,6 @@ const HomeScreen = () => {
 
   const fetchQuickBookings = async () => {
     try {
-      // Get most booked routes for quick bookings
       const snapshot = await firestore()
         .collection('routes')
         .orderBy('bookingCount', 'desc')
@@ -256,7 +334,6 @@ const HomeScreen = () => {
     setLoading(true);
 
     try {
-      // Save search to history if user is logged in
       if (user) {
         await firestore().collection('search_history').add({
           userId: user.uid,
@@ -271,7 +348,6 @@ const HomeScreen = () => {
         });
       }
 
-      // Navigate to search results
       navigation.navigate('SearchResults', {
         from: fromLocation,
         to: toLocation,
@@ -284,7 +360,6 @@ const HomeScreen = () => {
       });
     } catch (error) {
       console.error('Error saving search:', error);
-      // Still navigate even if saving fails
       navigation.navigate('SearchResults', {
         from: fromLocation,
         to: toLocation,
@@ -352,8 +427,6 @@ const HomeScreen = () => {
         {
           text: 'Use Current City',
           onPress: () => {
-            // For now, set to first popular city
-            // In real app, use geolocation to detect city
             const defaultCity = cities.find(c => c.popular) || cities[0];
             if (defaultCity) {
               setFromLocation(defaultCity.name);
@@ -370,6 +443,18 @@ const HomeScreen = () => {
     return `PKR ${fare.toLocaleString()}`;
   };
 
+  // Group cities by province for better organization
+  const groupedCities = () => {
+    const groups: { [key: string]: City[] } = {};
+    filteredCities.forEach(city => {
+      if (!groups[city.province]) {
+        groups[city.province] = [];
+      }
+      groups[city.province].push(city);
+    });
+    return groups;
+  };
+
   const CitySelectionModal = () => (
     <Modal
       visible={showCityModal}
@@ -383,7 +468,7 @@ const HomeScreen = () => {
             <Text style={styles.modalTitle}>
               Select {citySelectionType === 'from' ? 'Departure' : 'Destination'} City
             </Text>
-            <TouchableOpacity onPress={() => setShowCityModal(false)}>
+            <TouchableOpacity onPress={() => setShowCityModal(false)} style={styles.closeButton}>
               <Icon name="close" size={24} color="#666" />
             </TouchableOpacity>
           </View>
@@ -392,9 +477,10 @@ const HomeScreen = () => {
             <Icon name="search" size={20} color="#999" style={styles.searchIcon} />
             <TextInput
               style={styles.searchInput}
-              placeholder="Search cities..."
+              placeholder="Search Pakistan cities..."
               value={searchQuery}
               onChangeText={handleSearchCities}
+              placeholderTextColor="#999"
             />
             {searchQuery.length > 0 && (
               <TouchableOpacity onPress={() => setSearchQuery('')}>
@@ -406,25 +492,22 @@ const HomeScreen = () => {
           {loadingCities ? (
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="large" color="#4A90E2" />
-              <Text style={styles.loadingText}>Loading cities...</Text>
+              <Text style={styles.loadingText}>Loading Pakistan cities...</Text>
             </View>
           ) : (
             <FlatList
               data={filteredCities}
               keyExtractor={(item) => item.id}
               showsVerticalScrollIndicator={false}
-              ListHeaderComponent={() => (
-                <>
-                  {filteredCities.some(c => c.popular) && (
-                    <View style={styles.sectionHeader}>
-                      <Text style={styles.sectionHeaderText}>Popular Cities</Text>
-                    </View>
-                  )}
-                </>
-              )}
               renderItem={({ item }) => (
                 <TouchableOpacity
-                  style={styles.cityItem}
+                  style={[
+                    styles.cityItem,
+                    (citySelectionType === 'from' && fromCityId === item.id) ||
+                    (citySelectionType === 'to' && toCityId === item.id)
+                      ? styles.cityItemSelected
+                      : null
+                  ]}
                   onPress={() => handleCitySelect(item)}
                 >
                   <View style={styles.cityIconContainer}>
@@ -443,6 +526,10 @@ const HomeScreen = () => {
                       <Text style={styles.popularBadgeText}>Popular</Text>
                     </View>
                   )}
+                  {((citySelectionType === 'from' && fromCityId === item.id) ||
+                    (citySelectionType === 'to' && toCityId === item.id)) && (
+                    <Icon name="check-circle" size={24} color="#4A90E2" />
+                  )}
                 </TouchableOpacity>
               )}
               ItemSeparatorComponent={() => <View style={styles.separator} />}
@@ -450,6 +537,7 @@ const HomeScreen = () => {
                 <View style={styles.emptyContainer}>
                   <Icon name="location-off" size={48} color="#ccc" />
                   <Text style={styles.emptyText}>No cities found</Text>
+                  <Text style={styles.emptySubText}>Try searching for a different city</Text>
                 </View>
               )}
             />
@@ -529,7 +617,6 @@ const HomeScreen = () => {
               <TouchableOpacity
                 style={styles.dateButton}
                 onPress={() => {
-                  // In a real app, show date picker
                   Alert.alert('Select Date', 'Date picker coming soon');
                 }}
               >
@@ -992,6 +1079,9 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#1A237E',
   },
+  closeButton: {
+    padding: 8,
+  },
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1020,20 +1110,15 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
   },
-  sectionHeader: {
-    paddingVertical: 12,
-    backgroundColor: '#F8F9FA',
-    marginBottom: 8,
-  },
-  sectionHeaderText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#666',
-  },
   cityItem: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 16,
+    paddingHorizontal: 8,
+  },
+  cityItemSelected: {
+    backgroundColor: '#F0F7FF',
+    borderRadius: 8,
   },
   cityIconContainer: {
     width: 40,
@@ -1062,6 +1147,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
+    marginRight: 12,
   },
   popularBadgeText: {
     fontSize: 10,
@@ -1079,6 +1165,12 @@ const styles = StyleSheet.create({
   emptyText: {
     marginTop: 12,
     fontSize: 16,
+    color: '#999',
+    fontWeight: '600',
+  },
+  emptySubText: {
+    marginTop: 8,
+    fontSize: 14,
     color: '#999',
   },
 });
