@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
+// src/screens/driver/BoardingScreen.tsx - IMPROVED & FIXED VERSION
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -9,280 +10,330 @@ import {
   StatusBar,
   Alert,
   Modal,
+  TextInput,
   ActivityIndicator,
   RefreshControl,
+  FlatList,
+  Vibration,
+  Platform,
 } from 'react-native';
+import { StackNavigationProp } from '@react-navigation/stack';
 import firestore from '@react-native-firebase/firestore';
 import auth from '@react-native-firebase/auth';
+import Sound from 'react-native-sound';
+
+// Enable sound for Android
+if (Platform.OS === 'android') {
+  Sound.setCategory('Playback');
+}
+
+type BoardingScreenProps = {
+  navigation: StackNavigationProp<any>;
+  route?: any;
+};
 
 interface Passenger {
   id: string;
-  name: string;
-  seat: string;
-  fromStop: string;
-  toStop: string;
-  status: 'BOARDED' | 'PENDING' | 'MISSED';
-  ticketNumber: string;
   bookingId: string;
-  stopId?: string;
+  passengerName: string;
+  seatNumber: string;      // might be stored as string (e.g., "1", "2A")
+  ticketNumber: string;
+  status: 'PENDING' | 'BOARDED' | 'MISSED';
+  phoneNumber?: string;
+  email?: string;
+  boardedAt?: any;
 }
 
 interface TripInfo {
   id: string;
-  busNumber: string;
   routeName: string;
-  currentStop: string;
-  nextStop: string;
-  nextStopETA: string;
+  routeCode: string;
+  busNumber: string;
+  busId: string;
+  departureTime: string;
+  arrivalTime: string;
+  from: string;
+  to: string;
   totalSeats: number;
-  bookedSeats: number;
   boardedSeats: number;
+  status: 'scheduled' | 'ready_for_boarding' | 'boarding' | 'in_progress' | 'completed';
+  boardingOpen: boolean;
 }
 
-const BoardingScreen: React.FC = ({ navigation }: any) => {
+const BoardingScreen: React.FC<BoardingScreenProps> = ({ navigation, route }) => {
   const user = auth().currentUser;
+  const tripId = route?.params?.tripId;
+  const dutyDetails = route?.params?.dutyDetails;
 
-  const [tripInfo, setTripInfo] = useState<TripInfo | null>(null);
-  const [passengers, setPassengers] = useState<Passenger[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [driverUid, setDriverUid] = useState<string>('');
+  const [tripInfo, setTripInfo] = useState<TripInfo | null>(null);
+  const [passengers, setPassengers] = useState<Passenger[]>([]);
+  const [totalPassengers, setTotalPassengers] = useState(0);
+  const [boardingOpen, setBoardingOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');   // 🔥 Enhancement: search filter
 
-  const [currentStop, setCurrentStop] = useState('Stop 3: University');
-  const [nextStop, setNextStop] = useState('Stop 4: Hospital');
-  const [nextStopETA, setNextStopETA] = useState('15 min');
+  // Manual ticket entry modal
+  const [showManualEntry, setShowManualEntry] = useState(false);
+  const [ticketInput, setTicketInput] = useState('');
+  const [manualSearchLoading, setManualSearchLoading] = useState(false);
 
-  const [showScanModal, setShowScanModal] = useState(false);
-  const [showPassengerModal, setShowPassengerModal] = useState(false);
-  const [selectedPassenger, setSelectedPassenger] = useState<Passenger | null>(null);
-  const [filter, setFilter] = useState<'ALL' | 'BOARDED' | 'PENDING'>('ALL');
-  const [scanResult, setScanResult] = useState<'success' | 'error' | null>(null);
-  const [isScanning, setIsScanning] = useState(false);
+  // Sound effects
+  const [successSound, setSuccessSound] = useState<any>(null);
+  const [errorSound, setErrorSound] = useState<any>(null);
 
-  // Fetch current trip and passengers
-  useEffect(() => {
-    if (!user) return;
+  // Refs
+  const flatListRef = useRef<FlatList>(null);
+  const unsubscribeRefs = useRef<(() => void)[]>([]);
 
-    let unsubscribePassengers: () => void;
-    let unsubscribeTrip: () => void;
+  // Derived values (using numeric sorting)
+  const sortedPassengers = [...passengers].sort((a, b) => {
+    const aNum = parseInt(a.seatNumber, 10) || 0;
+    const bNum = parseInt(b.seatNumber, 10) || 0;
+    return aNum - bNum;
+  });
+  const filteredPassengers = sortedPassengers.filter(p =>
+    p.passengerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    p.ticketNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    p.seatNumber.includes(searchQuery)
+  );
 
-    const fetchData = async () => {
-      try {
-        setLoading(true);
+  const boardedCount = passengers.filter(p => p.status === 'BOARDED').length;
+  const pendingCount = passengers.filter(p => p.status === 'PENDING').length;
+  const missedCount = passengers.filter(p => p.status === 'MISSED').length;
+  const progress = totalPassengers > 0 ? (boardedCount / totalPassengers) * 100 : 0;
 
-        // First find active trip for this driver
-        const tripsSnapshot = await firestore()
-          .collection('trips')
-          .where('driverId', '==', user.uid)
-          .where('status', 'in', ['in-progress', 'ready'])
-          .limit(1)
-          .get();
+  // Find next pending passenger for highlighting and auto‑scroll
+  const nextPassenger = filteredPassengers.find(p => p.status === 'PENDING');
 
-        if (tripsSnapshot.empty) {
-          setLoading(false);
-          Alert.alert(
-            'No Active Trip',
-            'You don\'t have any active trip. Please start a duty first.',
-            [
-              {
-                text: 'Go to Dashboard',
-                onPress: () => navigation.navigate('Dashboard')
-              }
-            ]
-          );
-          return;
-        }
-
-        const tripDoc = tripsSnapshot.docs[0];
-        const tripData = tripDoc.data();
-
-        // Set trip info
-        setTripInfo({
-          id: tripDoc.id,
-          busNumber: tripData.busNumber || '',
-          routeName: tripData.routeName || '',
-          currentStop: tripData.currentStop || 'Stop 1',
-          nextStop: tripData.nextStop || 'Stop 2',
-          nextStopETA: tripData.nextStopETA || '10 min',
-          totalSeats: tripData.totalSeats || 40,
-          bookedSeats: tripData.bookedSeats || 0,
-          boardedSeats: tripData.boardedSeats || 0,
-        });
-
-        setCurrentStop(tripData.currentStop || 'Stop 3: University');
-        setNextStop(tripData.nextStop || 'Stop 4: Hospital');
-        setNextStopETA(tripData.nextStopETA || '15 min');
-
-        // Listen to bookings for this trip
-        unsubscribePassengers = firestore()
-          .collection('bookings')
-          .where('tripId', '==', tripDoc.id)
-          .onSnapshot(
-            (snapshot) => {
-              const passengersData: Passenger[] = [];
-              snapshot.forEach(doc => {
-                const data = doc.data();
-                passengersData.push({
-                  id: doc.id,
-                  name: data.passengerName || 'Unknown',
-                  seat: data.seatNumber || 'N/A',
-                  fromStop: data.fromStop || 'Stop 1',
-                  toStop: data.toStop || 'Stop 5',
-                  status: mapBoardingStatus(data.boardingStatus),
-                  ticketNumber: data.ticketNumber || `TKT-${doc.id.slice(0,8)}`,
-                  bookingId: doc.id,
-                  stopId: data.stopId,
-                });
-              });
-              setPassengers(passengersData);
-              setLoading(false);
-              setRefreshing(false);
-            },
-            (error) => {
-              console.error('Error fetching passengers:', error);
-              setLoading(false);
-              setRefreshing(false);
-            }
-          );
-
-        // Listen to trip updates
-        unsubscribeTrip = firestore()
-          .collection('trips')
-          .doc(tripDoc.id)
-          .onSnapshot(
-            (doc) => {
-              if (doc.exists) {
-                const data = doc.data();
-                setCurrentStop(data?.currentStop || 'Stop 3: University');
-                setNextStop(data?.nextStop || 'Stop 4: Hospital');
-                setNextStopETA(data?.nextStopETA || '15 min');
-              }
-            },
-            (error) => {
-              console.error('Error listening to trip:', error);
-            }
-          );
-
-      } catch (error) {
-        console.error('Error fetching trip data:', error);
-        setLoading(false);
-        setRefreshing(false);
+  // Scroll to next passenger after boarding
+  const scrollToNextPassenger = useCallback(() => {
+    if (nextPassenger && flatListRef.current) {
+      const index = filteredPassengers.findIndex(p => p.id === nextPassenger.id);
+      if (index !== -1) {
+        flatListRef.current.scrollToIndex({ index, animated: true, viewPosition: 0.5 });
       }
-    };
+    }
+  }, [filteredPassengers, nextPassenger]);
 
-    fetchData();
+  // Initialize sounds
+  useEffect(() => {
+    const success = new Sound('beep_success.mp3', Sound.MAIN_BUNDLE, (error) => {
+      if (error) console.log('Failed to load success sound', error);
+    });
+    const error = new Sound('beep_error.mp3', Sound.MAIN_BUNDLE, (error) => {
+      if (error) console.log('Failed to load error sound', error);
+    });
+    setSuccessSound(success);
+    setErrorSound(error);
 
     return () => {
-      if (unsubscribePassengers) unsubscribePassengers();
-      if (unsubscribeTrip) unsubscribeTrip();
+      success.release();
+      error.release();
     };
-  }, [user]);
+  }, []);
 
-  // Map Firebase boarding status to local status
-  const mapBoardingStatus = (firebaseStatus: string): Passenger['status'] => {
+  // Play success / error feedback
+  const playSuccessFeedback = () => {
+    Vibration.vibrate(100);
+    if (successSound) successSound.play();
+  };
+  const playErrorFeedback = () => {
+    Vibration.vibrate([0, 200, 100, 200]);
+    if (errorSound) errorSound.play();
+  };
+
+  // Get correct driver UID
+  const getDriverUid = useCallback(async (authUid: string): Promise<string> => {
+    try {
+      const driverDoc = await firestore().collection('drivers').doc(authUid).get();
+      if (driverDoc.exists) {
+        setDriverUid(authUid);
+        return authUid;
+      } else {
+        const userDoc = await firestore().collection('users').doc(authUid).get();
+        if (userDoc.exists) {
+          const userData = userDoc.data();
+          const driverQuery = await firestore()
+            .collection('drivers')
+            .where('email', '==', userData?.email)
+            .limit(1)
+            .get();
+          if (!driverQuery.empty) {
+            const driverId = driverQuery.docs[0].id;
+            setDriverUid(driverId);
+            return driverId;
+          }
+        }
+        setDriverUid(authUid);
+        return authUid;
+      }
+    } catch (error) {
+      console.error('Error getting driver UID:', error);
+      return authUid;
+    }
+  }, []);
+
+  // Fetch trip and passenger data – with proper cleanup
+  useEffect(() => {
+    if (!user || !tripId) {
+      Alert.alert('Error', 'No trip information found');
+      navigation.goBack();
+      return;
+    }
+
+    const setupListeners = async () => {
+      // 1. Get driver UID
+      const uid = await getDriverUid(user.uid);
+      // Store locally for later use (if needed)
+      const driverId = uid;
+
+      // 2. Set up real‑time listeners
+      const unsubscribeTrip = firestore()
+        .collection('trips')
+        .doc(tripId)
+        .onSnapshot(
+          (doc) => {
+            if (doc.exists) {
+              const data = doc.data();
+              const tripData: TripInfo = {
+                id: doc.id,
+                routeName: data?.routeName || 'Unknown Route',
+                routeCode: data?.routeCode || '',
+                busNumber: data?.busNumber || 'B-001',
+                busId: data?.busId || '',
+                departureTime: data?.departureTime || '--:--',
+                arrivalTime: data?.arrivalTime || '--:--',
+                from: data?.from || data?.startLocation || 'Unknown',
+                to: data?.to || data?.endLocation || 'Unknown',
+                totalSeats: data?.totalSeats || 40,
+                boardedSeats: data?.boardedSeats || 0,
+                status: mapTripStatus(data?.status),
+                boardingOpen: data?.boardingOpen || false,
+              };
+              setTripInfo(tripData);
+              setBoardingOpen(tripData.boardingOpen);
+              // ✅ Fix: NO manual boardingCount update – derived from passengers
+
+              if (tripData.status === 'in_progress') {
+                Alert.alert(
+                  'Trip Already Started',
+                  'This trip is already in progress. Redirecting to route...',
+                  [
+                    {
+                      text: 'OK',
+                      onPress: () => navigation.replace('Route', { tripId })
+                    }
+                  ]
+                );
+              }
+            } else {
+              Alert.alert('Error', 'Trip not found');
+              navigation.goBack();
+            }
+          },
+          (error) => console.error('Error fetching trip:', error)
+        );
+
+      // 3. Passengers listener – will automatically update counts
+      const unsubscribeBookings = firestore()
+        .collection('bookings')
+        .where('tripId', '==', tripId)
+        .onSnapshot(
+          (snapshot) => {
+            const passengersList: Passenger[] = [];
+            snapshot.forEach(doc => {
+              const data = doc.data();
+              passengersList.push({
+                id: doc.id,
+                bookingId: doc.id,
+                passengerName: data?.passengerName || data?.fullName || 'Unknown',
+                seatNumber: data?.seatNumber || 'N/A',
+                ticketNumber: data?.ticketNumber || data?.bookingId || doc.id.slice(0, 8),
+                status: mapBoardingStatus(data?.boardingStatus),
+                phoneNumber: data?.phoneNumber,
+                email: data?.email,
+                boardedAt: data?.boardedAt,
+              });
+            });
+            setPassengers(passengersList);
+            setTotalPassengers(passengersList.length);
+            setLoading(false);
+            setRefreshing(false);
+          },
+          (error) => {
+            console.error('Error fetching bookings:', error);
+            setLoading(false);
+            setRefreshing(false);
+          }
+        );
+
+      // Store for cleanup
+      unsubscribeRefs.current.push(unsubscribeTrip);
+      unsubscribeRefs.current.push(unsubscribeBookings);
+    };
+
+    setupListeners();
+
+    // Cleanup
+    return () => {
+      unsubscribeRefs.current.forEach(unsub => unsub());
+      unsubscribeRefs.current = [];
+    };
+  }, [user, tripId, navigation, getDriverUid]);
+
+  // Map statuses
+  const mapTripStatus = (firebaseStatus: string): TripInfo['status'] => {
     switch (firebaseStatus) {
+      case 'scheduled': return 'scheduled';
+      case 'ready_for_boarding': return 'ready_for_boarding';
+      case 'boarding': return 'boarding';
+      case 'in-progress':
+      case 'in_progress': return 'in_progress';
+      case 'completed': return 'completed';
+      default: return 'scheduled';
+    }
+  };
+
+  const mapBoardingStatus = (status: string): Passenger['status'] => {
+    switch (status) {
       case 'boarded': return 'BOARDED';
-      case 'pending': return 'PENDING';
       case 'missed': return 'MISSED';
       default: return 'PENDING';
     }
   };
 
-  // Map local status to Firebase status
-  const mapToFirebaseStatus = (localStatus: Passenger['status']): string => {
-    switch (localStatus) {
-      case 'BOARDED': return 'boarded';
-      case 'PENDING': return 'pending';
-      case 'MISSED': return 'missed';
-      default: return 'pending';
+  // Open boarding
+  const handleOpenBoarding = async () => {
+    if (!tripInfo) return;
+    if (tripInfo.status !== 'ready_for_boarding') {
+      Alert.alert('Cannot Open Boarding', `Trip is ${tripInfo.status}. It must be ready_for_boarding.`);
+      return;
     }
-  };
 
-  // Handle QR scan
-  const handleScanQR = () => {
-    setShowScanModal(true);
-    setIsScanning(true);
-    setScanResult(null);
-
-    // Simulate QR scan (in real app, this would use camera)
-    setTimeout(() => {
-      setScanResult('success');
-      setIsScanning(false);
-
-      setTimeout(() => {
-        const pendingPassengers = passengers.filter(p => p.status === 'PENDING');
-        if (pendingPassengers.length > 0) {
-          const randomIndex = Math.floor(Math.random() * pendingPassengers.length);
-          setSelectedPassenger(pendingPassengers[randomIndex]);
-          setShowScanModal(false);
-          setShowPassengerModal(true);
-          setScanResult(null);
-        } else {
-          Alert.alert('No Pending Passengers', 'All passengers have been processed.');
-          setShowScanModal(false);
-        }
-      }, 1000);
-    }, 2000);
-  };
-
-  // Handle manual boarding
-  const handleManualBoarding = () => {
     Alert.alert(
-      'Manual Boarding',
-      'Enter ticket number or select passenger:',
+      'Open Boarding',
+      'Are you sure you want to open boarding for this trip?',
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Enter Ticket Number',
-          onPress: () => {
-            Alert.prompt(
-              'Enter Ticket Number',
-              'Please enter the ticket number:',
-              [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                  text: 'Search',
-                  onPress: async (ticketNumber) => {
-                    if (!ticketNumber || !tripInfo) return;
-
-                    const booking = passengers.find(p =>
-                      p.ticketNumber.toLowerCase() === ticketNumber.toLowerCase()
-                    );
-
-                    if (booking) {
-                      setSelectedPassenger(booking);
-                      setShowPassengerModal(true);
-                    } else {
-                      Alert.alert('Not Found', 'No booking found with this ticket number.');
-                    }
-                  }
-                }
-              ]
-            );
-          }
-        },
-        {
-          text: 'Select from List',
-          onPress: () => {
-            const pendingPassengers = passengers.filter(p => p.status === 'PENDING');
-            if (pendingPassengers.length > 0) {
-              const passengerOptions = pendingPassengers.map(p => ({
-                text: `${p.name} (${p.ticketNumber})`,
-                onPress: () => {
-                  setSelectedPassenger(p);
-                  setShowPassengerModal(true);
-                }
-              }));
-
-              Alert.alert(
-                'Select Passenger',
-                'Choose a passenger to board:',
-                [
-                  ...passengerOptions,
-                  { text: 'Cancel', style: 'cancel' }
-                ]
-              );
-            } else {
-              Alert.alert('No Pending Passengers', 'All passengers have been processed.');
+          text: 'Open Boarding',
+          onPress: async () => {
+            try {
+              setSaving(true);
+              await firestore().collection('trips').doc(tripInfo.id).update({
+                status: 'boarding',
+                boardingOpen: true,
+                boardingStartedAt: firestore.FieldValue.serverTimestamp(),
+              });
+              playSuccessFeedback();
+            } catch (error) {
+              console.error('Error opening boarding:', error);
+              Alert.alert('Error', 'Failed to open boarding');
+            } finally {
+              setSaving(false);
             }
           }
         }
@@ -290,115 +341,185 @@ const BoardingScreen: React.FC = ({ navigation }: any) => {
     );
   };
 
-  // Handle confirm boarding
-  const handleConfirmBoarding = async () => {
-    if (!selectedPassenger || !tripInfo) return;
+  // Board a passenger (transaction)
+  const handleBoardPassenger = async (passenger: Passenger) => {
+    if (!tripInfo) return;
+    if (!boardingOpen) {
+      Alert.alert('Boarding Closed', 'Please open boarding first.');
+      playErrorFeedback();
+      return;
+    }
+    if (passenger.status !== 'PENDING') {
+      Alert.alert('Already Processed', `This passenger is already ${passenger.status}.`);
+      playErrorFeedback();
+      return;
+    }
+    if (saving) return;
+    setSaving(true);
 
     try {
-      // Update booking status in Firebase
-      await firestore()
-        .collection('bookings')
-        .doc(selectedPassenger.id)
-        .update({
+      await firestore().runTransaction(async (transaction) => {
+        const bookingRef = firestore().collection('bookings').doc(passenger.id);
+        const tripRef = firestore().collection('trips').doc(tripInfo.id);
+
+        const bookingDoc = await transaction.get(bookingRef);
+        if (!bookingDoc.exists) throw new Error('Booking not found');
+        const bookingData = bookingDoc.data();
+        if (bookingData?.tripId !== tripInfo.id) throw new Error('Invalid ticket for this trip');
+        if (bookingData?.boardingStatus === 'boarded') throw new Error('Already boarded');
+
+        transaction.update(bookingRef, {
           boardingStatus: 'boarded',
           boardedAt: firestore.FieldValue.serverTimestamp(),
-          boardedStop: currentStop,
+          boardedBy: driverUid || user?.uid,
         });
-
-      // Update trip boarded count
-      await firestore()
-        .collection('trips')
-        .doc(tripInfo.id)
-        .update({
+        transaction.update(tripRef, {
           boardedSeats: firestore.FieldValue.increment(1),
         });
+      });
 
-      Alert.alert(
-        'Boarding Confirmed',
-        `${selectedPassenger.name} has been boarded successfully.\nSeat: ${selectedPassenger.seat}\nTicket: ${selectedPassenger.ticketNumber}`
-      );
-
-      setShowPassengerModal(false);
-      setSelectedPassenger(null);
-
-    } catch (error) {
-      console.error('Error confirming boarding:', error);
-      Alert.alert('Error', 'Failed to confirm boarding. Please try again.');
+      playSuccessFeedback();
+      // ✅ Fix: NO manual state update – listener will sync
+      // Scroll to next passenger
+      setTimeout(() => scrollToNextPassenger(), 100);
+    } catch (error: any) {
+      console.error('Error boarding passenger:', error);
+      playErrorFeedback();
+      let errorMessage = 'Failed to board passenger';
+      if (error.message === 'Already boarded') errorMessage = 'Already boarded';
+      else if (error.message === 'Invalid ticket for this trip') errorMessage = 'Invalid ticket';
+      Alert.alert('Error', errorMessage);
+    } finally {
+      setSaving(false);
     }
   };
 
-  // Handle mark as missed
-  const handleMarkMissed = async (passengerId: string) => {
-    if (!tripInfo) return;
-
-    Alert.alert(
-      'Mark as Missed',
-      'Are you sure you want to mark this passenger as missed?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Mark as Missed',
-          onPress: async () => {
-            try {
-              await firestore()
-                .collection('bookings')
-                .doc(passengerId)
-                .update({
-                  boardingStatus: 'missed',
-                  missedAt: firestore.FieldValue.serverTimestamp(),
-                });
-
-              Alert.alert('Marked as Missed', 'Passenger has been marked as missed.');
-
-              if (selectedPassenger?.id === passengerId) {
-                setShowPassengerModal(false);
-                setSelectedPassenger(null);
-              }
-
-            } catch (error) {
-              console.error('Error marking as missed:', error);
-              Alert.alert('Error', 'Failed to update status.');
-            }
-          }
-        }
-      ]
-    );
+  // Manual ticket entry
+  const handleManualEntry = () => {
+    if (!boardingOpen) {
+      Alert.alert('Boarding Closed', 'Please open boarding first.');
+      return;
+    }
+    setShowManualEntry(true);
+    setTicketInput('');
   };
 
-  // Handle close doors
-  const handleCloseDoors = async () => {
+  const searchTicket = async () => {
+    if (!ticketInput.trim()) {
+      Alert.alert('Error', 'Please enter ticket number');
+      return;
+    }
+
+    setManualSearchLoading(true);
+    try {
+      const bookingQuery = await firestore()
+        .collection('bookings')
+        .where('tripId', '==', tripInfo?.id)
+        .where('ticketNumber', '==', ticketInput.trim())
+        .limit(1)
+        .get();
+
+      if (bookingQuery.empty) {
+        Alert.alert('Not Found', 'No booking found with this ticket number');
+        playErrorFeedback();
+        return;
+      }
+
+      const bookingDoc = bookingQuery.docs[0];
+      const passenger = passengers.find(p => p.id === bookingDoc.id);
+      if (!passenger) {
+        Alert.alert('Error', 'Passenger not found in manifest');
+        playErrorFeedback();
+        return;
+      }
+
+      setShowManualEntry(false);
+      setTicketInput('');
+      await handleBoardPassenger(passenger);
+    } catch (error) {
+      console.error('Error searching ticket:', error);
+      Alert.alert('Error', 'Failed to search ticket');
+      playErrorFeedback();
+    } finally {
+      setManualSearchLoading(false);
+    }
+  };
+
+  // Close boarding and start trip
+  const handleCloseBoarding = async () => {
     if (!tripInfo) return;
 
     Alert.alert(
-      'Close Doors',
-      'Are you sure you want to close the doors?\n\nAll pending passengers will be marked as missed.',
+      'Close Boarding',
+      `Are you sure you want to close boarding?\n\n` +
+      `✅ Boarded: ${boardedCount}\n` +
+      `⏳ Pending: ${pendingCount}\n` +
+      `❌ Missed: ${missedCount}\n\n` +
+      `Pending passengers will be marked as MISSED.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Close Doors',
+          text: 'Close Boarding',
           onPress: async () => {
+            if (saving) return;
+            setSaving(true);
             try {
-              const batch = firestore().batch();
-              const pendingBookings = passengers.filter(p => p.status === 'PENDING');
+              await firestore().runTransaction(async (transaction) => {
+                const tripRef = firestore().collection('trips').doc(tripInfo.id);
+                const driverRef = firestore().collection('drivers').doc(driverUid || user?.uid);
+                const busRef = firestore().collection('buses').doc(tripInfo.busId);
 
-              pendingBookings.forEach(booking => {
-                const bookingRef = firestore().collection('bookings').doc(booking.id);
-                batch.update(bookingRef, {
-                  boardingStatus: 'missed',
-                  missedAt: firestore.FieldValue.serverTimestamp(),
+                // Mark all pending passengers as missed
+                const pendingPassengers = passengers.filter(p => p.status === 'PENDING');
+                for (const passenger of pendingPassengers) {
+                  const bookingRef = firestore().collection('bookings').doc(passenger.id);
+                  transaction.update(bookingRef, {
+                    boardingStatus: 'missed',
+                    missedAt: firestore.FieldValue.serverTimestamp(),
+                  });
+                }
+
+                // Update trip
+                transaction.update(tripRef, {
+                  status: 'in_progress',
+                  boardingOpen: false,
+                  startedAt: firestore.FieldValue.serverTimestamp(),
+                  boardedSeats: boardedCount,
+                  pendingMarkedMissed: pendingPassengers.length,
+                });
+
+                // Update driver
+                transaction.update(driverRef, {
+                  status: 'on_trip',
+                  currentTripId: tripInfo.id,
+                  lastTripStarted: firestore.FieldValue.serverTimestamp(),
+                });
+
+                // Update bus
+                transaction.update(busRef, {
+                  status: 'active',
+                  currentTripId: tripInfo.id,
                 });
               });
 
-              await batch.commit();
+              playSuccessFeedback();
+              setBoardingOpen(false);
 
               Alert.alert(
-                'Doors Closed',
-                `${pendingBookings.length} passengers marked as missed.`
+                'Boarding Closed',
+                `Trip started successfully with ${boardedCount} passengers.`,
+                [
+                  {
+                    text: 'Go to Route',
+                    onPress: () => navigation.replace('Route', { tripId: tripInfo.id })
+                  }
+                ]
               );
-
             } catch (error) {
-              console.error('Error closing doors:', error);
-              Alert.alert('Error', 'Failed to close doors.');
+              console.error('Error closing boarding:', error);
+              Alert.alert('Error', 'Failed to close boarding');
+            } finally {
+              setSaving(false);
             }
           }
         }
@@ -406,179 +527,59 @@ const BoardingScreen: React.FC = ({ navigation }: any) => {
     );
   };
 
-  // Handle report delay
-  const handleReportDelay = async () => {
-    if (!tripInfo) return;
+  // Render passenger item
+  const renderPassenger = ({ item, index }: { item: Passenger; index: number }) => {
+    const isNext = item.id === nextPassenger?.id;
+    const getStatusColor = (status: Passenger['status']) => {
+      switch (status) {
+        case 'BOARDED': return '#4CAF50';
+        case 'MISSED': return '#F44336';
+        default: return '#FF9800';
+      }
+    };
+    const getStatusEmoji = (status: Passenger['status']) => {
+      switch (status) {
+        case 'BOARDED': return '✅';
+        case 'MISSED': return '❌';
+        default: return '⏳';
+      }
+    };
 
-    Alert.alert(
-      'Report Delay',
-      'Select delay reason:',
-      [
-        {
-          text: 'Traffic Congestion (5-10 min)',
-          onPress: async () => {
-            try {
-              await firestore().collection('delays').add({
-                tripId: tripInfo.id,
-                driverId: user?.uid,
-                reason: 'Traffic Congestion',
-                estimatedDelay: '10 min',
-                timestamp: firestore.FieldValue.serverTimestamp(),
-              });
-              Alert.alert('Delay Reported', 'Traffic delay reported to dispatch and passengers.');
-            } catch (error) {
-              Alert.alert('Error', 'Failed to report delay.');
-            }
-          }
-        },
-        {
-          text: 'Passenger Delay (2-3 min)',
-          onPress: async () => {
-            try {
-              await firestore().collection('delays').add({
-                tripId: tripInfo.id,
-                driverId: user?.uid,
-                reason: 'Passenger Delay',
-                estimatedDelay: '3 min',
-                timestamp: firestore.FieldValue.serverTimestamp(),
-              });
-              Alert.alert('Delay Reported', 'Passenger delay reported.');
-            } catch (error) {
-              Alert.alert('Error', 'Failed to report delay.');
-            }
-          }
-        },
-        {
-          text: 'Mechanical Issue',
-          onPress: async () => {
-            try {
-              await firestore().collection('delays').add({
-                tripId: tripInfo.id,
-                driverId: user?.uid,
-                reason: 'Mechanical Issue',
-                estimatedDelay: '20 min',
-                timestamp: firestore.FieldValue.serverTimestamp(),
-              });
-              Alert.alert('Delay Reported', 'Mechanical issue reported to maintenance.');
-            } catch (error) {
-              Alert.alert('Error', 'Failed to report issue.');
-            }
-          }
-        },
-        { text: 'Cancel', style: 'cancel' }
-      ]
+    return (
+      <TouchableOpacity
+        style={[
+          styles.passengerItem,
+          item.status === 'BOARDED' && styles.passengerItemBoarded,
+          item.status === 'MISSED' && styles.passengerItemMissed,
+          isNext && styles.nextPassenger, // 🔥 Highlight next passenger
+        ]}
+        onPress={() => handleBoardPassenger(item)}
+        disabled={item.status !== 'PENDING' || saving || !boardingOpen}
+      >
+        <View style={styles.passengerSeat}>
+          <Text style={styles.seatNumber}>{item.seatNumber}</Text>
+        </View>
+
+        <View style={styles.passengerInfo}>
+          <Text style={styles.passengerName}>{item.passengerName}</Text>
+          <Text style={styles.ticketNumber}>🎫 {item.ticketNumber}</Text>
+          {item.phoneNumber && <Text style={styles.phoneNumber}>📞 {item.phoneNumber}</Text>}
+        </View>
+
+        <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) + '20' }]}>
+          <Text style={[styles.statusText, { color: getStatusColor(item.status) }]}>
+            {getStatusEmoji(item.status)} {item.status}
+          </Text>
+        </View>
+      </TouchableOpacity>
     );
   };
-
-  // Handle make announcement
-  const handleAnnounce = async () => {
-    if (!tripInfo) return;
-
-    Alert.alert(
-      'Make Announcement',
-      'Select announcement type:',
-      [
-        {
-          text: 'Next Stop Announcement',
-          onPress: async () => {
-            try {
-              await firestore().collection('announcements').add({
-                tripId: tripInfo.id,
-                driverId: user?.uid,
-                type: 'next-stop',
-                message: `Next stop: ${nextStop}. ETA: ${nextStopETA}`,
-                timestamp: firestore.FieldValue.serverTimestamp(),
-              });
-              Alert.alert('Announcement Made', 'Next stop announcement broadcasted.');
-            } catch (error) {
-              Alert.alert('Error', 'Failed to make announcement.');
-            }
-          }
-        },
-        {
-          text: 'Welcome Announcement',
-          onPress: async () => {
-            try {
-              await firestore().collection('announcements').add({
-                tripId: tripInfo.id,
-                driverId: user?.uid,
-                type: 'welcome',
-                message: 'Welcome aboard! Thank you for choosing our service.',
-                timestamp: firestore.FieldValue.serverTimestamp(),
-              });
-              Alert.alert('Announcement Made', 'Welcome announcement broadcasted.');
-            } catch (error) {
-              Alert.alert('Error', 'Failed to make announcement.');
-            }
-          }
-        },
-        {
-          text: 'Safety Announcement',
-          onPress: async () => {
-            try {
-              await firestore().collection('announcements').add({
-                tripId: tripInfo.id,
-                driverId: user?.uid,
-                type: 'safety',
-                message: 'Please keep aisles clear and hold handrails while standing.',
-                timestamp: firestore.FieldValue.serverTimestamp(),
-              });
-              Alert.alert('Announcement Made', 'Safety announcement broadcasted.');
-            } catch (error) {
-              Alert.alert('Error', 'Failed to make announcement.');
-            }
-          }
-        },
-        { text: 'Cancel', style: 'cancel' }
-      ]
-    );
-  };
-
-  // Calculate counts
-  const pendingCount = passengers.filter(p => p.status === 'PENDING').length;
-  const boardedCount = passengers.filter(p => p.status === 'BOARDED').length;
-  const missedCount = passengers.filter(p => p.status === 'MISSED').length;
-  const totalPassengers = passengers.length;
-
-  // Filter passengers
-  const filteredPassengers = passengers.filter(passenger => {
-    if (filter === 'ALL') return true;
-    if (filter === 'BOARDED') return passenger.status === 'BOARDED';
-    if (filter === 'PENDING') return passenger.status === 'PENDING';
-    return true;
-  });
-
-  // Get status color
-  const getStatusColor = (status: Passenger['status']) => {
-    switch (status) {
-      case 'BOARDED': return '#4CAF50';
-      case 'PENDING': return '#FF9800';
-      case 'MISSED': return '#F44336';
-      default: return '#666666';
-    }
-  };
-
-  // Get status emoji
-  const getStatusEmoji = (status: Passenger['status']) => {
-    switch (status) {
-      case 'BOARDED': return '✅';
-      case 'PENDING': return '⏳';
-      case 'MISSED': return '❌';
-      default: return '🔘';
-    }
-  };
-
-  // Handle refresh
-  const onRefresh = useCallback(() => {
-    setRefreshing(true);
-    // Data will auto-refresh via Firebase listeners
-  }, []);
 
   if (loading) {
     return (
       <SafeAreaView style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#4A90E2" />
-        <Text style={styles.loadingText}>Loading trip data...</Text>
+        <Text style={styles.loadingText}>Loading boarding data...</Text>
       </SafeAreaView>
     );
   }
@@ -587,818 +588,237 @@ const BoardingScreen: React.FC = ({ navigation }: any) => {
     <SafeAreaView style={styles.container}>
       <StatusBar backgroundColor="#1A237E" barStyle="light-content" />
 
-      {/* Top Info Bar */}
-      <View style={styles.topBar}>
-        <View style={styles.stopInfo}>
-          <Text style={styles.currentStop}>📍 {currentStop}</Text>
-          <Text style={styles.nextStop}>Next: {nextStop} • ETA: {nextStopETA}</Text>
-          {tripInfo && (
-            <Text style={styles.busInfo}>
-              🚌 {tripInfo.busNumber} • {tripInfo.routeName}
+      {/* Header */}
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>👥 PASSENGER BOARDING</Text>
+        {tripInfo && (
+          <>
+            <Text style={styles.routeInfo}>
+              {tripInfo.routeName} • {tripInfo.busNumber}
             </Text>
-          )}
-        </View>
-        <View style={styles.passengerCount}>
-          <Text style={styles.countText}>
-            👥 {boardedCount}/{totalPassengers}
+            <Text style={styles.routeDetails}>
+              {tripInfo.from} → {tripInfo.to} • {tripInfo.departureTime}
+            </Text>
+          </>
+        )}
+      </View>
+
+      {/* Boarding Status Bar */}
+      <View style={styles.statusBar}>
+        <View style={[styles.statusIndicator, { backgroundColor: boardingOpen ? '#4CAF50' : '#FF9800' }]}>
+          <Text style={styles.statusText}>
+            {boardingOpen ? '🟢 BOARDING OPEN' : '⏸️ BOARDING CLOSED'}
           </Text>
-          <Text style={styles.countLabel}>Boarded</Text>
+        </View>
+        {!boardingOpen && tripInfo?.status === 'ready_for_boarding' && (
+          <TouchableOpacity style={styles.openBoardingButton} onPress={handleOpenBoarding} disabled={saving}>
+            <Text style={styles.openBoardingButtonText}>OPEN BOARDING</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {/* Progress Bar */}
+      <View style={styles.progressContainer}>
+        <View style={styles.progressHeader}>
+          <Text style={styles.progressTitle}>Boarding Progress</Text>
+          <Text style={styles.progressCount}>{boardedCount}/{totalPassengers} boarded</Text>
+        </View>
+        <View style={styles.progressBar}>
+          <View style={[styles.progressFill, { width: `${progress}%` }]} />
+        </View>
+        <View style={styles.statsRow}>
+          <Text style={styles.statItem}>✅ Boarded: {boardedCount}</Text>
+          <Text style={styles.statItem}>⏳ Pending: {pendingCount}</Text>
+          <Text style={styles.statItem}>❌ Missed: {missedCount}</Text>
         </View>
       </View>
 
-      <ScrollView
-        style={styles.scrollView}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
+      {/* Search Bar */}
+      <View style={styles.searchContainer}>
+        <TextInput
+          style={styles.searchInput}
+          placeholder="🔍 Search by name, ticket, or seat..."
+          placeholderTextColor="#999"
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+        />
+      </View>
+
+      {/* Action Buttons */}
+      <View style={styles.actionRow}>
+        <TouchableOpacity
+          style={[styles.actionButton, styles.manualButton]}
+          onPress={handleManualEntry}
+          disabled={!boardingOpen || saving}
+        >
+          <Text style={styles.manualButtonText}>📝 MANUAL ENTRY</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.actionButton, styles.closeButton]}
+          onPress={handleCloseBoarding}
+          disabled={saving}
+        >
+          <Text style={styles.closeButtonText}>🔒 CLOSE BOARDING</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Passenger List */}
+      <View style={styles.listContainer}>
+        <Text style={styles.listTitle}>
+          PASSENGER MANIFEST {filteredPassengers.length !== passengers.length ? `(${filteredPassengers.length} results)` : ''}
+        </Text>
+        <FlatList
+          ref={flatListRef}
+          data={filteredPassengers}
+          renderItem={renderPassenger}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => setRefreshing(false)} />}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyEmoji}>📋</Text>
+              <Text style={styles.emptyTitle}>
+                {searchQuery ? 'No matching passengers' : 'No Passengers Found'}
+              </Text>
+              <Text style={styles.emptyText}>
+                {searchQuery ? 'Try a different search term.' : 'No bookings found for this trip.'}
+              </Text>
+            </View>
+          }
+          onScrollToIndexFailed={info => {
+            // fallback if scroll fails
+            const wait = new Promise(resolve => setTimeout(resolve, 500));
+            wait.then(() => flatListRef.current?.scrollToIndex({ index: info.index, animated: true }));
+          }}
+        />
+      </View>
+
+      {/* Manual Entry Modal */}
+      <Modal
+        visible={showManualEntry}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setShowManualEntry(false)}
       >
-        {/* QR Scan Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>SCAN QR CODE</Text>
-          <TouchableOpacity style={styles.scanButton} onPress={handleScanQR}>
-            <Text style={styles.scanButtonEmoji}>📱</Text>
-            <Text style={styles.scanButtonText}>TAP TO SCAN QR CODE</Text>
-            <Text style={styles.scanButtonSubtext}>Position QR code within frame</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.manualButton} onPress={handleManualBoarding}>
-            <Text style={styles.manualButtonText}>📝 MANUAL BOARDING</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Boarding Status */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>BOARDING STATUS</Text>
-          <View style={styles.statusContainer}>
-            <View style={styles.statusItem}>
-              <Text style={styles.statusNumber}>{boardedCount}</Text>
-              <Text style={styles.statusLabel}>✅ Boarded</Text>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>📝 MANUAL TICKET ENTRY</Text>
+              <TouchableOpacity onPress={() => setShowManualEntry(false)}>
+                <Text style={styles.modalClose}>✕</Text>
+              </TouchableOpacity>
             </View>
-            <View style={styles.statusItem}>
-              <Text style={styles.statusNumber}>{pendingCount}</Text>
-              <Text style={styles.statusLabel}>⏳ Pending</Text>
-            </View>
-            <View style={styles.statusItem}>
-              <Text style={styles.statusNumber}>{missedCount}</Text>
-              <Text style={styles.statusLabel}>❌ Missed</Text>
-            </View>
-          </View>
-
-          <Text style={styles.currentStopInfo}>
-            Current Stop: {currentStop}
-          </Text>
-        </View>
-
-        {/* Passenger List */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>PASSENGER LIST</Text>
-            <Text style={styles.passengerCountText}>
-              {filteredPassengers.length} passengers
-            </Text>
-          </View>
-
-          {/* Filter Tabs */}
-          <View style={styles.filterTabs}>
-            <TouchableOpacity
-              style={[styles.filterTab, filter === 'ALL' && styles.filterTabActive]}
-              onPress={() => setFilter('ALL')}
-            >
-              <Text style={[styles.filterTabText, filter === 'ALL' && styles.filterTabTextActive]}>
-                ALL ({totalPassengers})
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.filterTab, filter === 'BOARDED' && styles.filterTabActive]}
-              onPress={() => setFilter('BOARDED')}
-            >
-              <Text style={[styles.filterTabText, filter === 'BOARDED' && styles.filterTabTextActive]}>
-                ✅ BOARDED ({boardedCount})
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.filterTab, filter === 'PENDING' && styles.filterTabActive]}
-              onPress={() => setFilter('PENDING')}
-            >
-              <Text style={[styles.filterTabText, filter === 'PENDING' && styles.filterTabTextActive]}>
-                ⏳ PENDING ({pendingCount})
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Passenger Cards */}
-          <View style={styles.passengerList}>
-            {filteredPassengers.length > 0 ? (
-              filteredPassengers.map(passenger => (
+            <View style={styles.modalBody}>
+              <Text style={styles.modalLabel}>Enter Ticket Number</Text>
+              <TextInput
+                style={styles.ticketInput}
+                value={ticketInput}
+                onChangeText={setTicketInput}
+                placeholder="e.g., TKT-001"
+                placeholderTextColor="#999"
+                autoCapitalize="characters"
+                autoFocus
+              />
+              <View style={styles.modalActions}>
                 <TouchableOpacity
-                  key={passenger.id}
-                  style={styles.passengerCard}
-                  onPress={() => {
-                    setSelectedPassenger(passenger);
-                    setShowPassengerModal(true);
-                  }}
+                  style={[styles.modalButton, styles.cancelModalButton]}
+                  onPress={() => setShowManualEntry(false)}
                 >
-                  <View style={styles.passengerHeader}>
-                    <Text style={styles.passengerName}>{passenger.name}</Text>
-                    <View style={[
-                      styles.statusBadge,
-                      { backgroundColor: getStatusColor(passenger.status) + '20' }
-                    ]}>
-                      <Text style={[styles.statusBadgeText, { color: getStatusColor(passenger.status) }]}>
-                        {getStatusEmoji(passenger.status)} {passenger.status}
-                      </Text>
-                    </View>
-                  </View>
-
-                  <View style={styles.passengerDetails}>
-                    <Text style={styles.passengerSeat}>Seat: {passenger.seat}</Text>
-                    <Text style={styles.passengerRoute}>
-                      To: {passenger.toStop}
-                    </Text>
-                  </View>
-
-                  <Text style={styles.passengerTicket}>
-                    Ticket: {passenger.ticketNumber}
-                  </Text>
-
-                  {passenger.status === 'PENDING' && (
-                    <View style={styles.passengerActions}>
-                      <TouchableOpacity
-                        style={styles.actionButton}
-                        onPress={() => {
-                          setSelectedPassenger(passenger);
-                          setShowPassengerModal(true);
-                        }}
-                      >
-                        <Text style={styles.actionButtonText}>BOARD</Text>
-                      </TouchableOpacity>
-
-                      <TouchableOpacity
-                        style={[styles.actionButton, styles.missedButton]}
-                        onPress={() => handleMarkMissed(passenger.id)}
-                      >
-                        <Text style={styles.missedButtonText}>MISSED</Text>
-                      </TouchableOpacity>
-                    </View>
+                  <Text style={styles.cancelModalButtonText}>CANCEL</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.searchModalButton]}
+                  onPress={searchTicket}
+                  disabled={manualSearchLoading}
+                >
+                  {manualSearchLoading ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.searchModalButtonText}>SEARCH</Text>
                   )}
                 </TouchableOpacity>
-              ))
-            ) : (
-              <View style={styles.emptyContainer}>
-                <Text style={styles.emptyEmoji}>👥</Text>
-                <Text style={styles.emptyTitle}>No Passengers Found</Text>
-                <Text style={styles.emptyText}>
-                  {filter === 'ALL'
-                    ? 'No passengers on this trip'
-                    : `No ${filter.toLowerCase()} passengers`}
-                </Text>
               </View>
-            )}
-          </View>
-        </View>
-
-        {/* Quick Actions */}
-        <View style={styles.quickActions}>
-          <TouchableOpacity style={styles.quickAction} onPress={handleAnnounce}>
-            <Text style={styles.quickActionEmoji}>📢</Text>
-            <Text style={styles.quickActionText}>Announce</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.quickAction} onPress={handleCloseDoors}>
-            <Text style={styles.quickActionEmoji}>🚪</Text>
-            <Text style={styles.quickActionText}>Close Doors</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.quickAction} onPress={handleReportDelay}>
-            <Text style={styles.quickActionEmoji}>⏰</Text>
-            <Text style={styles.quickActionText}>Delay</Text>
-          </TouchableOpacity>
-        </View>
-      </ScrollView>
-
-      {/* QR Scan Modal */}
-      <Modal
-        visible={showScanModal}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => {
-          setIsScanning(false);
-          setShowScanModal(false);
-          setScanResult(null);
-        }}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.scanModalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>📱 SCAN QR CODE</Text>
-              <TouchableOpacity onPress={() => {
-                setIsScanning(false);
-                setShowScanModal(false);
-                setScanResult(null);
-              }}>
-                <Text style={styles.modalClose}>✕</Text>
-              </TouchableOpacity>
             </View>
-
-            <View style={styles.scanFrame}>
-              {scanResult === 'success' ? (
-                <View style={styles.scanSuccess}>
-                  <Text style={styles.scanSuccessEmoji}>✅</Text>
-                  <Text style={styles.scanSuccessText}>QR Code Scanned Successfully!</Text>
-                  <Text style={styles.scanSuccessSubtext}>Processing passenger details...</Text>
-                </View>
-              ) : (
-                <>
-                  <View style={styles.qrFrame} />
-                  <Text style={styles.scanInstruction}>
-                    Position QR code within frame
-                  </Text>
-                  {isScanning && (
-                    <View style={styles.scanningContainer}>
-                      <ActivityIndicator size="large" color="#4A90E2" />
-                      <Text style={styles.scanningText}>
-                        Scanning...
-                      </Text>
-                    </View>
-                  )}
-                </>
-              )}
-            </View>
-
-            <TouchableOpacity
-              style={styles.cancelButton}
-              onPress={() => {
-                setIsScanning(false);
-                setShowScanModal(false);
-                setScanResult(null);
-              }}
-            >
-              <Text style={styles.cancelButtonText}>CANCEL SCAN</Text>
-            </TouchableOpacity>
           </View>
         </View>
       </Modal>
 
-      {/* Passenger Details Modal */}
-      <Modal
-        visible={showPassengerModal && selectedPassenger !== null}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => {
-          setShowPassengerModal(false);
-          setSelectedPassenger(null);
-        }}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.passengerModalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>👤 PASSENGER DETAILS</Text>
-              <TouchableOpacity onPress={() => {
-                setShowPassengerModal(false);
-                setSelectedPassenger(null);
-              }}>
-                <Text style={styles.modalClose}>✕</Text>
-              </TouchableOpacity>
-            </View>
-
-            {selectedPassenger && (
-              <>
-                <View style={styles.passengerInfo}>
-                  <Text style={styles.passengerNameLarge}>{selectedPassenger.name}</Text>
-                  <Text style={styles.passengerTicketLarge}>
-                    Ticket: {selectedPassenger.ticketNumber}
-                  </Text>
-
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Seat Number:</Text>
-                    <Text style={styles.detailValue}>{selectedPassenger.seat}</Text>
-                  </View>
-
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>From Stop:</Text>
-                    <Text style={styles.detailValue}>{selectedPassenger.fromStop}</Text>
-                  </View>
-
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>To Stop:</Text>
-                    <Text style={styles.detailValue}>{selectedPassenger.toStop}</Text>
-                  </View>
-
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Status:</Text>
-                    <Text style={[styles.detailValue, { color: getStatusColor(selectedPassenger.status) }]}>
-                      {getStatusEmoji(selectedPassenger.status)} {selectedPassenger.status}
-                    </Text>
-                  </View>
-                </View>
-
-                <View style={styles.modalActions}>
-                  {selectedPassenger.status === 'PENDING' && (
-                    <>
-                      <TouchableOpacity
-                        style={styles.confirmButton}
-                        onPress={handleConfirmBoarding}
-                      >
-                        <Text style={styles.confirmButtonText}>✅ CONFIRM BOARDING</Text>
-                      </TouchableOpacity>
-
-                      <TouchableOpacity
-                        style={styles.missedModalButton}
-                        onPress={() => handleMarkMissed(selectedPassenger.id)}
-                      >
-                        <Text style={styles.missedModalButtonText}>❌ MARK AS MISSED</Text>
-                      </TouchableOpacity>
-                    </>
-                  )}
-
-                  {(selectedPassenger.status === 'BOARDED' || selectedPassenger.status === 'MISSED') && (
-                    <TouchableOpacity
-                      style={[styles.confirmButton, {
-                        backgroundColor: selectedPassenger.status === 'BOARDED' ? '#4CAF50' : '#F44336'
-                      }]}
-                      onPress={() => {
-                        setShowPassengerModal(false);
-                        setSelectedPassenger(null);
-                      }}
-                    >
-                      <Text style={styles.confirmButtonText}>
-                        {selectedPassenger.status === 'BOARDED' ? '✅ ALREADY BOARDED' : '❌ MISSED'}
-                      </Text>
-                    </TouchableOpacity>
-                  )}
-
-                  <TouchableOpacity
-                    style={styles.closeButton}
-                    onPress={() => {
-                      setShowPassengerModal(false);
-                      setSelectedPassenger(null);
-                    }}
-                  >
-                    <Text style={styles.closeButtonText}>CLOSE</Text>
-                  </TouchableOpacity>
-                </View>
-              </>
-            )}
-          </View>
+      {/* Loading Overlay */}
+      {saving && (
+        <View style={styles.loadingOverlay}>
+          <ActivityIndicator size="large" color="#FFFFFF" />
+          <Text style={styles.loadingOverlayText}>Processing...</Text>
         </View>
-      </Modal>
+      )}
     </SafeAreaView>
   );
 };
 
+// Styles (unchanged, but add new ones for search and next passenger)
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F8F9FA',
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#F8F9FA',
-  },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 16,
-    color: '#4A90E2',
-  },
-  topBar: {
-    backgroundColor: '#1A237E',
-    paddingHorizontal: 20,
-    paddingVertical: 15,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  stopInfo: {
-    flex: 1,
-  },
-  currentStop: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginBottom: 4,
-  },
-  nextStop: {
-    fontSize: 14,
-    color: '#E3F2FD',
-  },
-  busInfo: {
-    fontSize: 12,
-    color: '#E3F2FD',
-    marginTop: 4,
-  },
-  passengerCount: {
-    alignItems: 'center',
-  },
-  countText: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-  },
-  countLabel: {
-    fontSize: 12,
-    color: '#E3F2FD',
-    marginTop: 2,
-  },
-  scrollView: {
-    flex: 1,
-    paddingHorizontal: 16,
-  },
-  section: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 16,
-    marginTop: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#1A237E',
-    marginBottom: 12,
-  },
-  scanButton: {
-    backgroundColor: '#4A90E2',
-    borderRadius: 12,
-    padding: 24,
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  scanButtonEmoji: {
-    fontSize: 48,
-    marginBottom: 12,
-  },
-  scanButtonText: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginBottom: 4,
-  },
-  scanButtonSubtext: {
-    fontSize: 14,
-    color: '#E3F2FD',
-  },
-  manualButton: {
-    backgroundColor: '#FF9800',
-    paddingVertical: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  manualButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  statusContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-  },
-  statusItem: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: 12,
-    backgroundColor: '#F8F9FA',
-    borderRadius: 8,
-    marginHorizontal: 4,
-  },
-  statusNumber: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#1A237E',
-    marginBottom: 4,
-  },
-  statusLabel: {
-    fontSize: 12,
-    color: '#666666',
-  },
-  currentStopInfo: {
-    fontSize: 14,
-    color: '#666666',
-    textAlign: 'center',
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#E0E0E0',
-  },
-  passengerCountText: {
-    fontSize: 14,
-    color: '#666666',
-  },
-  filterTabs: {
-    flexDirection: 'row',
-    backgroundColor: '#F8F9FA',
-    borderRadius: 8,
-    padding: 4,
-    marginBottom: 16,
-  },
-  filterTab: {
-    flex: 1,
-    paddingVertical: 8,
-    borderRadius: 6,
-    alignItems: 'center',
-  },
-  filterTabActive: {
-    backgroundColor: '#4A90E2',
-  },
-  filterTabText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#666666',
-  },
-  filterTabTextActive: {
-    color: '#FFFFFF',
-  },
-  passengerList: {
-    gap: 12,
-  },
-  passengerCard: {
-    backgroundColor: '#F8F9FA',
-    borderRadius: 12,
-    padding: 16,
-    borderLeftWidth: 4,
-    borderLeftColor: '#4A90E2',
-    marginBottom: 8,
-  },
-  passengerHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  passengerName: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#1A237E',
-  },
-  statusBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  statusBadgeText: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  passengerDetails: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  passengerSeat: {
-    fontSize: 14,
-    color: '#666666',
-  },
-  passengerRoute: {
-    fontSize: 14,
-    color: '#666666',
-  },
-  passengerTicket: {
-    fontSize: 12,
-    color: '#999',
-    marginBottom: 12,
-  },
-  passengerActions: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  actionButton: {
-    flex: 1,
-    backgroundColor: '#4A90E2',
-    paddingVertical: 8,
-    borderRadius: 6,
-    alignItems: 'center',
-  },
-  actionButtonText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  missedButton: {
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: '#F44336',
-  },
-  missedButtonText: {
-    color: '#F44336',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  quickActions: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginTop: 20,
-    marginBottom: 32,
-  },
-  quickAction: {
-    alignItems: 'center',
-    padding: 16,
-  },
-  quickActionEmoji: {
-    fontSize: 24,
-    marginBottom: 8,
-  },
-  quickActionText: {
-    fontSize: 12,
-    color: '#1A237E',
-    fontWeight: '500',
-  },
-  emptyContainer: {
-    padding: 40,
-    alignItems: 'center',
-  },
-  emptyEmoji: {
-    fontSize: 48,
-    marginBottom: 16,
-  },
-  emptyTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#1A237E',
-    marginBottom: 8,
-  },
-  emptyText: {
-    fontSize: 14,
-    color: '#666666',
-    textAlign: 'center',
-  },
-  // Modal Styles
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'flex-end',
-  },
-  scanModalContent: {
-    backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingBottom: 20,
-  },
-  passengerModalContent: {
-    backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    maxHeight: '80%',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E0E0E0',
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#1A237E',
-  },
-  modalClose: {
-    fontSize: 24,
-    color: '#666666',
-    padding: 4,
-  },
-  scanFrame: {
-    alignItems: 'center',
-    padding: 40,
-  },
-  qrFrame: {
-    width: 200,
-    height: 200,
-    borderWidth: 2,
-    borderColor: '#4A90E2',
-    borderStyle: 'dashed',
-    borderRadius: 8,
-    marginBottom: 20,
-  },
-  scanInstruction: {
-    fontSize: 16,
-    color: '#666666',
-    marginBottom: 8,
-  },
-  scanningContainer: {
-    alignItems: 'center',
-    marginTop: 20,
-  },
-  scanningText: {
-    fontSize: 14,
-    color: '#4CAF50',
-    fontWeight: '500',
-    marginTop: 8,
-  },
-  scanSuccess: {
-    alignItems: 'center',
-  },
-  scanSuccessEmoji: {
-    fontSize: 48,
-    marginBottom: 16,
-  },
-  scanSuccessText: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#4CAF50',
-  },
-  scanSuccessSubtext: {
-    fontSize: 14,
-    color: '#666666',
-    marginTop: 8,
-  },
-  cancelButton: {
-    backgroundColor: '#F8F9FA',
-    marginHorizontal: 20,
-    paddingVertical: 14,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  cancelButtonText: {
-    color: '#666666',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  passengerInfo: {
-    padding: 20,
-  },
-  passengerNameLarge: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#1A237E',
-    marginBottom: 8,
-  },
-  passengerTicketLarge: {
-    fontSize: 16,
-    color: '#666666',
-    marginBottom: 20,
-  },
-  detailRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
-  },
-  detailLabel: {
-    fontSize: 16,
-    color: '#666666',
-  },
-  detailValue: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1A237E',
-  },
-  modalActions: {
-    padding: 20,
-    gap: 12,
-  },
-  confirmButton: {
-    backgroundColor: '#4CAF50',
-    paddingVertical: 16,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  confirmButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  missedModalButton: {
-    backgroundColor: 'transparent',
-    paddingVertical: 16,
-    borderRadius: 8,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#F44336',
-  },
-  missedModalButtonText: {
-    color: '#F44336',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  closeButton: {
-    backgroundColor: '#F8F9FA',
-    paddingVertical: 16,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  closeButtonText: {
-    color: '#666666',
-    fontSize: 16,
-    fontWeight: '600',
-  },
+  container: { flex: 1, backgroundColor: '#F8F9FA' },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F8F9FA' },
+  loadingText: { marginTop: 12, fontSize: 16, color: '#4A90E2' },
+  header: { backgroundColor: '#1A237E', paddingHorizontal: 20, paddingVertical: 20, alignItems: 'center' },
+  headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#FFFFFF', marginBottom: 4 },
+  routeInfo: { fontSize: 16, color: '#E3F2FD', marginBottom: 2 },
+  routeDetails: { fontSize: 14, color: '#E3F2FD' },
+  statusBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#E0E0E0' },
+  statusIndicator: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20 },
+  statusText: { fontSize: 14, fontWeight: '600', color: '#FFFFFF' },
+  openBoardingButton: { backgroundColor: '#4A90E2', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8 },
+  openBoardingButtonText: { fontSize: 14, fontWeight: '600', color: '#FFFFFF' },
+  progressContainer: { backgroundColor: '#FFFFFF', paddingHorizontal: 16, paddingVertical: 12, marginBottom: 8 },
+  progressHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  progressTitle: { fontSize: 14, fontWeight: '600', color: '#1A237E' },
+  progressCount: { fontSize: 14, color: '#4A90E2', fontWeight: '600' },
+  progressBar: { height: 8, backgroundColor: '#E0E0E0', borderRadius: 4, overflow: 'hidden', marginBottom: 8 },
+  progressFill: { height: '100%', backgroundColor: '#4CAF50', borderRadius: 4 },
+  statsRow: { flexDirection: 'row', justifyContent: 'space-between' },
+  statItem: { fontSize: 12, color: '#666666' },
+  searchContainer: { paddingHorizontal: 16, paddingVertical: 8, backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#E0E0E0' },
+  searchInput: { backgroundColor: '#F8F9FA', borderRadius: 8, padding: 12, fontSize: 14, color: '#1A237E', borderWidth: 1, borderColor: '#E0E0E0' },
+  actionRow: { flexDirection: 'row', gap: 12, paddingHorizontal: 16, paddingVertical: 12 },
+  actionButton: { flex: 1, paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
+  manualButton: { backgroundColor: '#FF9800' },
+  closeButton: { backgroundColor: '#4A90E2' },
+  manualButtonText: { fontSize: 14, fontWeight: '600', color: '#FFFFFF' },
+  closeButtonText: { fontSize: 14, fontWeight: '600', color: '#FFFFFF' },
+  listContainer: { flex: 1, paddingHorizontal: 16 },
+  listTitle: { fontSize: 16, fontWeight: 'bold', color: '#1A237E', marginBottom: 12 },
+  listContent: { paddingBottom: 20 },
+  passengerItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 12, padding: 12, marginBottom: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 2, elevation: 1 },
+  passengerItemBoarded: { backgroundColor: '#E8F5E9', opacity: 0.8 },
+  passengerItemMissed: { backgroundColor: '#FFEBEE', opacity: 0.8 },
+  nextPassenger: { borderWidth: 2, borderColor: '#FF9800', backgroundColor: '#FFF3E0' }, // 🔥 Highlight next
+  passengerSeat: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#F0F0F0', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  seatNumber: { fontSize: 18, fontWeight: 'bold', color: '#1A237E' },
+  passengerInfo: { flex: 1 },
+  passengerName: { fontSize: 16, fontWeight: '600', color: '#1A237E', marginBottom: 4 },
+  ticketNumber: { fontSize: 14, color: '#666666', marginBottom: 2 },
+  phoneNumber: { fontSize: 12, color: '#999999' },
+  statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, marginLeft: 8 },
+  emptyContainer: { padding: 40, alignItems: 'center' },
+  emptyEmoji: { fontSize: 48, marginBottom: 16 },
+  emptyTitle: { fontSize: 18, fontWeight: 'bold', color: '#1A237E', marginBottom: 8 },
+  emptyText: { fontSize: 14, color: '#666666', textAlign: 'center' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
+  modalContent: { backgroundColor: '#FFFFFF', borderRadius: 20, width: '90%', maxWidth: 400 },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: '#E0E0E0' },
+  modalTitle: { fontSize: 18, fontWeight: 'bold', color: '#1A237E' },
+  modalClose: { fontSize: 24, color: '#666666', padding: 4 },
+  modalBody: { padding: 20 },
+  modalLabel: { fontSize: 14, fontWeight: '600', color: '#1A237E', marginBottom: 8 },
+  ticketInput: { backgroundColor: '#F8F9FA', borderRadius: 8, padding: 16, fontSize: 16, color: '#1A237E', borderWidth: 1, borderColor: '#E0E0E0', marginBottom: 20 },
+  modalActions: { flexDirection: 'row', gap: 12 },
+  modalButton: { flex: 1, paddingVertical: 14, borderRadius: 8, alignItems: 'center' },
+  cancelModalButton: { backgroundColor: '#F8F9FA', borderWidth: 1, borderColor: '#E0E0E0' },
+  searchModalButton: { backgroundColor: '#FF9800' },
+  cancelModalButtonText: { fontSize: 14, fontWeight: '600', color: '#666666' },
+  searchModalButtonText: { fontSize: 14, fontWeight: '600', color: '#FFFFFF' },
+  loadingOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center', zIndex: 2000 },
+  loadingOverlayText: { marginTop: 12, fontSize: 16, color: '#FFFFFF', fontWeight: '600' },
 });
 
 export default BoardingScreen;

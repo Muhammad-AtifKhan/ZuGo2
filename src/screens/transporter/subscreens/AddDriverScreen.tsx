@@ -1,5 +1,5 @@
-// src/screens/transporter/subscreens/AddDriverScreen.tsx
-import React, { useState, useEffect } from 'react';
+// src/screens/transporter/subscreens/AddDriverScreen.tsx - COMPLETE FIXED VERSION
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -17,8 +17,9 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
+import Clipboard from '@react-native-clipboard/clipboard'; // ✅ FIX: Updated clipboard import
 
-// 🔥 UPDATED SERVICE IMPORT
+// Import driver auth service
 import { createDriverWithSecondaryApp } from '../../../services/driverAuthService';
 
 // Types
@@ -30,9 +31,10 @@ import { COLORS, SIZES, SHADOWS } from '../../../constants/theme';
 const AddDriverScreen = () => {
   const navigation = useNavigation();
   const route = useRoute();
-  const { mode, driver } = route.params as {
+  const { mode, driver, transporterId: routeTransporterId } = route.params as {
     mode: 'add' | 'edit';
     driver?: Driver;
+    transporterId?: string;
   };
 
   // Date picker states
@@ -44,25 +46,41 @@ const AddDriverScreen = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [transporterName, setTransporterName] = useState('');
+  const [passwordStrength, setPasswordStrength] = useState<'weak' | 'medium' | 'strong' | ''>('');
 
+  // Available buses for assignment
+  const [availableBuses, setAvailableBuses] = useState<Array<{id: string, busNumber: string}>>([]);
+  const [showBusPicker, setShowBusPicker] = useState(false);
+
+  // ✅ FIX: Single source of truth - removed vehicleAssigned field
   const [formData, setFormData] = useState({
     fullName: '',
     contactNumber: '',
     email: '',
     cnic: '',
     licenseNumber: '',
-    licenseType: 'heavy',
+    licenseType: 'heavy' as 'light' | 'heavy' | 'both',
     licenseExpiry: '',
     address: '',
     emergencyContact: '',
     joiningDate: '',
     salary: '',
-    employmentType: 'fulltime',
-    vehicleAssigned: '',
-    status: 'active',
+    employmentType: 'fulltime' as 'fulltime' | 'parttime' | 'contract',
+    vehicleAssignedBusId: '',
+    status: 'active' as 'active' | 'on_duty' | 'inactive' | 'on_leave' | 'suspended',
+    experienceYears: '',
     password: '',
     confirmPassword: '',
   });
+
+  // ✅ FIX: Update field helper to avoid inline setState
+  const updateField = useCallback((key: string, value: any) => {
+    setFormData(prev => ({ ...prev, [key]: value }));
+  }, []);
+
+  // ✅ FIX: Debounced email duplicate check
+  const emailCheckTimeout = useRef<NodeJS.Timeout>();
+  const [emailError, setEmailError] = useState('');
 
   // Load existing driver data if in edit mode
   useEffect(() => {
@@ -80,13 +98,17 @@ const AddDriverScreen = () => {
         joiningDate: driver.joiningDate || '',
         salary: driver.salary?.toString() || '',
         employmentType: driver.employmentType || 'fulltime',
-        vehicleAssigned: driver.vehicleAssigned || '',
+        vehicleAssignedBusId: driver.vehicleAssignedBusId || '',
         status: driver.status || 'active',
+        experienceYears: driver.experienceYears?.toString() || '',
         password: '',
         confirmPassword: '',
       });
     }
   }, [mode, driver]);
+
+  // ✅ FIX: REMOVED auto status override - let user manually set status
+  // Users can now manually control driver status
 
   // Fetch transporter name
   useEffect(() => {
@@ -108,6 +130,80 @@ const AddDriverScreen = () => {
     return () => unsubscribe();
   }, []);
 
+  // Fetch available buses for assignment
+  useEffect(() => {
+    const user = auth().currentUser;
+    if (!user) return;
+
+    const unsubscribe = firestore()
+      .collection('buses')
+      .where('transporterId', '==', user.uid)
+      .where('status', '==', 'active')
+      .where('isDeleted', '==', false)
+      .onSnapshot((snapshot) => {
+        const buses = snapshot.docs.map(doc => ({
+          id: doc.id,
+          busNumber: doc.data().busNumber,
+        }));
+        setAvailableBuses(buses);
+      });
+
+    return () => unsubscribe();
+  }, []);
+
+  // ✅ FIX: Email duplicate check function
+  const checkEmailDuplicate = useCallback(async (email: string): Promise<boolean> => {
+    if (!email || mode === 'edit') return true;
+
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail) return true;
+
+    try {
+      const user = auth().currentUser;
+      const transporterId = routeTransporterId || user?.uid;
+
+      if (!transporterId) return true;
+
+      const existingDriver = await firestore()
+        .collection('drivers')
+        .where('email', '==', normalizedEmail)
+        .where('transporterId', '==', transporterId)
+        .where('isDeleted', '==', false)
+        .limit(1)
+        .get();
+
+      if (!existingDriver.empty) {
+        setEmailError('This email is already registered with another driver');
+        return false;
+      }
+
+      setEmailError('');
+      return true;
+    } catch (error) {
+      console.error('Error checking email duplicate:', error);
+      return true;
+    }
+  }, [mode, routeTransporterId]);
+
+  // ✅ FIX: Debounced email validation
+  useEffect(() => {
+    if (emailCheckTimeout.current) {
+      clearTimeout(emailCheckTimeout.current);
+    }
+
+    if (formData.email && mode === 'add') {
+      emailCheckTimeout.current = setTimeout(() => {
+        checkEmailDuplicate(formData.email);
+      }, 500);
+    }
+
+    return () => {
+      if (emailCheckTimeout.current) {
+        clearTimeout(emailCheckTimeout.current);
+      }
+    };
+  }, [formData.email, checkEmailDuplicate, mode]);
+
   const licenseTypes = [
     { id: 'light', label: 'Light Vehicle', icon: '🚗' },
     { id: 'heavy', label: 'Heavy Vehicle', icon: '🚌' },
@@ -121,11 +217,54 @@ const AddDriverScreen = () => {
   ];
 
   const statusTypes = [
-    { id: 'active', label: 'Active', color: '#34C759' },
-    { id: 'inactive', label: 'Inactive', color: '#FF3B30' },
-    { id: 'on_leave', label: 'On Leave', color: '#FF9500' },
-    { id: 'suspended', label: 'Suspended', color: '#8E8E93' },
+    { id: 'active', label: 'Active', color: '#34C759', icon: '🟢' },
+    { id: 'on_duty', label: 'On Duty', color: '#007AFF', icon: '🔵' },
+    { id: 'inactive', label: 'Inactive', color: '#FF3B30', icon: '🔴' },
+    { id: 'on_leave', label: 'On Leave', color: '#FF9500', icon: '🟠' },
+    { id: 'suspended', label: 'Suspended', color: '#8E8E93', icon: '⚪' },
   ];
+
+  // Format CNIC (35202-1234567-1)
+  const formatCNIC = (text: string) => {
+    let cleaned = text.replace(/\D/g, '');
+    if (cleaned.length > 5) {
+      if (cleaned.length > 12) {
+        cleaned = cleaned.substring(0, 13);
+        return `${cleaned.substring(0, 5)}-${cleaned.substring(5, 12)}-${cleaned.substring(12, 13)}`;
+      }
+      return `${cleaned.substring(0, 5)}-${cleaned.substring(5)}`;
+    }
+    return cleaned;
+  };
+
+  // Format phone (0300-1234567)
+  const formatPhone = (text: string) => {
+    let cleaned = text.replace(/\D/g, '');
+    if (cleaned.length > 4) {
+      return `${cleaned.substring(0, 4)}-${cleaned.substring(4, 11)}`;
+    }
+    return cleaned;
+  };
+
+  // Calculate password strength
+  const calculatePasswordStrength = (password: string) => {
+    if (!password) {
+      setPasswordStrength('');
+      return;
+    }
+
+    let score = 0;
+    if (password.length >= 8) score += 1;
+    if (password.length >= 12) score += 1;
+    if (/[a-z]/.test(password)) score += 1;
+    if (/[A-Z]/.test(password)) score += 1;
+    if (/[0-9]/.test(password)) score += 1;
+    if (/[^a-zA-Z0-9]/.test(password)) score += 1;
+
+    if (score >= 6) setPasswordStrength('strong');
+    else if (score >= 4) setPasswordStrength('medium');
+    else setPasswordStrength('weak');
+  };
 
   // DATE PICKER FUNCTIONS
   const handleDatePress = (field: string) => {
@@ -144,20 +283,65 @@ const AddDriverScreen = () => {
     if (date) {
       setSelectedDate(date);
       const formattedDate = date.toISOString().split('T')[0];
-      setFormData({
-        ...formData,
-        [currentDateField]: formattedDate,
-      });
+      updateField(currentDateField, formattedDate);
     }
   };
 
   const handleAndroidDateConfirm = () => {
     const formattedDate = selectedDate.toISOString().split('T')[0];
-    setFormData({
-      ...formData,
-      [currentDateField]: formattedDate,
-    });
+    updateField(currentDateField, formattedDate);
     setShowDatePicker(false);
+  };
+
+  // ✅ FIX: Check for duplicate driver with both CNIC and email
+  const checkDuplicateDriver = async (transporterId: string): Promise<boolean> => {
+    try {
+      const cleanedCNIC = formData.cnic.replace(/\D/g, '');
+      const normalizedEmail = formData.email.trim().toLowerCase();
+
+      // Check CNIC duplicate
+      const existingByCNIC = await firestore()
+        .collection('drivers')
+        .where('cnic', '==', cleanedCNIC)
+        .where('transporterId', '==', transporterId)
+        .where('isDeleted', '==', false)
+        .limit(1)
+        .get();
+
+      if (!existingByCNIC.empty) {
+        if (mode === 'edit' && driver?.id) {
+          const isSameDriver = existingByCNIC.docs.some(doc => doc.id === driver.id);
+          if (!isSameDriver) {
+            Alert.alert('Error', 'A driver with this CNIC already exists');
+            return false;
+          }
+        } else if (mode === 'add') {
+          Alert.alert('Error', 'A driver with this CNIC already exists');
+          return false;
+        }
+      }
+
+      // ✅ FIX: Check email duplicate (only for add mode)
+      if (mode === 'add' && normalizedEmail) {
+        const existingByEmail = await firestore()
+          .collection('drivers')
+          .where('email', '==', normalizedEmail)
+          .where('transporterId', '==', transporterId)
+          .where('isDeleted', '==', false)
+          .limit(1)
+          .get();
+
+        if (!existingByEmail.empty) {
+          Alert.alert('Error', 'A driver with this email already exists');
+          return false;
+        }
+      }
+
+      return true;
+    } catch (error) {
+      console.error('Error checking duplicate:', error);
+      return true;
+    }
   };
 
   // VALIDATION
@@ -167,7 +351,6 @@ const AddDriverScreen = () => {
       return false;
     }
 
-    // Phone validation
     const phoneRegex = /^[0-9]{10,15}$/;
     const cleanedPhone = formData.contactNumber.replace(/\D/g, '');
     if (!formData.contactNumber.trim()) {
@@ -179,7 +362,6 @@ const AddDriverScreen = () => {
       return false;
     }
 
-    // Email validation
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!formData.email.trim()) {
       Alert.alert('Error', 'Please enter driver email address');
@@ -190,7 +372,12 @@ const AddDriverScreen = () => {
       return false;
     }
 
-    // CNIC validation
+    // ✅ FIX: Email duplicate validation
+    if (emailError) {
+      Alert.alert('Error', emailError);
+      return false;
+    }
+
     const cnicRegex = /^[0-9]{5}-[0-9]{7}-[0-9]{1}$/;
     if (!formData.cnic.trim()) {
       Alert.alert('Error', 'Please enter CNIC number');
@@ -206,9 +393,33 @@ const AddDriverScreen = () => {
       return false;
     }
 
+    if (formData.licenseExpiry) {
+      const expiryDate = new Date(formData.licenseExpiry);
+      if (expiryDate < new Date()) {
+        Alert.alert('Error', 'License has already expired. Please enter a valid future date.');
+        return false;
+      }
+    }
+
     if (!formData.address.trim()) {
       Alert.alert('Error', 'Please enter address');
       return false;
+    }
+
+    if (formData.salary) {
+      const salaryNum = parseInt(formData.salary);
+      if (isNaN(salaryNum) || salaryNum < 0 || salaryNum > 500000) {
+        Alert.alert('Error', 'Please enter a valid salary (0 - 500,000 PKR)');
+        return false;
+      }
+    }
+
+    if (formData.experienceYears) {
+      const expNum = parseInt(formData.experienceYears);
+      if (isNaN(expNum) || expNum < 0 || expNum > 50) {
+        Alert.alert('Error', 'Please enter valid experience (0-50 years)');
+        return false;
+      }
     }
 
     if (mode === 'add') {
@@ -224,12 +435,28 @@ const AddDriverScreen = () => {
         Alert.alert('Error', 'Passwords do not match');
         return false;
       }
+      if (passwordStrength === 'weak') {
+        Alert.alert('Weak Password', 'Please use a stronger password with mix of letters, numbers and symbols');
+        return false;
+      }
     }
     return true;
   };
 
-  // 🔥 SUBMIT HANDLER
+  // ✅ FIX: Check if license is expired
+  const isLicenseExpired = () => {
+    if (!formData.licenseExpiry) return false;
+    const expiryDate = new Date(formData.licenseExpiry);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return expiryDate < today;
+  };
+
+  // SUBMIT HANDLER with batch writes
   const handleSubmit = async () => {
+    // ✅ FIX: Loading lock to prevent multiple submissions
+    if (loading) return;
+
     if (!validateForm()) return;
     setLoading(true);
 
@@ -237,85 +464,125 @@ const AddDriverScreen = () => {
       const currentUser = auth().currentUser;
       if (!currentUser) {
         Alert.alert('Error', 'You must be logged in to add drivers');
-        navigation.navigate('Login');
+        await auth().signOut();
         setLoading(false);
         return;
       }
-      const transporterId = currentUser.uid;
+
+      // ✅ FIX: Use provided transporterId or current user's uid
+      const transporterId = routeTransporterId || currentUser.uid;
+      if (!transporterId) {
+        Alert.alert('Error', 'Transporter ID is required');
+        setLoading(false);
+        return;
+      }
+
+      // Check for duplicate driver (both CNIC and email)
+      const isUnique = await checkDuplicateDriver(transporterId);
+      if (!isUnique) {
+        setLoading(false);
+        return;
+      }
+
+      // Clean and normalize data
+      const cleanedPhone = formData.contactNumber.replace(/\D/g, '');
+      const cleanedCNIC = formData.cnic.replace(/\D/g, '');
+      const normalizedEmail = formData.email.trim().toLowerCase();
+      const normalizedFullName = formData.fullName.trim();
+
+      // Add search keywords
+      const searchKeywords = [
+        normalizedFullName.toLowerCase(),
+        cleanedPhone,
+        cleanedCNIC,
+        normalizedEmail,
+      ];
+
+      const licenseExpired = isLicenseExpired();
 
       if (mode === 'add') {
-        // 🔥 Secondary Firebase auth
+        // Secondary Firebase auth
         const driverUID = await createDriverWithSecondaryApp(
-          formData.email,
+          normalizedEmail,
           formData.password,
-          formData.fullName
+          normalizedFullName
         );
 
-        // Firestore writes
-        await firestore().collection('drivers').doc(driverUID).set({
-          fullName: formData.fullName,
-          contactNumber: formData.contactNumber,
-          email: formData.email.trim().toLowerCase(),
-          cnic: formData.cnic,
+        // Use batch write for atomic transaction
+        const batch = firestore().batch();
+
+        // Drivers collection
+        const driverRef = firestore().collection('drivers').doc(driverUID);
+        batch.set(driverRef, {
+          fullName: normalizedFullName,
+          contactNumber: cleanedPhone,
+          email: normalizedEmail,
+          cnic: cleanedCNIC,
+          cnicFormatted: formData.cnic,
           licenseNumber: formData.licenseNumber,
           licenseType: formData.licenseType,
-          licenseExpiry: formData.licenseExpiry,
+          licenseExpiry: formData.licenseExpiry || null,
+          isLicenseExpired: licenseExpired,
           address: formData.address,
-          emergencyContact: formData.emergencyContact,
+          emergencyContact: formData.emergencyContact ? formData.emergencyContact.replace(/\D/g, '') : '',
           joiningDate: formData.joiningDate || new Date().toISOString().split('T')[0],
           salary: parseInt(formData.salary) || 0,
           employmentType: formData.employmentType,
-          vehicleAssigned: formData.vehicleAssigned || '',
+          vehicleAssignedBusId: formData.vehicleAssignedBusId || null,
+          experienceYears: parseInt(formData.experienceYears) || 0,
           status: formData.status,
+          isAvailable: formData.status === 'active' || formData.status === 'on_duty',
           uid: driverUID,
           transporterId: transporterId,
           role: 'driver',
+          isDeleted: false,
+          searchKeywords: searchKeywords,
           createdAt: firestore.FieldValue.serverTimestamp(),
           updatedAt: firestore.FieldValue.serverTimestamp(),
         });
 
-        await firestore().collection('users').doc(driverUID).set({
+        // Users collection
+        const userRef = firestore().collection('users').doc(driverUID);
+        batch.set(userRef, {
           uid: driverUID,
-          fullName: formData.fullName,
-          email: formData.email.trim().toLowerCase(),
-          phone: formData.contactNumber,
+          fullName: normalizedFullName,
+          email: normalizedEmail,
+          phone: cleanedPhone,
           userType: 'driver',
           transporterId: transporterId,
           status: formData.status || 'active',
+          isDeleted: false,
           createdAt: firestore.FieldValue.serverTimestamp(),
           updatedAt: firestore.FieldValue.serverTimestamp(),
         });
 
-        // Save credentials reference
-        await firestore().collection('driver_credentials').doc(driverUID).set({
+        // Driver credentials reference
+        const credRef = firestore().collection('driver_credentials').doc(driverUID);
+        batch.set(credRef, {
           driverId: driverUID,
           transporterId,
-          email: formData.email.trim().toLowerCase(),
-          driverName: formData.fullName,
-          phone: formData.contactNumber,
+          email: normalizedEmail,
+          driverName: normalizedFullName,
+          phone: cleanedPhone,
           createdAt: firestore.FieldValue.serverTimestamp(),
         });
 
         // Increment transporter driver count
         const transporterRef = firestore().collection('transporters').doc(transporterId);
-        const transporterDoc = await transporterRef.get();
-        if (transporterDoc.exists) {
-          await transporterRef.update({
-            driversCount: firestore.FieldValue.increment(1),
-            updatedAt: firestore.FieldValue.serverTimestamp(),
-          });
-        } else {
-          await transporterRef.set({
-            transporterId,
-            driversCount: 1,
-            createdAt: firestore.FieldValue.serverTimestamp(),
-            updatedAt: firestore.FieldValue.serverTimestamp(),
-          });
-        }
+        batch.set(transporterRef, {
+          driversCount: firestore.FieldValue.increment(1),
+          updatedAt: firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+
+        // Commit batch
+        await batch.commit();
+
+        // ✅ FIX: Copy password to clipboard using updated library
+        Clipboard.setString(formData.password);
 
         Alert.alert(
           'Success',
-          `Driver Added Successfully!\n\n📧 Email: ${formData.email}\n🔑 Password: ${formData.password}`,
+          `Driver added successfully!\n\n📧 Email: ${normalizedEmail}\n\n🔑 Password has been copied to clipboard. Share it securely with the driver.`,
           [
             {
               text: 'OK',
@@ -327,31 +594,43 @@ const AddDriverScreen = () => {
         // Update existing driver
         if (!driver?.id) throw new Error('Driver ID not found');
 
-        await firestore().collection('drivers').doc(driver.id).update({
-          fullName: formData.fullName,
-          contactNumber: formData.contactNumber,
-          email: formData.email.trim().toLowerCase(),
-          cnic: formData.cnic,
+        // Use batch write for update
+        const batch = firestore().batch();
+
+        const driverRef = firestore().collection('drivers').doc(driver.id);
+        batch.update(driverRef, {
+          fullName: normalizedFullName,
+          contactNumber: cleanedPhone,
+          email: normalizedEmail,
+          cnic: cleanedCNIC,
+          cnicFormatted: formData.cnic,
           licenseNumber: formData.licenseNumber,
           licenseType: formData.licenseType,
-          licenseExpiry: formData.licenseExpiry,
+          licenseExpiry: formData.licenseExpiry || null,
+          isLicenseExpired: licenseExpired,
           address: formData.address,
-          emergencyContact: formData.emergencyContact,
+          emergencyContact: formData.emergencyContact ? formData.emergencyContact.replace(/\D/g, '') : '',
           joiningDate: formData.joiningDate,
           salary: parseInt(formData.salary) || 0,
           employmentType: formData.employmentType,
-          vehicleAssigned: formData.vehicleAssigned || '',
+          vehicleAssignedBusId: formData.vehicleAssignedBusId || null,
+          experienceYears: parseInt(formData.experienceYears) || 0,
           status: formData.status,
+          isAvailable: formData.status === 'active' || formData.status === 'on_duty',
+          searchKeywords: searchKeywords,
           updatedAt: firestore.FieldValue.serverTimestamp(),
         });
 
-        await firestore().collection('users').doc(driver.id).update({
-          fullName: formData.fullName,
-          email: formData.email.trim().toLowerCase(),
-          phone: formData.contactNumber,
+        const userRef = firestore().collection('users').doc(driver.id);
+        batch.update(userRef, {
+          fullName: normalizedFullName,
+          email: normalizedEmail,
+          phone: cleanedPhone,
           status: formData.status || 'active',
           updatedAt: firestore.FieldValue.serverTimestamp(),
         });
+
+        await batch.commit();
 
         Alert.alert('Success', 'Driver updated successfully!', [
           { text: 'OK', onPress: () => navigation.goBack() },
@@ -381,11 +660,90 @@ const AddDriverScreen = () => {
   const generateRandomPassword = () => {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%';
     let password = '';
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 12; i++) {
       password += chars.charAt(Math.floor(Math.random() * chars.length));
     }
-    setFormData({ ...formData, password, confirmPassword: password });
-    Alert.alert('Password Generated', `Generated: ${password}`);
+    updateField('password', password);
+    updateField('confirmPassword', password);
+    calculatePasswordStrength(password);
+    // ✅ FIX: Copy to clipboard using updated library
+    Clipboard.setString(password);
+    Alert.alert('Password Generated', 'Password has been copied to clipboard.');
+  };
+
+  // ✅ FIX: Render bus assignment with dropdown picker
+  const renderBusAssignment = () => {
+    const selectedBus = availableBuses.find(b => b.id === formData.vehicleAssignedBusId);
+
+    return (
+      <View>
+        <TouchableOpacity
+          style={styles.busSelector}
+          onPress={() => setShowBusPicker(true)}
+          disabled={loading}
+        >
+          <Text style={styles.busSelectorIcon}>🚌</Text>
+          <Text style={selectedBus ? styles.busSelectorText : styles.busSelectorPlaceholder}>
+            {selectedBus ? selectedBus.busNumber : 'Select a bus (optional)'}
+          </Text>
+          <Text style={styles.busSelectorArrow}>▼</Text>
+        </TouchableOpacity>
+
+        {showBusPicker && (
+          <Modal
+            transparent={true}
+            animationType="slide"
+            visible={showBusPicker}
+            onRequestClose={() => setShowBusPicker(false)}
+          >
+            <View style={styles.busPickerOverlay}>
+              <View style={styles.busPickerContainer}>
+                <View style={styles.busPickerHeader}>
+                  <Text style={styles.busPickerTitle}>Select Bus</Text>
+                  <TouchableOpacity onPress={() => setShowBusPicker(false)}>
+                    <Text style={styles.busPickerClose}>Close</Text>
+                  </TouchableOpacity>
+                </View>
+                <ScrollView>
+                  <TouchableOpacity
+                    style={styles.busPickerOption}
+                    onPress={() => {
+                      updateField('vehicleAssignedBusId', '');
+                      setShowBusPicker(false);
+                    }}
+                  >
+                    <Text style={styles.busPickerOptionText}>None (Unassigned)</Text>
+                  </TouchableOpacity>
+                  {availableBuses.map((bus) => (
+                    <TouchableOpacity
+                      key={bus.id}
+                      style={[
+                        styles.busPickerOption,
+                        formData.vehicleAssignedBusId === bus.id && styles.busPickerOptionSelected
+                      ]}
+                      onPress={() => {
+                        updateField('vehicleAssignedBusId', bus.id);
+                        setShowBusPicker(false);
+                      }}
+                    >
+                      <Text style={[
+                        styles.busPickerOptionText,
+                        formData.vehicleAssignedBusId === bus.id && styles.busPickerOptionTextSelected
+                      ]}>
+                        {bus.busNumber}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                  {availableBuses.length === 0 && (
+                    <Text style={styles.busPickerEmpty}>No active buses available</Text>
+                  )}
+                </ScrollView>
+              </View>
+            </View>
+          </Modal>
+        )}
+      </View>
+    );
   };
 
   // ========== RENDER FUNCTIONS ==========
@@ -402,15 +760,44 @@ const AddDriverScreen = () => {
             ]}
             onPress={() => {
               if (!loading) {
-                setFormData({...formData, status: status.id});
+                updateField('status', status.id);
               }
             }}
             disabled={loading}
           >
+            <Text style={styles.statusIcon}>{status.icon}</Text>
             <View style={[styles.statusDot, { backgroundColor: status.color }]} />
             <Text style={styles.statusLabel}>{status.label}</Text>
           </TouchableOpacity>
         ))}
+      </View>
+    );
+  };
+
+  // Password strength indicator
+  const renderPasswordStrength = () => {
+    if (!passwordStrength) return null;
+
+    const colors = {
+      weak: '#FF3B30',
+      medium: '#FF9500',
+      strong: '#34C759',
+    };
+
+    return (
+      <View style={styles.strengthContainer}>
+        <View style={styles.strengthBarContainer}>
+          <View style={[
+            styles.strengthBar,
+            {
+              width: passwordStrength === 'weak' ? '33%' : passwordStrength === 'medium' ? '66%' : '100%',
+              backgroundColor: colors[passwordStrength]
+            }
+          ]} />
+        </View>
+        <Text style={[styles.strengthText, { color: colors[passwordStrength] }]}>
+          {passwordStrength.toUpperCase()} Password
+        </Text>
       </View>
     );
   };
@@ -420,7 +807,9 @@ const AddDriverScreen = () => {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color={COLORS.primary} />
-        <Text style={styles.loadingText}>Creating driver account...</Text>
+        <Text style={styles.loadingText}>
+          {mode === 'add' ? 'Creating driver account...' : 'Updating driver...'}
+        </Text>
         <Text style={styles.loadingSubText}>Using secure secondary Firebase instance</Text>
       </View>
     );
@@ -465,7 +854,7 @@ const AddDriverScreen = () => {
               style={styles.input}
               placeholder="Enter driver's full name"
               value={formData.fullName}
-              onChangeText={(text) => setFormData({...formData, fullName: text})}
+              onChangeText={(text) => updateField('fullName', text)}
               editable={!loading}
             />
           </View>
@@ -475,28 +864,33 @@ const AddDriverScreen = () => {
               <Text style={styles.label}>Contact Number *</Text>
               <TextInput
                 style={styles.input}
-                placeholder="03001234567"
+                placeholder="0300-1234567"
                 value={formData.contactNumber}
-                onChangeText={(text) => setFormData({...formData, contactNumber: text})}
+                onChangeText={(text) => updateField('contactNumber', formatPhone(text))}
                 keyboardType="phone-pad"
+                maxLength={12}
                 editable={!loading}
               />
             </View>
             <View style={[styles.inputGroup, { flex: 1, marginLeft: 8 }]}>
               <Text style={styles.label}>Email Address *</Text>
               <TextInput
-                style={styles.input}
+                style={[styles.input, emailError ? styles.inputError : null]}
                 placeholder="driver@email.com"
                 value={formData.email}
-                onChangeText={(text) => setFormData({...formData, email: text})}
+                onChangeText={(text) => updateField('email', text)}
                 keyboardType="email-address"
                 autoCapitalize="none"
                 autoCorrect={false}
                 editable={!loading}
               />
-              <Text style={styles.inputNote}>
-                Driver will use this email to login
-              </Text>
+              {emailError ? (
+                <Text style={styles.errorText}>{emailError}</Text>
+              ) : (
+                <Text style={styles.inputNote}>
+                  Driver will use this email to login
+                </Text>
+              )}
             </View>
           </View>
 
@@ -504,9 +898,11 @@ const AddDriverScreen = () => {
             <Text style={styles.label}>CNIC Number *</Text>
             <TextInput
               style={styles.input}
-              placeholder="42301-1234567-8"
+              placeholder="35202-1234567-1"
               value={formData.cnic}
-              onChangeText={(text) => setFormData({...formData, cnic: text})}
+              onChangeText={(text) => updateField('cnic', formatCNIC(text))}
+              maxLength={15}
+              keyboardType="numeric"
               editable={!loading}
             />
             <Text style={styles.inputNote}>Format: 12345-1234567-1</Text>
@@ -518,7 +914,7 @@ const AddDriverScreen = () => {
               style={[styles.input, styles.textArea]}
               placeholder="House #, Street, City"
               value={formData.address}
-              onChangeText={(text) => setFormData({...formData, address: text})}
+              onChangeText={(text) => updateField('address', text)}
               multiline
               numberOfLines={3}
               editable={!loading}
@@ -529,10 +925,11 @@ const AddDriverScreen = () => {
             <Text style={styles.label}>Emergency Contact (Optional)</Text>
             <TextInput
               style={styles.input}
-              placeholder="03009876543"
+              placeholder="0300-9876543"
               value={formData.emergencyContact}
-              onChangeText={(text) => setFormData({...formData, emergencyContact: text})}
+              onChangeText={(text) => updateField('emergencyContact', formatPhone(text))}
               keyboardType="phone-pad"
+              maxLength={12}
               editable={!loading}
             />
           </View>
@@ -555,7 +952,10 @@ const AddDriverScreen = () => {
                     style={[styles.input, styles.passwordInput]}
                     placeholder="Enter password (min 6 chars)"
                     value={formData.password}
-                    onChangeText={(text) => setFormData({...formData, password: text})}
+                    onChangeText={(text) => {
+                      updateField('password', text);
+                      calculatePasswordStrength(text);
+                    }}
                     secureTextEntry={!showPassword}
                     editable={!loading}
                   />
@@ -567,6 +967,7 @@ const AddDriverScreen = () => {
                     <Text style={styles.eyeIcon}>{showPassword ? '👁️' : '👁️‍🗨️'}</Text>
                   </TouchableOpacity>
                 </View>
+                {renderPasswordStrength()}
                 <Text style={styles.passwordHint}>
                   Use strong password with letters, numbers, and symbols
                 </Text>
@@ -579,7 +980,7 @@ const AddDriverScreen = () => {
                     style={[styles.input, styles.passwordInput]}
                     placeholder="Confirm password"
                     value={formData.confirmPassword}
-                    onChangeText={(text) => setFormData({...formData, confirmPassword: text})}
+                    onChangeText={(text) => updateField('confirmPassword', text)}
                     secureTextEntry={!showConfirmPassword}
                     editable={!loading}
                   />
@@ -597,6 +998,7 @@ const AddDriverScreen = () => {
                 <Text style={styles.passwordInfoTitle}>📝 Important:</Text>
                 <Text style={styles.passwordInfoText}>
                   • Driver will use email & password to login{'\n'}
+                  • Password has been copied to clipboard{'\n'}
                   • Share credentials securely with driver{'\n'}
                   • Driver can change password later after login
                 </Text>
@@ -613,7 +1015,8 @@ const AddDriverScreen = () => {
               style={styles.input}
               placeholder="LHR-123456"
               value={formData.licenseNumber}
-              onChangeText={(text) => setFormData({...formData, licenseNumber: text})}
+              onChangeText={(text) => updateField('licenseNumber', text.toUpperCase())}
+              autoCapitalize="characters"
               editable={!loading}
             />
           </View>
@@ -628,7 +1031,7 @@ const AddDriverScreen = () => {
                     styles.optionButton,
                     formData.licenseType === type.id && styles.optionButtonSelected
                   ]}
-                  onPress={() => setFormData({...formData, licenseType: type.id})}
+                  onPress={() => updateField('licenseType', type.id)}
                   disabled={loading}
                 >
                   <Text style={styles.optionIcon}>{type.icon}</Text>
@@ -654,6 +1057,9 @@ const AddDriverScreen = () => {
               </Text>
               <Text style={styles.calendarIcon}>📅</Text>
             </TouchableOpacity>
+            {isLicenseExpired() && formData.licenseExpiry && (
+              <Text style={styles.warningText}>⚠️ License has expired!</Text>
+            )}
           </View>
 
           {/* ===== EMPLOYMENT INFORMATION ===== */}
@@ -679,33 +1085,46 @@ const AddDriverScreen = () => {
                 style={styles.input}
                 placeholder="45000"
                 value={formData.salary}
-                onChangeText={(text) => setFormData({...formData, salary: text})}
+                onChangeText={(text) => updateField('salary', text)}
+                keyboardType="numeric"
+                editable={!loading}
+              />
+              <Text style={styles.inputNote}>0 - 500,000 PKR</Text>
+            </View>
+            <View style={[styles.inputGroup, { flex: 1, marginLeft: 8 }]}>
+              <Text style={styles.label}>Experience (Years)</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="5"
+                value={formData.experienceYears}
+                onChangeText={(text) => updateField('experienceYears', text)}
                 keyboardType="numeric"
                 editable={!loading}
               />
             </View>
-            <View style={[styles.inputGroup, { flex: 1, marginLeft: 8 }]}>
-              <Text style={styles.label}>Employment Type</Text>
-              <View style={styles.employmentOptions}>
-                {employmentTypes.map((type) => (
-                  <TouchableOpacity
-                    key={type.id}
-                    style={[
-                      styles.employmentButton,
-                      formData.employmentType === type.id && styles.employmentButtonSelected
-                    ]}
-                    onPress={() => setFormData({...formData, employmentType: type.id})}
-                    disabled={loading}
-                  >
-                    <Text style={[
-                      styles.employmentLabel,
-                      formData.employmentType === type.id && styles.employmentLabelSelected
-                    ]}>
-                      {type.label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
+          </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Employment Type</Text>
+            <View style={styles.employmentOptions}>
+              {employmentTypes.map((type) => (
+                <TouchableOpacity
+                  key={type.id}
+                  style={[
+                    styles.employmentButton,
+                    formData.employmentType === type.id && styles.employmentButtonSelected
+                  ]}
+                  onPress={() => updateField('employmentType', type.id)}
+                  disabled={loading}
+                >
+                  <Text style={[
+                    styles.employmentLabel,
+                    formData.employmentType === type.id && styles.employmentLabelSelected
+                  ]}>
+                    {type.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
             </View>
           </View>
 
@@ -716,13 +1135,10 @@ const AddDriverScreen = () => {
 
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Assigned Vehicle (Optional)</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Bus-01 or Registration Number"
-              value={formData.vehicleAssigned}
-              onChangeText={(text) => setFormData({...formData, vehicleAssigned: text})}
-              editable={!loading}
-            />
+            {renderBusAssignment()}
+            <Text style={styles.inputNote}>
+              Select a bus from available active buses
+            </Text>
           </View>
 
           {/* ===== ACTION BUTTONS ===== */}
@@ -750,7 +1166,7 @@ const AddDriverScreen = () => {
             </TouchableOpacity>
           </View>
 
-          {/* ===== SERVICE NOTE (only for add mode) ===== */}
+          {/* ===== SERVICE NOTE ===== */}
           {mode === 'add' && (
             <View style={styles.serviceNote}>
               <Text style={styles.serviceNoteTitle}>🔧 Using DriverAuthService</Text>
@@ -758,7 +1174,7 @@ const AddDriverScreen = () => {
                 • Secondary Firebase app instance{'\n'}
                 • Transporter session preserved{'\n'}
                 • Secure account creation{'\n'}
-                • Automatic cleanup after creation
+                • Password copied to clipboard for security
               </Text>
             </View>
           )}
@@ -786,6 +1202,7 @@ const AddDriverScreen = () => {
                 mode="date"
                 display={Platform.OS === 'ios' ? 'spinner' : 'default'}
                 onChange={handleDateChange}
+                minimumDate={currentDateField === 'licenseExpiry' ? new Date() : undefined}
               />
               {Platform.OS === 'android' && (
                 <View style={styles.androidButtons}>
@@ -915,6 +1332,15 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.white,
     color: COLORS.text,
   },
+  inputError: {
+    borderColor: '#FF3B30',
+    borderWidth: 2,
+  },
+  errorText: {
+    fontSize: 12,
+    color: '#FF3B30',
+    marginTop: 4,
+  },
   disabledInput: {
     backgroundColor: COLORS.greyLight,
     opacity: 0.7,
@@ -1027,6 +1453,10 @@ const styles = StyleSheet.create({
     margin: 4,
     backgroundColor: COLORS.white,
   },
+  statusIcon: {
+    fontSize: 12,
+    marginRight: 4,
+  },
   statusDot: {
     width: 8,
     height: 8,
@@ -1071,6 +1501,25 @@ const styles = StyleSheet.create({
     marginTop: 4,
     fontStyle: 'italic',
   },
+  strengthContainer: {
+    marginTop: 4,
+  },
+  strengthBarContainer: {
+    height: 4,
+    backgroundColor: COLORS.border,
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  strengthBar: {
+    height: '100%',
+    borderRadius: 2,
+  },
+  strengthText: {
+    fontSize: 11,
+    fontWeight: '600',
+    marginTop: 2,
+    textAlign: 'right',
+  },
   passwordInfo: {
     backgroundColor: '#FFF3E0',
     padding: SIZES.md,
@@ -1089,6 +1538,91 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#5D4037',
     lineHeight: 18,
+  },
+  // Bus selector styles
+  busSelector: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: SIZES.xs,
+    padding: SIZES.sm,
+    backgroundColor: COLORS.white,
+  },
+  busSelectorIcon: {
+    fontSize: 20,
+    marginRight: SIZES.sm,
+  },
+  busSelectorText: {
+    flex: 1,
+    fontSize: 16,
+    color: COLORS.text,
+  },
+  busSelectorPlaceholder: {
+    flex: 1,
+    fontSize: 16,
+    color: COLORS.textLighter,
+  },
+  busSelectorArrow: {
+    fontSize: 16,
+    color: COLORS.textLight,
+  },
+  busPickerOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  busPickerContainer: {
+    backgroundColor: COLORS.white,
+    borderTopLeftRadius: SIZES.lg,
+    borderTopRightRadius: SIZES.lg,
+    maxHeight: '80%',
+  },
+  busPickerHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: SIZES.md,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  busPickerTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: COLORS.text,
+  },
+  busPickerClose: {
+    fontSize: 16,
+    color: COLORS.secondary,
+    fontWeight: '600',
+  },
+  busPickerOption: {
+    padding: SIZES.md,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  busPickerOptionSelected: {
+    backgroundColor: COLORS.infoLight,
+  },
+  busPickerOptionText: {
+    fontSize: 16,
+    color: COLORS.text,
+  },
+  busPickerOptionTextSelected: {
+    color: COLORS.primary,
+    fontWeight: '600',
+  },
+  busPickerEmpty: {
+    padding: SIZES.lg,
+    textAlign: 'center',
+    color: COLORS.textLight,
+    fontSize: 14,
+  },
+  warningText: {
+    fontSize: 12,
+    color: '#FF3B30',
+    marginTop: 4,
+    fontWeight: '500',
   },
   actionButtons: {
     flexDirection: 'row',

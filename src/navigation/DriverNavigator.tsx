@@ -123,8 +123,8 @@ const CustomDrawerContent = (props: any) => {
           if (userDoc.exists) {
             setDriverName(userDoc.data()?.fullName || 'Driver');
           }
-        } catch (error) {
-          console.error('Error fetching driver name:', error);
+        } catch {
+          // Ignore
         }
       }
       setLoading(false);
@@ -146,8 +146,7 @@ const CustomDrawerContent = (props: any) => {
   const handleLogout = async () => {
     try {
       await auth().signOut();  // ✅ Direct Firebase logout
-    } catch (error) {
-      console.error('Logout error:', error);
+    } catch {
     }
   };
 

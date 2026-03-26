@@ -2,6 +2,7 @@ import 'react-native-gesture-handler';
 import React, { useEffect, useState, useContext } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 import { AuthContext } from '../context/AuthContext';
 
@@ -40,16 +41,25 @@ export default function RootNavigator() {
   useEffect(() => {
     const fetchUserRole = async () => {
       if (user) {
-        const doc = await firestore()
-          .collection('users')
-          .doc(user.uid)
-          .get();
+        try {
+          const doc = await firestore()
+            .collection('users')
+            .doc(user.uid)
+            .get();
 
-        setUserRole(doc.data()?.userType?.toLowerCase() ?? null);
+          const userType = doc.data()?.userType?.toLowerCase?.() ?? null;
+          if (!userType || !['passenger', 'driver', 'transporter'].includes(userType)) {
+            await auth().signOut();
+            setUserRole(null);
+          } else {
+            setUserRole(userType);
+          }
+        } catch {
+          setUserRole(null);
+        }
       } else {
         setUserRole(null);
       }
-
       setCheckingRole(false);
     };
 

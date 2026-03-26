@@ -174,7 +174,7 @@ const EarningsScreen: React.FC<EarningsScreenProps> = ({ navigation }) => {
                 distance: totalDistanceKm,
               });
             },
-            (error) => console.error('Error fetching today earnings:', error)
+            () => {}
           );
 
         // Listen to weekly earnings
@@ -236,7 +236,7 @@ const EarningsScreen: React.FC<EarningsScreenProps> = ({ navigation }) => {
                 distance: totalDistance,
               });
             },
-            (error) => console.error('Error fetching weekly earnings:', error)
+            () => {}
           );
 
         // Listen to monthly earnings
@@ -298,7 +298,7 @@ const EarningsScreen: React.FC<EarningsScreenProps> = ({ navigation }) => {
                 distance: totalDistance,
               });
             },
-            (error) => console.error('Error fetching monthly earnings:', error)
+            () => {}
           );
 
         // Listen to recent trips
@@ -333,15 +333,13 @@ const EarningsScreen: React.FC<EarningsScreenProps> = ({ navigation }) => {
               setLoading(false);
               setRefreshing(false);
             },
-            (error) => {
-              console.error('Error fetching recent trips:', error);
+            () => {
               setLoading(false);
               setRefreshing(false);
             }
           );
 
-      } catch (error) {
-        console.error('Error in fetchEarnings:', error);
+      } catch {
         setLoading(false);
         setRefreshing(false);
       }
@@ -363,9 +361,9 @@ const EarningsScreen: React.FC<EarningsScreenProps> = ({ navigation }) => {
     // Data will auto-refresh via Firebase listeners
   }, []);
 
-  // Format currency
+  // Format currency (PKR)
   const formatCurrency = (amount: number) => {
-    return `$${amount.toFixed(2)}`;
+    return `PKR ${amount.toLocaleString()}`;
   };
 
   // Handle trip press

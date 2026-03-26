@@ -4,9 +4,15 @@ D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/CMakeFiles/rebuild_ca
 D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/rnasyncstorage_autolinked_build/CMakeFiles/react_codegen_rnasyncstorage.dir
 D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/rnasyncstorage_autolinked_build/CMakeFiles/edit_cache.dir
 D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/rnasyncstorage_autolinked_build/CMakeFiles/rebuild_cache.dir
+D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/rnclipboard_autolinked_build/CMakeFiles/react_codegen_rnclipboard.dir
+D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/rnclipboard_autolinked_build/CMakeFiles/edit_cache.dir
+D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/rnclipboard_autolinked_build/CMakeFiles/rebuild_cache.dir
 D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNDateTimePickerCGen_autolinked_build/CMakeFiles/react_codegen_RNDateTimePickerCGen.dir
 D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNDateTimePickerCGen_autolinked_build/CMakeFiles/edit_cache.dir
 D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNDateTimePickerCGen_autolinked_build/CMakeFiles/rebuild_cache.dir
+D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNCGeolocationSpec_autolinked_build/CMakeFiles/react_codegen_RNCGeolocationSpec.dir
+D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNCGeolocationSpec_autolinked_build/CMakeFiles/edit_cache.dir
+D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNCGeolocationSpec_autolinked_build/CMakeFiles/rebuild_cache.dir
 D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/rngesturehandler_codegen_autolinked_build/CMakeFiles/react_codegen_rngesturehandler_codegen.dir
 D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/rngesturehandler_codegen_autolinked_build/CMakeFiles/edit_cache.dir
 D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/rngesturehandler_codegen_autolinked_build/CMakeFiles/rebuild_cache.dir
@@ -22,6 +28,9 @@ D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/safeareacontext_autol
 D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/rnscreens_autolinked_build/CMakeFiles/react_codegen_rnscreens.dir
 D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/rnscreens_autolinked_build/CMakeFiles/edit_cache.dir
 D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/rnscreens_autolinked_build/CMakeFiles/rebuild_cache.dir
+D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNSoundSpec_autolinked_build/CMakeFiles/react_codegen_RNSoundSpec.dir
+D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNSoundSpec_autolinked_build/CMakeFiles/edit_cache.dir
+D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNSoundSpec_autolinked_build/CMakeFiles/rebuild_cache.dir
 D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNVectorIconsSpec_autolinked_build/CMakeFiles/react_codegen_RNVectorIconsSpec.dir
 D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNVectorIconsSpec_autolinked_build/CMakeFiles/edit_cache.dir
 D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNVectorIconsSpec_autolinked_build/CMakeFiles/rebuild_cache.dir

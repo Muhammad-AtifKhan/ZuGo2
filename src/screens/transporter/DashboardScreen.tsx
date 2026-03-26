@@ -335,6 +335,7 @@ const DashboardScreen = () => {
     return firestore()
       .collection('notifications')
       .where('transporterId', '==', transporterId)
+      .where('target', '==', 'transporter')
       .orderBy('createdAt', 'desc')
       .limit(20)
       .onSnapshot(
@@ -365,9 +366,11 @@ const DashboardScreen = () => {
   // Helper functions
   const mapTripStatus = (status: string): Trip['status'] => {
     switch (status) {
+      case 'active':
       case 'in-progress': return 'on-time';
       case 'delayed': return 'delayed';
-      case 'scheduled': return 'upcoming';
+      case 'scheduled':
+      case 'upcoming': return 'upcoming';
       case 'completed': return 'completed';
       default: return 'upcoming';
     }
@@ -554,8 +557,10 @@ const DashboardScreen = () => {
                   title: 'Announcement',
                   message: announcementText,
                   createdAt: firestore.FieldValue.serverTimestamp(),
+                  timestamp: firestore.FieldValue.serverTimestamp(),
                   read: false,
                   actionable: false,
+                  target: 'driver',
                 });
               });
 

@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+// src/screens/passenger/HomeScreen.tsx - WITH USEFOCUSEFFECT IMPLEMENTED
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -11,13 +12,17 @@ import {
   Modal,
   FlatList,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { PassengerStackParamList } from '../../navigation/PassengerNavigator';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import firestore from '@react-native-firebase/firestore';
 import auth from '@react-native-firebase/auth';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import DateTimePicker from '@react-native-community/datetimepicker';
+import { cleanupExpiredBookings } from '../../utils/bookingCleanup';
 
 type HomeScreenNavigationProp = StackNavigationProp<PassengerStackParamList, 'Home'>;
 
@@ -34,92 +39,117 @@ interface City {
 interface Route {
   id: string;
   name: string;
-  from: string;
-  to: string;
+  fromCityId: string;
+  toCityId: string;
+  fromCityName: string;
+  toCityName: string;
   fromCode: string;
   toCode: string;
-  frequency: string;
-  fare: number;
+  distance: number;
+  duration: string;
+  baseFare: number;
+  operator: string;
+  rating: number;
+  totalRatings: number;
+  busTypes: string[];
+}
+
+interface Trip {
+  id: string;
+  routeId: string;
   busNumber: string;
   departureTime: string;
   arrivalTime: string;
-  distance: string;
-  duration: string;
-  rating: number;
-  busType: 'AC' | 'Non-AC' | 'Luxury' | 'Standard';
-  operator: string;
+  availableSeats: number;
+  fare: number;
+  busType: string;
 }
 
 interface QuickBooking {
   id: string;
   name: string;
   time: string;
-  from: string;
-  to: string;
+  fromCityId: string;
+  toCityId: string;
+  fromCityName: string;
+  toCityName: string;
   fromCode: string;
   toCode: string;
   routeId: string;
-  busNumber: string;
   fare: number;
   icon?: string;
+}
+
+interface RecentSearch {
+  id: string;
+  fromCityId: string;
+  toCityId: string;
+  fromCityName: string;
+  toCityName: string;
+  fromCode: string;
+  toCode: string;
+  timestamp: number;
 }
 
 // Pakistan Cities Data (Hardcoded as backup)
 const PAKISTAN_CITIES = [
   // Punjab
-  { name: 'Lahore', code: 'LHE', province: 'Punjab', popular: true },
-  { name: 'Faisalabad', code: 'FSD', province: 'Punjab', popular: true },
-  { name: 'Rawalpindi', code: 'RWP', province: 'Punjab', popular: true },
-  { name: 'Multan', code: 'MUX', province: 'Punjab', popular: true },
-  { name: 'Gujranwala', code: 'GRW', province: 'Punjab', popular: false },
-  { name: 'Sialkot', code: 'SKT', province: 'Punjab', popular: false },
-  { name: 'Bahawalpur', code: 'BHV', province: 'Punjab', popular: false },
-  { name: 'Sargodha', code: 'SGD', province: 'Punjab', popular: false },
-  { name: 'Sheikhupura', code: 'SKP', province: 'Punjab', popular: false },
-  { name: 'Rahim Yar Khan', code: 'RYK', province: 'Punjab', popular: false },
-  { name: 'Jhang', code: 'JHG', province: 'Punjab', popular: false },
-  { name: 'Dera Ghazi Khan', code: 'DGK', province: 'Punjab', popular: false },
-  { name: 'Gujrat', code: 'GRT', province: 'Punjab', popular: false },
-  { name: 'Sahiwal', code: 'SWL', province: 'Punjab', popular: false },
-  { name: 'Kasur', code: 'KSR', province: 'Punjab', popular: false },
+  { id: 'lhe', name: 'Lahore', code: 'LHE', province: 'Punjab', popular: true },
+  { id: 'fsd', name: 'Faisalabad', code: 'FSD', province: 'Punjab', popular: true },
+  { id: 'rwp', name: 'Rawalpindi', code: 'RWP', province: 'Punjab', popular: true },
+  { id: 'mux', name: 'Multan', code: 'MUX', province: 'Punjab', popular: true },
+  { id: 'grw', name: 'Gujranwala', code: 'GRW', province: 'Punjab', popular: false },
+  { id: 'skt', name: 'Sialkot', code: 'SKT', province: 'Punjab', popular: false },
+  { id: 'bhv', name: 'Bahawalpur', code: 'BHV', province: 'Punjab', popular: false },
+  { id: 'sgd', name: 'Sargodha', code: 'SGD', province: 'Punjab', popular: false },
 
   // Sindh
-  { name: 'Karachi', code: 'KHI', province: 'Sindh', popular: true },
-  { name: 'Hyderabad', code: 'HDD', province: 'Sindh', popular: true },
-  { name: 'Sukkur', code: 'SKZ', province: 'Sindh', popular: false },
-  { name: 'Larkana', code: 'LRK', province: 'Sindh', popular: false },
-  { name: 'Nawabshah', code: 'NWS', province: 'Sindh', popular: false },
-  { name: 'Mirpur Khas', code: 'MPK', province: 'Sindh', popular: false },
-  { name: 'Jacobabad', code: 'JCB', province: 'Sindh', popular: false },
+  { id: 'khi', name: 'Karachi', code: 'KHI', province: 'Sindh', popular: true },
+  { id: 'hdd', name: 'Hyderabad', code: 'HDD', province: 'Sindh', popular: true },
+  { id: 'skz', name: 'Sukkur', code: 'SKZ', province: 'Sindh', popular: false },
 
-  // Khyber Pakhtunkhwa
-  { name: 'Peshawar', code: 'PEW', province: 'KPK', popular: true },
-  { name: 'Mardan', code: 'MRD', province: 'KPK', popular: false },
-  { name: 'Abbottabad', code: 'ABT', province: 'KPK', popular: false },
-  { name: 'Mingora', code: 'MNG', province: 'KPK', popular: false },
-  { name: 'Kohat', code: 'KHT', province: 'KPK', popular: false },
-  { name: 'Bannu', code: 'BNU', province: 'KPK', popular: false },
-  { name: 'Dera Ismail Khan', code: 'DIK', province: 'KPK', popular: false },
+  // KPK
+  { id: 'pew', name: 'Peshawar', code: 'PEW', province: 'KPK', popular: true },
+  { id: 'abt', name: 'Abbottabad', code: 'ABT', province: 'KPK', popular: false },
 
   // Balochistan
-  { name: 'Quetta', code: 'UET', province: 'Balochistan', popular: true },
-  { name: 'Turbat', code: 'TBT', province: 'Balochistan', popular: false },
-  { name: 'Gwadar', code: 'GWD', province: 'Balochistan', popular: false },
-  { name: 'Khuzdar', code: 'KZD', province: 'Balochistan', popular: false },
-  { name: 'Chaman', code: 'CMN', province: 'Balochistan', popular: false },
+  { id: 'uet', name: 'Quetta', code: 'UET', province: 'Balochistan', popular: true },
+  { id: 'gwd', name: 'Gwadar', code: 'GWD', province: 'Balochistan', popular: false },
 
   // Islamabad
-  { name: 'Islamabad', code: 'ISB', province: 'Islamabad', popular: true },
+  { id: 'isb', name: 'Islamabad', code: 'ISB', province: 'Islamabad', popular: true },
 
   // Gilgit-Baltistan
-  { name: 'Gilgit', code: 'GIL', province: 'Gilgit-Baltistan', popular: false },
-  { name: 'Skardu', code: 'SKD', province: 'Gilgit-Baltistan', popular: false },
-  { name: 'Hunza', code: 'HNZ', province: 'Gilgit-Baltistan', popular: false },
-
-  // Azad Kashmir
-  { name: 'Muzaffarabad', code: 'MZF', province: 'Azad Kashmir', popular: false },
-  { name: 'Mirpur', code: 'MRP', province: 'Azad Kashmir', popular: false },
+  { id: 'gil', name: 'Gilgit', code: 'GIL', province: 'Gilgit-Baltistan', popular: false },
+  { id: 'skd', name: 'Skardu', code: 'SKD', province: 'Gilgit-Baltistan', popular: false },
 ];
+
+// Time slots for better UX
+const TIME_SLOTS = [
+  { label: 'Anytime', value: '' },
+  { label: 'Morning (6AM - 12PM)', value: 'morning' },
+  { label: 'Afternoon (12PM - 5PM)', value: 'afternoon' },
+  { label: 'Evening (5PM - 9PM)', value: 'evening' },
+  { label: 'Night (9PM - 6AM)', value: 'night' },
+];
+
+// Skeleton component for loading
+const SkeletonCard = () => (
+  <View style={styles.skeletonCard}>
+    <View style={styles.skeletonHeader}>
+      <View style={styles.skeletonIcon} />
+      <View style={styles.skeletonTitleContainer}>
+        <View style={styles.skeletonTitle} />
+        <View style={styles.skeletonSubtitle} />
+      </View>
+    </View>
+    <View style={styles.skeletonContent}>
+      <View style={styles.skeletonRow} />
+      <View style={styles.skeletonRow} />
+    </View>
+    <View style={styles.skeletonButton} />
+  </View>
+);
 
 const HomeScreen = () => {
   const navigation = useNavigation<HomeScreenNavigationProp>();
@@ -135,7 +165,9 @@ const HomeScreen = () => {
 
   // State for date/time
   const [travelDate, setTravelDate] = useState(new Date());
-  const [travelTime, setTravelTime] = useState('');
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [travelTimeSlot, setTravelTimeSlot] = useState('');
+  const [showTimePicker, setShowTimePicker] = useState(false);
 
   // State for modals
   const [showCityModal, setShowCityModal] = useState(false);
@@ -145,20 +177,64 @@ const HomeScreen = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [loadingCities, setLoadingCities] = useState(false);
 
-  // State for routes
+  // State for routes and trips
   const [popularRoutes, setPopularRoutes] = useState<Route[]>([]);
+  const [routeTrips, setRouteTrips] = useState<{ [key: string]: Trip[] }>({});
   const [quickBookings, setQuickBookings] = useState<QuickBooking[]>([]);
+  const [recentSearches, setRecentSearches] = useState<RecentSearch[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingRoutes, setLoadingRoutes] = useState(true);
 
-  // Fetch cities from Firebase or use hardcoded data
-  useEffect(() => {
-    fetchCities();
-    fetchPopularRoutes();
-    fetchQuickBookings();
+  // Cache key for cities
+  const CITIES_CACHE_KEY = '@zugo_cities_cache';
+
+  // Fetch cities from Firestore
+  const fetchCities = useCallback(async () => {
+    setLoadingCities(true);
+    try {
+      console.log('📡 Fetching cities from Firestore...');
+
+      const snapshot = await firestore()
+        .collection('cities')
+        .orderBy('name')
+        .get();
+
+      if (!snapshot.empty) {
+        const citiesList: City[] = [];
+        snapshot.forEach(doc => {
+          const data = doc.data();
+          citiesList.push({
+            id: doc.id,
+            name: data.name,
+            code: data.code,
+            province: data.province,
+            popular: data.popular || false,
+          });
+        });
+
+        console.log(`✅ Loaded ${citiesList.length} cities from Firestore`);
+        setCities(citiesList);
+        setFilteredCities(citiesList);
+
+        // Cache for next time (optional - background)
+        AsyncStorage.setItem('@zugo_cities_cache', JSON.stringify(citiesList)).catch(() => {});
+
+      } else {
+        console.log('⚠️ No cities in Firestore, using hardcoded');
+        setCities(PAKISTAN_CITIES);
+        setFilteredCities(PAKISTAN_CITIES);
+      }
+    } catch (error) {
+      console.error('❌ Error fetching cities:', error);
+      // Fallback to hardcoded on error
+      setCities(PAKISTAN_CITIES);
+      setFilteredCities(PAKISTAN_CITIES);
+    } finally {
+      setLoadingCities(false);
+    }
   }, []);
 
-  const fetchCities = async () => {
-    setLoadingCities(true);
+  const fetchFreshCities = async () => {
     try {
       const snapshot = await firestore()
         .collection('cities')
@@ -179,39 +255,25 @@ const HomeScreen = () => {
             lng: data.lng,
           });
         });
+
+        // Save to cache
+        await AsyncStorage.setItem(CITIES_CACHE_KEY, JSON.stringify(citiesList));
+
         setCities(citiesList);
         setFilteredCities(citiesList);
-      } else {
-        // If no cities in Firebase, use hardcoded Pakistan cities
-        const hardcodedCities: City[] = PAKISTAN_CITIES.map((city, index) => ({
-          id: `city-${index}`,
-          name: city.name,
-          code: city.code,
-          province: city.province,
-          popular: city.popular,
-        }));
-        setCities(hardcodedCities);
-        setFilteredCities(hardcodedCities);
       }
     } catch (error) {
-      console.error('Error fetching cities:', error);
-      // Fallback to hardcoded cities
-      const hardcodedCities: City[] = PAKISTAN_CITIES.map((city, index) => ({
-        id: `city-${index}`,
-        name: city.name,
-        code: city.code,
-        province: city.province,
-        popular: city.popular,
-      }));
-      setCities(hardcodedCities);
-      setFilteredCities(hardcodedCities);
-    } finally {
-      setLoadingCities(false);
+      console.error('Error fetching fresh cities:', error);
     }
   };
 
-  const fetchPopularRoutes = async () => {
+  // Fetch popular routes and their trips
+  const fetchPopularRoutes = useCallback(async () => {
+    setLoadingRoutes(true);
     try {
+      // Note: Create composite index in Firebase Console:
+      // Collection: routes
+      // Fields: popular (Ascending), bookingCount (Descending)
       const snapshot = await firestore()
         .collection('routes')
         .where('popular', '==', true)
@@ -220,34 +282,73 @@ const HomeScreen = () => {
         .get();
 
       const routes: Route[] = [];
+      const routeIds: string[] = [];
+
       snapshot.forEach(doc => {
         const data = doc.data();
-        routes.push({
+        const route: Route = {
           id: doc.id,
-          name: data.name || '',
-          from: data.from || '',
-          to: data.to || '',
+          name: data.name || `${data.fromCityName} → ${data.toCityName}`,
+          fromCityId: data.fromCityId || '',
+          toCityId: data.toCityId || '',
+          fromCityName: data.fromCityName || data.from || '',
+          toCityName: data.toCityName || data.to || '',
           fromCode: data.fromCode || '',
           toCode: data.toCode || '',
-          frequency: data.frequency || 'Every 30 min',
-          fare: data.fare || 0,
-          busNumber: data.busNumber || '',
-          departureTime: data.departureTime || '08:00 AM',
-          arrivalTime: data.arrivalTime || '09:30 AM',
-          distance: data.distance || '',
-          duration: data.duration || '',
-          rating: data.rating || 4.5,
-          busType: data.busType || 'Standard',
+          distance: data.distance || 0,
+          duration: data.duration || '2h 30m',
+          baseFare: data.baseFare || 0,
           operator: data.operator || 'ZUGO Transport',
-        });
+          rating: data.rating || 4.5,
+          totalRatings: data.totalRatings || 0,
+          busTypes: data.busTypes || ['Standard'],
+        };
+        routes.push(route);
+        routeIds.push(doc.id);
       });
+
       setPopularRoutes(routes);
+
+      // Fetch trips for these routes
+      if (routeIds.length > 0) {
+        const tripsSnapshot = await firestore()
+          .collection('trips')
+          .where('routeId', 'in', routeIds)
+          .where('status', 'in', ['active', 'upcoming'])
+          .orderBy('departureTime')
+          .get();
+
+        const tripsByRoute: { [key: string]: Trip[] } = {};
+        tripsSnapshot.forEach(doc => {
+          const data = doc.data();
+          const trip: Trip = {
+            id: doc.id,
+            routeId: data.routeId,
+            busNumber: data.busNumber || '',
+            departureTime: data.departureTime || '',
+            arrivalTime: data.arrivalTime || '',
+            availableSeats: data.availableSeats || 0,
+            fare: data.fare || 0,
+            busType: data.busType || 'Standard',
+          };
+
+          if (!tripsByRoute[data.routeId]) {
+            tripsByRoute[data.routeId] = [];
+          }
+          tripsByRoute[data.routeId].push(trip);
+        });
+
+        setRouteTrips(tripsByRoute);
+      }
     } catch (error) {
       console.error('Error fetching popular routes:', error);
+    } finally {
+      setLoadingRoutes(false);
     }
-  };
+  }, []);
 
-  const fetchQuickBookings = async () => {
+  // Fetch quick bookings (most booked routes)
+  const fetchQuickBookings = useCallback(async () => {
     try {
       const snapshot = await firestore()
         .collection('routes')
@@ -260,21 +361,111 @@ const HomeScreen = () => {
         const data = doc.data();
         bookings.push({
           id: doc.id,
-          name: `${data.from.split(' ')[0]} → ${data.to.split(' ')[0]}`,
-          time: data.departureTime || 'Any Time',
-          from: data.from,
-          to: data.to,
-          fromCode: data.fromCode,
-          toCode: data.toCode,
+          name: `${data.fromCityName?.split(' ')[0] || ''} → ${data.toCityName?.split(' ')[0] || ''}`,
+          time: 'Any Time',
+          fromCityId: data.fromCityId || '',
+          toCityId: data.toCityId || '',
+          fromCityName: data.fromCityName || data.from || '',
+          toCityName: data.toCityName || data.to || '',
+          fromCode: data.fromCode || '',
+          toCode: data.toCode || '',
           routeId: doc.id,
-          busNumber: data.busNumber || '',
-          fare: data.fare || 0,
+          fare: data.baseFare || 0,
           icon: 'directions-bus',
         });
       });
       setQuickBookings(bookings);
     } catch (error) {
       console.error('Error fetching quick bookings:', error);
+    }
+  }, []);
+
+  // Load recent searches from AsyncStorage
+  const loadRecentSearches = useCallback(async () => {
+    try {
+      const searchesJson = await AsyncStorage.getItem('@zugo_recent_searches');
+      if (searchesJson) {
+        const searches = JSON.parse(searchesJson);
+        setRecentSearches(searches.slice(0, 5));
+      }
+    } catch (error) {
+      console.error('Error loading recent searches:', error);
+    }
+  }, []);
+
+  // Save recent search
+  const saveRecentSearch = useCallback(async (
+    fromId: string,
+    toId: string,
+    fromName: string,
+    toName: string,
+    fromCode: string,
+    toCode: string
+  ) => {
+    try {
+      const newSearch: RecentSearch = {
+        id: `${fromId}-${toId}-${Date.now()}`,
+        fromCityId: fromId,
+        toCityId: toId,
+        fromCityName: fromName,
+        toCityName: toName,
+        fromCode,
+        toCode,
+        timestamp: Date.now(),
+      };
+
+      const updatedSearches = [newSearch, ...recentSearches.filter(s =>
+        !(s.fromCityId === fromId && s.toCityId === toId)
+      )].slice(0, 20);
+
+      await AsyncStorage.setItem('@zugo_recent_searches', JSON.stringify(updatedSearches));
+      setRecentSearches(updatedSearches.slice(0, 5));
+    } catch (error) {
+      console.error('Error saving recent search:', error);
+    }
+  }, [recentSearches]);
+
+  // Initial data load
+  useEffect(() => {
+    fetchCities();
+    fetchPopularRoutes();
+    fetchQuickBookings();
+    loadRecentSearches();
+  }, [fetchCities, fetchPopularRoutes, fetchQuickBookings, loadRecentSearches]);
+
+  // ✅ IMPLEMENTED: useFocusEffect for booking cleanup
+  useFocusEffect(
+    useCallback(() => {
+      // This runs every time the screen comes into focus
+      console.log('🏠 HomeScreen focused - checking for expired bookings...');
+
+      if (user) {
+        // Run cleanup in background (don't await to avoid blocking UI)
+        cleanupExpiredBookings(user.uid).catch(error => {
+          console.error('Error in cleanupExpiredBookings:', error);
+        });
+      }
+
+      // Optional: Return cleanup function if needed
+      return () => {
+        console.log('🏠 HomeScreen unfocused');
+      };
+    }, [user]) // Re-run if user changes
+  );
+
+  // Date picker handler
+  const onDateChange = (event: any, selectedDate?: Date) => {
+    setShowDatePicker(false);
+    if (selectedDate) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      if (selectedDate < today) {
+        Alert.alert('Invalid Date', 'Please select a future date');
+        return;
+      }
+
+      setTravelDate(selectedDate);
     }
   };
 
@@ -320,13 +511,24 @@ const HomeScreen = () => {
     setToCityId(tempId);
   };
 
+  // Get suggestions based on from city
+  const getSuggestions = useCallback(() => {
+    if (!fromCityId) return [];
+
+    const popularDestinations = cities.filter(c =>
+      c.id !== fromCityId && c.popular
+    ).slice(0, 3);
+
+    return popularDestinations;
+  }, [fromCityId, cities]);
+
   const handleSearch = async () => {
     if (!fromLocation || !toLocation) {
       Alert.alert('Missing Information', 'Please select both locations');
       return;
     }
 
-    if (fromLocation === toLocation) {
+    if (fromCityId === toCityId) {
       Alert.alert('Invalid Route', 'From and To locations cannot be the same');
       return;
     }
@@ -335,40 +537,60 @@ const HomeScreen = () => {
 
     try {
       if (user) {
-        await firestore().collection('search_history').add({
+        const historyRef = firestore().collection('search_history');
+        const userHistory = await historyRef
+          .where('userId', '==', user.uid)
+          .orderBy('timestamp', 'desc')
+          .get();
+
+        if (userHistory.size >= 20) {
+          const oldest = userHistory.docs[userHistory.size - 1];
+          await oldest.ref.delete();
+        }
+
+        await historyRef.add({
           userId: user.uid,
-          from: fromLocation,
-          to: toLocation,
-          fromCode: fromCode,
-          toCode: toCode,
-          fromCityId: fromCityId,
-          toCityId: toCityId,
+          fromCityId,
+          toCityId,
+          fromCityName: fromLocation,
+          toCityName: toLocation,
+          fromCode,
+          toCode,
           date: travelDate.toISOString().split('T')[0],
           timestamp: firestore.FieldValue.serverTimestamp(),
         });
       }
 
+      await saveRecentSearch(
+        fromCityId,
+        toCityId,
+        fromLocation,
+        toLocation,
+        fromCode,
+        toCode
+      );
+
       navigation.navigate('SearchResults', {
-        from: fromLocation,
-        to: toLocation,
-        fromCode: fromCode,
-        toCode: toCode,
-        fromCityId: fromCityId,
-        toCityId: toCityId,
+        fromCityId,
+        toCityId,
+        fromCityName: fromLocation,
+        toCityName: toLocation,
+        fromCode,
+        toCode,
         date: travelDate.toISOString().split('T')[0],
-        time: travelTime || 'Anytime',
+        timeSlot: travelTimeSlot,
       });
     } catch (error) {
-      console.error('Error saving search:', error);
+      console.error('Search error:', error);
       navigation.navigate('SearchResults', {
-        from: fromLocation,
-        to: toLocation,
-        fromCode: fromCode,
-        toCode: toCode,
-        fromCityId: fromCityId,
-        toCityId: toCityId,
+        fromCityId,
+        toCityId,
+        fromCityName: fromLocation,
+        toCityName: toLocation,
+        fromCode,
+        toCode,
         date: travelDate.toISOString().split('T')[0],
-        time: travelTime || 'Anytime',
+        timeSlot: travelTimeSlot,
       });
     } finally {
       setLoading(false);
@@ -376,45 +598,70 @@ const HomeScreen = () => {
   };
 
   const handleQuickBookingPress = (booking: QuickBooking) => {
-    setFromLocation(booking.from);
-    setToLocation(booking.to);
+    setFromLocation(booking.fromCityName);
+    setToLocation(booking.toCityName);
     setFromCode(booking.fromCode);
     setToCode(booking.toCode);
-
-    if (booking.time !== 'Any Time') {
-      setTravelTime(booking.time);
-    }
+    setFromCityId(booking.fromCityId);
+    setToCityId(booking.toCityId);
 
     navigation.navigate('SearchResults', {
-      from: booking.from,
-      to: booking.to,
+      fromCityId: booking.fromCityId,
+      toCityId: booking.toCityId,
+      fromCityName: booking.fromCityName,
+      toCityName: booking.toCityName,
       fromCode: booking.fromCode,
       toCode: booking.toCode,
       date: new Date().toISOString().split('T')[0],
-      time: booking.time !== 'Any Time' ? booking.time : 'Anytime',
+      timeSlot: '',
       routeId: booking.routeId,
-      busNumber: booking.busNumber,
-      fare: booking.fare.toString(),
       isQuickBooking: true,
     });
   };
 
+  const handleRecentSearchPress = (search: RecentSearch) => {
+    const fromCity = cities.find(c => c.id === search.fromCityId);
+    const toCity = cities.find(c => c.id === search.toCityId);
+
+    if (fromCity && toCity) {
+      setFromLocation(fromCity.name);
+      setToLocation(toCity.name);
+      setFromCode(fromCity.code);
+      setToCode(toCity.code);
+      setFromCityId(fromCity.id);
+      setToCityId(toCity.id);
+
+      navigation.navigate('SearchResults', {
+        fromCityId: fromCity.id,
+        toCityId: toCity.id,
+        fromCityName: fromCity.name,
+        toCityName: toCity.name,
+        fromCode: fromCity.code,
+        toCode: toCity.code,
+        date: new Date().toISOString().split('T')[0],
+        timeSlot: '',
+      });
+    }
+  };
+
   const handlePopularRoutePress = (route: Route) => {
-    setFromLocation(route.from);
-    setToLocation(route.to);
+    setFromLocation(route.fromCityName);
+    setToLocation(route.toCityName);
     setFromCode(route.fromCode);
     setToCode(route.toCode);
+    setFromCityId(route.fromCityId);
+    setToCityId(route.toCityId);
 
     navigation.navigate('SearchResults', {
-      from: route.from,
-      to: route.to,
+      fromCityId: route.fromCityId,
+      toCityId: route.toCityId,
+      fromCityName: route.fromCityName,
+      toCityName: route.toCityName,
       fromCode: route.fromCode,
       toCode: route.toCode,
       date: new Date().toISOString().split('T')[0],
-      time: route.departureTime,
+      timeSlot: '',
       routeId: route.id,
-      busNumber: route.busNumber,
-      fare: route.fare.toString(),
     });
   };
 
@@ -443,16 +690,9 @@ const HomeScreen = () => {
     return `PKR ${fare.toLocaleString()}`;
   };
 
-  // Group cities by province for better organization
-  const groupedCities = () => {
-    const groups: { [key: string]: City[] } = {};
-    filteredCities.forEach(city => {
-      if (!groups[city.province]) {
-        groups[city.province] = [];
-      }
-      groups[city.province].push(city);
-    });
-    return groups;
+  // Get trip for route (first available)
+  const getRouteTrip = (routeId: string): Trip | undefined => {
+    return routeTrips[routeId]?.[0];
   };
 
   const CitySelectionModal = () => (
@@ -547,6 +787,8 @@ const HomeScreen = () => {
     </Modal>
   );
 
+  const suggestions = useMemo(() => getSuggestions(), [getSuggestions]);
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView
@@ -610,15 +852,36 @@ const HomeScreen = () => {
             <Text style={styles.currentLocationText}>Use my current location</Text>
           </TouchableOpacity>
 
+          {/* Suggestions */}
+          {fromLocation && suggestions.length > 0 && (
+            <View style={styles.suggestionsContainer}>
+              <Text style={styles.suggestionsTitle}>Popular from here:</Text>
+              <View style={styles.suggestionsList}>
+                {suggestions.map(city => (
+                  <TouchableOpacity
+                    key={city.id}
+                    style={styles.suggestionChip}
+                    onPress={() => {
+                      setToLocation(city.name);
+                      setToCode(city.code);
+                      setToCityId(city.id);
+                    }}
+                  >
+                    <Icon name="location-on" size={16} color="#4A90E2" />
+                    <Text style={styles.suggestionChipText}>{city.name}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          )}
+
           {/* Date & Time Row */}
           <View style={styles.row}>
             <View style={styles.halfInputContainer}>
               <Icon name="calendar-today" size={20} color="#4A90E2" style={styles.inputIcon} />
               <TouchableOpacity
                 style={styles.dateButton}
-                onPress={() => {
-                  Alert.alert('Select Date', 'Date picker coming soon');
-                }}
+                onPress={() => setShowDatePicker(true)}
               >
                 <Text style={styles.dateText}>
                   {travelDate.toLocaleDateString('en-US', {
@@ -632,15 +895,69 @@ const HomeScreen = () => {
 
             <View style={styles.halfInputContainer}>
               <Icon name="access-time" size={20} color="#4A90E2" style={styles.inputIcon} />
-              <TextInput
-                style={styles.halfInput}
-                placeholder="Anytime"
-                placeholderTextColor="#999"
-                value={travelTime}
-                onChangeText={setTravelTime}
-              />
+              <TouchableOpacity
+                style={styles.dateButton}
+                onPress={() => setShowTimePicker(true)}
+              >
+                <Text style={styles.dateText}>
+                  {travelTimeSlot ? TIME_SLOTS.find(t => t.value === travelTimeSlot)?.label : 'Anytime'}
+                </Text>
+              </TouchableOpacity>
             </View>
           </View>
+
+          {/* Time Slot Modal */}
+          <Modal
+            visible={showTimePicker}
+            transparent
+            animationType="slide"
+            onRequestClose={() => setShowTimePicker(false)}
+          >
+            <View style={styles.modalOverlay}>
+              <View style={styles.timePickerContainer}>
+                <View style={styles.timePickerHeader}>
+                  <Text style={styles.timePickerTitle}>Select Time</Text>
+                  <TouchableOpacity onPress={() => setShowTimePicker(false)}>
+                    <Icon name="close" size={24} color="#666" />
+                  </TouchableOpacity>
+                </View>
+                <FlatList
+                  data={TIME_SLOTS}
+                  keyExtractor={(item) => item.value}
+                  renderItem={({ item }) => (
+                    <TouchableOpacity
+                      style={[
+                        styles.timeSlotItem,
+                        travelTimeSlot === item.value && styles.timeSlotItemSelected
+                      ]}
+                      onPress={() => {
+                        setTravelTimeSlot(item.value);
+                        setShowTimePicker(false);
+                      }}
+                    >
+                      <Text style={[
+                        styles.timeSlotText,
+                        travelTimeSlot === item.value && styles.timeSlotTextSelected
+                      ]}>
+                        {item.label}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                />
+              </View>
+            </View>
+          </Modal>
+
+          {/* Date Picker */}
+          {showDatePicker && (
+            <DateTimePicker
+              value={travelDate}
+              mode="date"
+              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+              onChange={onDateChange}
+              minimumDate={new Date()}
+            />
+          )}
 
           {/* Search Button */}
           <TouchableOpacity
@@ -659,6 +976,27 @@ const HomeScreen = () => {
           </TouchableOpacity>
         </View>
 
+        {/* Recent Searches */}
+        {recentSearches.length > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>RECENT SEARCHES</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              {recentSearches.map((search) => (
+                <TouchableOpacity
+                  key={search.id}
+                  style={styles.recentSearchCard}
+                  onPress={() => handleRecentSearchPress(search)}
+                >
+                  <Icon name="history" size={20} color="#4A90E2" />
+                  <Text style={styles.recentSearchText}>
+                    {search.fromCityName} → {search.toCityName}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        )}
+
         {/* Quick Bookings */}
         {quickBookings.length > 0 && (
           <View style={styles.section}>
@@ -674,7 +1012,6 @@ const HomeScreen = () => {
                     <Icon name="directions-bus" size={24} color="#4A90E2" />
                   </View>
                   <Text style={styles.quickBookingName}>{item.name}</Text>
-                  <Text style={styles.quickBookingTime}>{item.time}</Text>
                   <Text style={styles.quickBookingFare}>{formatFare(item.fare)}</Text>
                 </TouchableOpacity>
               ))}
@@ -683,70 +1020,99 @@ const HomeScreen = () => {
         )}
 
         {/* Popular Routes */}
-        {popularRoutes.length > 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>POPULAR ROUTES</Text>
-            {popularRoutes.map((route) => (
-              <TouchableOpacity
-                key={route.id}
-                style={styles.routeCard}
-                onPress={() => handlePopularRoutePress(route)}
-              >
-                <View style={styles.routeHeader}>
-                  <View style={styles.busIconContainer}>
-                    <Icon name="directions-bus" size={24} color="#FFF" />
-                  </View>
-                  <View style={styles.routeTitleContainer}>
-                    <Text style={styles.routeName}>{route.name}</Text>
-                    <Text style={styles.routeNumber}>Bus {route.busNumber} • {route.busType}</Text>
-                  </View>
-                </View>
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>POPULAR ROUTES</Text>
 
-                <View style={styles.routeDetails}>
-                  <View style={styles.routeRow}>
-                    <Icon name="location-on" size={18} color="#4A90E2" />
-                    <View style={styles.locationTextContainer}>
-                      <Text style={styles.routeFrom}>From: {route.from} ({route.fromCode})</Text>
-                      <Text style={styles.routeTo}>To: {route.to} ({route.toCode})</Text>
-                    </View>
-                  </View>
-
-                  <View style={styles.routeInfoRow}>
-                    <View style={styles.infoItem}>
-                      <Icon name="schedule" size={16} color="#666" />
-                      <Text style={styles.infoText}>{route.departureTime} - {route.arrivalTime}</Text>
-                    </View>
-
-                    <View style={styles.infoItem}>
-                      <Icon name="repeat" size={16} color="#666" />
-                      <Text style={styles.infoText}>{route.frequency}</Text>
-                    </View>
-                  </View>
-
-                  <View style={styles.routeInfoRow}>
-                    <View style={styles.infoItem}>
-                      <Icon name="attach-money" size={16} color="#666" />
-                      <Text style={styles.infoText}>Fare: {formatFare(route.fare)}</Text>
-                    </View>
-
-                    <View style={styles.infoItem}>
-                      <Icon name="star" size={16} color="#FFD700" />
-                      <Text style={styles.infoText}>{route.rating.toFixed(1)} ★</Text>
-                    </View>
-                  </View>
-                </View>
-
+          {loadingRoutes ? (
+            <>
+              <SkeletonCard />
+              <SkeletonCard />
+              <SkeletonCard />
+            </>
+          ) : popularRoutes.length > 0 ? (
+            popularRoutes.map((route) => {
+              const trip = getRouteTrip(route.id);
+              return (
                 <TouchableOpacity
-                  style={styles.bookNowButton}
+                  key={route.id}
+                  style={styles.routeCard}
                   onPress={() => handlePopularRoutePress(route)}
                 >
-                  <Text style={styles.bookNowText}>BOOK NOW</Text>
-                  <Icon name="arrow-forward" size={18} color="#FFF" />
+                  <View style={styles.routeHeader}>
+                    <View style={styles.busIconContainer}>
+                      <Icon name="directions-bus" size={24} color="#FFF" />
+                    </View>
+                    <View style={styles.routeTitleContainer}>
+                      <Text style={styles.routeName}>{route.name}</Text>
+                      <Text style={styles.routeNumber}>
+                        {trip?.busNumber ? `Bus ${trip.busNumber} • ` : ''}
+                        {route.busTypes.join(' • ')}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.routeDetails}>
+                    <View style={styles.routeRow}>
+                      <Icon name="location-on" size={18} color="#4A90E2" />
+                      <View style={styles.locationTextContainer}>
+                        <Text style={styles.routeFrom}>From: {route.fromCityName} ({route.fromCode})</Text>
+                        <Text style={styles.routeTo}>To: {route.toCityName} ({route.toCode})</Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.routeInfoRow}>
+                      <View style={styles.infoItem}>
+                        <Icon name="schedule" size={16} color="#666" />
+                        <Text style={styles.infoText}>
+                          {trip?.departureTime || 'Multiple times'} - {trip?.arrivalTime || ''}
+                        </Text>
+                      </View>
+
+                      <View style={styles.infoItem}>
+                        <Icon name="hourglass-empty" size={16} color="#666" />
+                        <Text style={styles.infoText}>{route.duration}</Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.routeInfoRow}>
+                      <View style={styles.infoItem}>
+                        <Icon name="attach-money" size={16} color="#666" />
+                        <Text style={styles.infoText}>
+                          From {formatFare(route.baseFare)}
+                        </Text>
+                      </View>
+
+                      <View style={styles.infoItem}>
+                        <Icon name="star" size={16} color="#FFD700" />
+                        <Text style={styles.infoText}>
+                          {route.rating.toFixed(1)} ({route.totalRatings})
+                        </Text>
+                      </View>
+
+                      {trip && (
+                        <View style={styles.infoItem}>
+                          <Icon name="event-seat" size={16} color="#666" />
+                          <Text style={styles.infoText}>
+                            {trip.availableSeats} seats
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                  </View>
+
+                  <View style={styles.bookNowButton}>
+                    <Text style={styles.bookNowText}>BOOK NOW</Text>
+                    <Icon name="arrow-forward" size={18} color="#FFF" />
+                  </View>
                 </TouchableOpacity>
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
+              );
+            })
+          ) : (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyText}>No popular routes available</Text>
+            </View>
+          )}
+        </View>
       </ScrollView>
 
       {/* City Selection Modal */}
@@ -861,6 +1227,34 @@ const styles = StyleSheet.create({
     color: '#4A90E2',
     marginLeft: 8,
   },
+  suggestionsContainer: {
+    marginBottom: 16,
+  },
+  suggestionsTitle: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 8,
+  },
+  suggestionsList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  suggestionChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F0F7FF',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#4A90E2',
+  },
+  suggestionChipText: {
+    fontSize: 14,
+    color: '#4A90E2',
+    marginLeft: 4,
+  },
   row: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -877,12 +1271,6 @@ const styles = StyleSheet.create({
     borderColor: '#E3E8EF',
     height: 56,
     marginRight: 12,
-  },
-  halfInput: {
-    flex: 1,
-    fontSize: 16,
-    color: '#1A1A1A',
-    height: '100%',
   },
   dateButton: {
     flex: 1,
@@ -916,6 +1304,22 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     marginRight: 8,
+  },
+  recentSearchCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFF',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 12,
+    marginRight: 12,
+    borderWidth: 1,
+    borderColor: '#E3E8EF',
+  },
+  recentSearchText: {
+    fontSize: 14,
+    color: '#1A1A1A',
+    marginLeft: 8,
   },
   quickBookingsContainer: {
     flexDirection: 'row',
@@ -951,12 +1355,6 @@ const styles = StyleSheet.create({
     color: '#1A1A1A',
     marginBottom: 4,
     textAlign: 'center',
-  },
-  quickBookingTime: {
-    fontSize: 12,
-    color: '#4A90E2',
-    fontWeight: '500',
-    marginBottom: 4,
   },
   quickBookingFare: {
     fontSize: 14,
@@ -1054,6 +1452,58 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     marginRight: 8,
+  },
+  // Skeleton Styles
+  skeletonCard: {
+    backgroundColor: '#FFF',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#E3E8EF',
+  },
+  skeletonHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  skeletonIcon: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#F0F0F0',
+    marginRight: 16,
+  },
+  skeletonTitleContainer: {
+    flex: 1,
+  },
+  skeletonTitle: {
+    height: 20,
+    backgroundColor: '#F0F0F0',
+    borderRadius: 4,
+    marginBottom: 8,
+    width: '80%',
+  },
+  skeletonSubtitle: {
+    height: 14,
+    backgroundColor: '#F0F0F0',
+    borderRadius: 4,
+    width: '60%',
+  },
+  skeletonContent: {
+    marginBottom: 20,
+  },
+  skeletonRow: {
+    height: 16,
+    backgroundColor: '#F0F0F0',
+    borderRadius: 4,
+    marginBottom: 12,
+    width: '90%',
+  },
+  skeletonButton: {
+    height: 48,
+    backgroundColor: '#F0F0F0',
+    borderRadius: 12,
   },
   // Modal Styles
   modalOverlay: {
@@ -1172,6 +1622,42 @@ const styles = StyleSheet.create({
     marginTop: 8,
     fontSize: 14,
     color: '#999',
+  },
+  // Time Picker Modal
+  timePickerContainer: {
+    backgroundColor: '#FFF',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
+    maxHeight: '50%',
+  },
+  timePickerHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  timePickerTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#1A237E',
+  },
+  timeSlotItem: {
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  timeSlotItemSelected: {
+    backgroundColor: '#F0F7FF',
+  },
+  timeSlotText: {
+    fontSize: 16,
+    color: '#1A1A1A',
+  },
+  timeSlotTextSelected: {
+    color: '#4A90E2',
+    fontWeight: '600',
   },
 });
 

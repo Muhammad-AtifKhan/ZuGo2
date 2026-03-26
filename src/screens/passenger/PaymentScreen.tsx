@@ -8,33 +8,104 @@ import {
   SafeAreaView,
   Alert,
   TextInput,
+  ActivityIndicator,
 } from 'react-native';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { PassengerStackParamList } from '../../navigation/PassengerNavigator';
 import Icon from 'react-native-vector-icons/MaterialIcons';
+import auth from '@react-native-firebase/auth';
+import firestore from '@react-native-firebase/firestore';
 
 type PaymentScreenNavigationProp = StackNavigationProp<PassengerStackParamList, 'Payment'>;
 type PaymentScreenRouteProp = RouteProp<PassengerStackParamList, 'Payment'>;
 
+// Payment method types
+type PaymentMethod = 'online_card' | 'jazzcash' | 'easypaisa' | 'cash_counter' | 'bank_transfer';
+
+interface PaymentMethodOption {
+  id: PaymentMethod;
+  name: string;
+  icon: string;
+  description: string;
+  processingTime: 'instant' | '24h' | '2-4h';
+}
+
 const PaymentScreen = () => {
   const navigation = useNavigation<PaymentScreenNavigationProp>();
   const route = useRoute<PaymentScreenRouteProp>();
-  const { busId, seatIds, totalAmount } = route.params;
+  const params = route.params ?? {};
+  const tripId = params.tripId ?? '';
+  const busId = params.busId ?? '';
+  const seatIds = params.seatIds ?? [];
+  const totalAmount = params.totalAmount ?? 0;
+  const from = params.from ?? '';
+  const to = params.to ?? '';
+  const date = params.date ?? '';
+  const time = params.time ?? '';
+  const busNumber = params.busNumber ?? 'N/A';
 
-  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string>('card');
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<PaymentMethod>('online_card');
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [discountCode, setDiscountCode] = useState('');
+  const [discountApplied, setDiscountApplied] = useState(false);
+  const [discountAmount, setDiscountAmount] = useState(0);
+  const [bookingCode, setBookingCode] = useState<string | null>(null);
+
+  // Card payment states
   const [cardNumber, setCardNumber] = useState('');
   const [cardExpiry, setCardExpiry] = useState('');
   const [cardCVV, setCardCVV] = useState('');
   const [cardholderName, setCardholderName] = useState('');
   const [saveCard, setSaveCard] = useState(false);
-  const [discountCode, setDiscountCode] = useState('');
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [discountApplied, setDiscountApplied] = useState(false);
-  const [discountAmount, setDiscountAmount] = useState(0);
+
+  // Bank transfer states
+  const [accountNumber, setAccountNumber] = useState('');
+  const [accountTitle, setAccountTitle] = useState('');
+  const [bankName, setBankName] = useState('');
+  const [transferSlip, setTransferSlip] = useState<string | null>(null);
 
   const serviceFee = 1;
   const finalAmount = totalAmount + serviceFee - discountAmount;
+
+  // Payment methods configuration
+  const paymentMethods: PaymentMethodOption[] = [
+    {
+      id: 'online_card',
+      name: 'Credit / Debit Card',
+      icon: 'credit-card',
+      description: 'Instant payment with card',
+      processingTime: 'instant',
+    },
+    {
+      id: 'jazzcash',
+      name: 'JazzCash',
+      icon: 'phone-android',
+      description: 'Pay with JazzCash app',
+      processingTime: 'instant',
+    },
+    {
+      id: 'easypaisa',
+      name: 'Easypaisa',
+      icon: 'phone-android',
+      description: 'Pay with Easypaisa app',
+      processingTime: 'instant',
+    },
+    {
+      id: 'cash_counter',
+      name: 'Cash at Counter',
+      icon: 'store',
+      description: 'Pay cash at our nearest counter',
+      processingTime: '24h',
+    },
+    {
+      id: 'bank_transfer',
+      name: 'Bank Transfer',
+      icon: 'account-balance',
+      description: 'Transfer to our bank account',
+      processingTime: '2-4h',
+    },
+  ];
 
   // Mock saved cards
   const savedCards = [
@@ -54,12 +125,6 @@ const PaymentScreen = () => {
     },
   ];
 
-  // Mock wallet options
-  const walletOptions = [
-    { id: 'jazzcash', name: 'JazzCash', icon: 'smartphone' },
-    { id: 'easypaisa', name: 'EasyPaisa', icon: 'smartphone' },
-  ];
-
   useEffect(() => {
     // Auto-format card number
     if (cardNumber.length > 0) {
@@ -74,6 +139,14 @@ const PaymentScreen = () => {
       setCardExpiry(cardExpiry + '/');
     }
   }, [cardNumber, cardExpiry]);
+
+  // Generate unique booking code
+  const generateBookingCode = (): string => {
+    const prefix = 'ZUG';
+    const timestamp = Date.now().toString().slice(-8);
+    const random = Math.random().toString(36).substring(2, 6).toUpperCase();
+    return `${prefix}-${timestamp}-${random}`;
+  };
 
   const handleApplyDiscount = () => {
     if (!discountCode.trim()) {
@@ -97,16 +170,9 @@ const PaymentScreen = () => {
     }
   };
 
-  const handlePaymentMethodSelect = (method: string) => {
+  const handlePaymentMethodSelect = (method: PaymentMethod) => {
     setSelectedPaymentMethod(method);
-
-    // Reset card details if switching from card
-    if (method !== 'card') {
-      setCardNumber('');
-      setCardExpiry('');
-      setCardCVV('');
-      setCardholderName('');
-    }
+    setBookingCode(null); // Reset booking code when method changes
   };
 
   const validateCardDetails = () => {
@@ -133,64 +199,239 @@ const PaymentScreen = () => {
     return true;
   };
 
+  const validateBankTransferDetails = () => {
+    if (!accountNumber.trim() || accountNumber.length < 8) {
+      Alert.alert('Invalid Account', 'Please enter a valid account number');
+      return false;
+    }
+
+    if (!accountTitle.trim()) {
+      Alert.alert('Invalid Title', 'Please enter account title');
+      return false;
+    }
+
+    if (!bankName.trim()) {
+      Alert.alert('Invalid Bank', 'Please enter bank name');
+      return false;
+    }
+
+    return true;
+  };
+
   const handleConfirmPayment = () => {
-    if (selectedPaymentMethod === 'card') {
+    // Validate based on payment method
+    if (selectedPaymentMethod === 'online_card') {
       if (!validateCardDetails()) {
+        return;
+      }
+    } else if (selectedPaymentMethod === 'bank_transfer') {
+      if (!validateBankTransferDetails()) {
         return;
       }
     }
 
-    if (selectedPaymentMethod === 'cash') {
+    if (selectedPaymentMethod === 'cash_counter') {
+      // For cash payment, show confirmation dialog
       Alert.alert(
         'Cash Payment',
-        'Please pay the driver in cash when boarding. Amount: $' + finalAmount,
+        `Your booking code will be generated. Please pay PKR ${finalAmount.toLocaleString()} at our counter within 24 hours.`,
         [
-          {
-            text: 'Cancel',
-            style: 'cancel',
-          },
-          {
-            text: 'Confirm',
-            onPress: processPayment,
-          },
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Continue', onPress: processBooking },
         ]
       );
+    } else {
+      // For online payments, process directly
+      processBooking();
+    }
+  };
+
+  const processBooking = async () => {
+    if (!tripId || !busId || seatIds.length === 0) {
+      Alert.alert('Error', 'Invalid booking data. Please go back and try again.');
       return;
     }
 
-    processPayment();
-  };
+    const user = auth().currentUser;
+    if (!user) {
+      Alert.alert('Error', 'You must be logged in to complete the booking.');
+      return;
+    }
 
-  const processPayment = () => {
     setIsProcessing(true);
 
-    // Mock payment processing
-    setTimeout(() => {
-      setIsProcessing(false);
+    try {
+      // Check if payment method is instant or pending
+      const isInstantPayment = ['online_card', 'jazzcash', 'easypaisa'].includes(selectedPaymentMethod);
 
-      // Mock successful payment
-      const bookingId = 'TKT-' + Date.now().toString().slice(-6);
+      // Get user data
+      const userDoc = await firestore().collection('users').doc(user.uid).get();
+      const userData = userDoc.data();
+      const passengerName = userData?.fullName ?? user.displayName ?? user.email ?? 'Passenger';
+      const passengerEmail = user.email ?? '';
+      const passengerPhone = userData?.phoneNumber ?? '';
 
-      Alert.alert(
-        'Payment Successful!',
-        'Your booking has been confirmed.',
-        [
-          {
-            text: 'View Ticket',
-            onPress: () => {
-              navigation.navigate('BookingConfirmation', {
-                bookingId,
-              });
+      // Check trip availability
+      const tripDoc = await firestore().collection('trips').doc(tripId).get();
+      if (!tripDoc.exists) {
+        throw new Error('Trip no longer available');
+      }
+
+      const tripData = tripDoc.data() ?? {};
+      const availableSeats = tripData.availableSeats ?? 0;
+
+      if (availableSeats < seatIds.length) {
+        throw new Error('Not enough seats available. Please go back and select again.');
+      }
+
+      // Extract seat numbers (remove 'seat-' prefix)
+      const seatNumbers = seatIds.map(id => id.replace('seat-', ''));
+
+      // Generate booking code for non-instant payments
+      const newBookingCode = !isInstantPayment ? generateBookingCode() : null;
+
+      // Calculate deadline for cash/transfer payments (24 hours)
+      const paymentDeadline = !isInstantPayment ?
+        firestore.Timestamp.fromDate(new Date(Date.now() + 24 * 60 * 60 * 1000)) : null;
+
+      // Create booking in Firestore
+      const bookingRef = firestore().collection('bookings').doc();
+
+      const bookingData: any = {
+        id: bookingRef.id,
+        userId: user.uid,
+        tripId,
+        busId,
+        seatNumbers,
+        seatCount: seatIds.length,
+        from,
+        to,
+        fromCode: tripData.fromCode || '',
+        toCode: tripData.toCode || '',
+        travelDate: date ? firestore.Timestamp.fromDate(new Date(date)) : firestore.FieldValue.serverTimestamp(),
+        departureTime: time,
+        baseFare: totalAmount,
+        serviceFee,
+        discountAmount,
+        totalAmount: finalAmount,
+        passengerName,
+        passengerEmail,
+        passengerPhone,
+        busNumber: busNumber || tripData.busNumber || '',
+
+        // Payment related
+        paymentMethod: selectedPaymentMethod,
+        paymentStatus: isInstantPayment ? 'paid' : 'pending',
+
+        // Booking status
+        status: isInstantPayment ? 'confirmed' : 'pending_payment',
+
+        // For cash/transfer payments
+        bookingCode: newBookingCode,
+        paymentDeadline,
+
+        // Timestamps
+        createdAt: firestore.FieldValue.serverTimestamp(),
+        updatedAt: firestore.FieldValue.serverTimestamp(),
+        confirmedAt: isInstantPayment ? firestore.FieldValue.serverTimestamp() : null,
+      };
+
+      // Add bank transfer details if applicable
+      if (selectedPaymentMethod === 'bank_transfer') {
+        bookingData.bankDetails = {
+          accountNumber,
+          accountTitle,
+          bankName,
+        };
+      }
+
+      await bookingRef.set(bookingData);
+
+      // Update seats in trip subcollection
+      for (const seatNum of seatNumbers) {
+        const seatRef = firestore().collection('trips').doc(tripId)
+          .collection('seats').doc(seatNum);
+
+        if (isInstantPayment) {
+          // Instant payment → book permanently
+          await seatRef.set({
+            seatNumber: seatNum,
+            isBooked: true,
+            status: 'booked',
+            bookedBy: user.uid,
+            bookingId: bookingRef.id,
+            updatedAt: firestore.FieldValue.serverTimestamp(),
+          }, { merge: true });
+        } else {
+          // Cash/Transfer → hold for 24 hours
+          await seatRef.set({
+            seatNumber: seatNum,
+            isBooked: false,
+            status: 'reserved',
+            reservedBy: user.uid,
+            bookingId: bookingRef.id,
+            reservedUntil: paymentDeadline,
+            updatedAt: firestore.FieldValue.serverTimestamp(),
+          }, { merge: true });
+        }
+      }
+
+      // Update trip's available seats ONLY for instant payments
+      if (isInstantPayment) {
+        await firestore().collection('trips').doc(tripId).update({
+          availableSeats: firestore.FieldValue.increment(-seatIds.length),
+          updatedAt: firestore.FieldValue.serverTimestamp(),
+        });
+      }
+
+      // Show appropriate success message
+      if (isInstantPayment) {
+        Alert.alert(
+          'Payment Successful!',
+          'Your booking has been confirmed.',
+          [
+            {
+              text: 'View Ticket',
+              onPress: () => {
+                navigation.navigate('BookingConfirmation', {
+                  bookingId: bookingRef.id,
+                });
+              },
             },
-          },
-        ]
+          ]
+        );
+      } else {
+        // For cash/transfer, show instructions and booking code
+        Alert.alert(
+          'Booking Created!',
+          `Your booking code is: ${newBookingCode}\n\nPlease complete payment within 24 hours to confirm your seats.`,
+          [
+            {
+              text: 'View Details',
+              onPress: () => {
+                navigation.navigate('BookingConfirmation', {
+                  bookingId: bookingRef.id,
+                });
+              },
+            },
+          ]
+        );
+      }
+
+    } catch (error: any) {
+      console.error('Booking error:', error);
+      Alert.alert(
+        'Booking Failed',
+        error?.message ?? 'Could not complete booking. Please try again.'
       );
-    }, 2000);
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
-  const renderPaymentMethod = () => {
+  const renderPaymentMethodDetails = () => {
     switch (selectedPaymentMethod) {
-      case 'card':
+      case 'online_card':
         return (
           <View style={styles.cardDetailsContainer}>
             {/* Saved Cards */}
@@ -299,57 +540,153 @@ const PaymentScreen = () => {
           </View>
         );
 
-      case 'wallet':
+      case 'jazzcash':
+      case 'easypaisa':
         return (
           <View style={styles.walletContainer}>
-            <Text style={styles.sectionTitle}>SELECT WALLET</Text>
-            {walletOptions.map(wallet => (
-              <TouchableOpacity
-                key={wallet.id}
-                style={styles.walletOption}
-                onPress={() => Alert.alert('Wallet Selected', `Redirecting to ${wallet.name}`)}
-              >
-                <View style={styles.walletIconContainer}>
-                  <Icon name={wallet.icon as any} size={28} color="#4A90E2" />
-                </View>
-                <View style={styles.walletInfo}>
-                  <Text style={styles.walletName}>{wallet.name}</Text>
-                  <Text style={styles.walletStatus}>Connected</Text>
-                </View>
-                <Icon name="chevron-right" size={24} color="#999" />
-              </TouchableOpacity>
-            ))}
+            <Icon
+              name={selectedPaymentMethod === 'jazzcash' ? 'phone-android' : 'payment'}
+              size={60}
+              color="#4A90E2"
+            />
+            <Text style={styles.walletTitle}>
+              {selectedPaymentMethod === 'jazzcash' ? 'JazzCash' : 'Easypaisa'} Payment
+            </Text>
+
+            <View style={styles.walletInstructions}>
+              <Text style={styles.instructionTitle}>How to pay:</Text>
+              <View style={styles.instructionItem}>
+                <Icon name="looks-one" size={20} color="#4A90E2" />
+                <Text style={styles.instructionText}>
+                  Open {selectedPaymentMethod === 'jazzcash' ? 'JazzCash' : 'Easypaisa'} app
+                </Text>
+              </View>
+              <View style={styles.instructionItem}>
+                <Icon name="looks-two" size={20} color="#4A90E2" />
+                <Text style={styles.instructionText}>
+                  Go to "Pay Merchant" or "Scan QR"
+                </Text>
+              </View>
+              <View style={styles.instructionItem}>
+                <Icon name="looks-3" size={20} color="#4A90E2" />
+                <Text style={styles.instructionText}>
+                  Enter Merchant ID: ZUGO123
+                </Text>
+              </View>
+              <View style={styles.instructionItem}>
+                <Icon name="looks-4" size={20} color="#4A90E2" />
+                <Text style={styles.instructionText}>
+                  Amount: PKR {finalAmount.toLocaleString()}
+                </Text>
+              </View>
+            </View>
 
             <Text style={styles.walletNote}>
-              You will be redirected to the selected wallet app to complete payment
+              After payment, you will be redirected back to confirm your booking.
             </Text>
           </View>
         );
 
-      case 'cash':
+      case 'cash_counter':
         return (
           <View style={styles.cashContainer}>
-            <Icon name="attach-money" size={60} color="#4CAF50" />
-            <Text style={styles.cashTitle}>Cash Payment</Text>
+            <Icon name="store" size={60} color="#4CAF50" />
+            <Text style={styles.cashTitle}>Cash at Counter</Text>
             <Text style={styles.cashDescription}>
-              Pay the driver in cash when boarding the bus. Please have exact change ready.
+              Pay at any of our customer service counters
             </Text>
 
             <View style={styles.cashInstructions}>
               <Text style={styles.instructionTitle}>Instructions:</Text>
               <View style={styles.instructionItem}>
                 <Icon name="check-circle" size={20} color="#4CAF50" />
-                <Text style={styles.instructionText}>Show your ticket QR code to driver</Text>
+                <Text style={styles.instructionText}>
+                  You'll receive a unique booking code
+                </Text>
               </View>
               <View style={styles.instructionItem}>
                 <Icon name="check-circle" size={20} color="#4CAF50" />
-                <Text style={styles.instructionText}>Pay exact amount: ${finalAmount}</Text>
+                <Text style={styles.instructionText}>
+                  Visit any ZUGO counter within 24 hours
+                </Text>
               </View>
               <View style={styles.instructionItem}>
                 <Icon name="check-circle" size={20} color="#4CAF50" />
-                <Text style={styles.instructionText}>Get receipt from driver</Text>
+                <Text style={styles.instructionText}>
+                  Show your booking code and pay PKR {finalAmount.toLocaleString()}
+                </Text>
+              </View>
+              <View style={styles.instructionItem}>
+                <Icon name="check-circle" size={20} color="#FF9800" />
+                <Text style={styles.instructionText}>
+                  Seats will be held for 24 hours only
+                </Text>
               </View>
             </View>
+          </View>
+        );
+
+      case 'bank_transfer':
+        return (
+          <View style={styles.bankContainer}>
+            <Icon name="account-balance" size={60} color="#4A90E2" />
+            <Text style={styles.bankTitle}>Bank Transfer</Text>
+
+            <View style={styles.bankDetailsCard}>
+              <Text style={styles.bankDetailLabel}>Bank Name:</Text>
+              <Text style={styles.bankDetailValue}>HBL - Habib Bank Limited</Text>
+
+              <Text style={styles.bankDetailLabel}>Account Title:</Text>
+              <Text style={styles.bankDetailValue}>ZUGO TRANSPORT SERVICES</Text>
+
+              <Text style={styles.bankDetailLabel}>Account Number:</Text>
+              <Text style={styles.bankDetailValue}>1234 5678 9012 3456</Text>
+
+              <Text style={styles.bankDetailLabel}>IBAN:</Text>
+              <Text style={styles.bankDetailValue}>PK36 HABB 1234 5678 9012 3456</Text>
+            </View>
+
+            {/* Transfer Details Form */}
+            <Text style={styles.inputLabel}>ACCOUNT NUMBER (for verification)</Text>
+            <View style={styles.inputContainer}>
+              <Icon name="account-balance" size={24} color="#4A90E2" style={styles.inputIcon} />
+              <TextInput
+                style={styles.input}
+                placeholder="Your account number"
+                placeholderTextColor="#999"
+                value={accountNumber}
+                onChangeText={setAccountNumber}
+                keyboardType="numeric"
+              />
+            </View>
+
+            <Text style={styles.inputLabel}>ACCOUNT TITLE</Text>
+            <View style={styles.inputContainer}>
+              <Icon name="person" size={24} color="#4A90E2" style={styles.inputIcon} />
+              <TextInput
+                style={styles.input}
+                placeholder="Your account title"
+                placeholderTextColor="#999"
+                value={accountTitle}
+                onChangeText={setAccountTitle}
+              />
+            </View>
+
+            <Text style={styles.inputLabel}>BANK NAME</Text>
+            <View style={styles.inputContainer}>
+              <Icon name="business" size={24} color="#4A90E2" style={styles.inputIcon} />
+              <TextInput
+                style={styles.input}
+                placeholder="Your bank name"
+                placeholderTextColor="#999"
+                value={bankName}
+                onChangeText={setBankName}
+              />
+            </View>
+
+            <Text style={styles.walletNote}>
+              After transfer, your booking will be pending until we verify the payment (2-4 hours).
+            </Text>
           </View>
         );
 
@@ -378,7 +715,7 @@ const PaymentScreen = () => {
 
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Bus:</Text>
-            <Text style={styles.summaryValue}>Bus {busId}</Text>
+            <Text style={styles.summaryValue}>Bus {busNumber}</Text>
           </View>
 
           <View style={styles.summaryRow}>
@@ -388,12 +725,12 @@ const PaymentScreen = () => {
 
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Base Fare:</Text>
-            <Text style={styles.summaryValue}>${totalAmount}</Text>
+            <Text style={styles.summaryValue}>PKR {totalAmount.toLocaleString()}</Text>
           </View>
 
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Service Fee:</Text>
-            <Text style={styles.summaryValue}>${serviceFee}</Text>
+            <Text style={styles.summaryValue}>PKR {serviceFee}</Text>
           </View>
 
           {/* Discount Row */}
@@ -424,7 +761,7 @@ const PaymentScreen = () => {
               <View style={styles.discountAppliedRow}>
                 <Icon name="local-offer" size={16} color="#4CAF50" />
                 <Text style={styles.discountText}>
-                  Discount: -${discountAmount.toFixed(2)}
+                  Discount: -PKR {discountAmount.toFixed(2)}
                 </Text>
                 <TouchableOpacity onPress={() => {
                   setDiscountCode('');
@@ -440,7 +777,7 @@ const PaymentScreen = () => {
           {/* Total */}
           <View style={[styles.summaryRow, styles.totalRow]}>
             <Text style={styles.totalLabel}>TOTAL AMOUNT:</Text>
-            <Text style={styles.totalAmount}>${finalAmount.toFixed(2)}</Text>
+            <Text style={styles.totalAmount}>PKR {finalAmount.toFixed(2)}</Text>
           </View>
         </View>
 
@@ -449,66 +786,61 @@ const PaymentScreen = () => {
           <Text style={styles.sectionTitle}>PAYMENT METHOD</Text>
 
           <View style={styles.paymentMethods}>
-            <TouchableOpacity
-              style={[
-                styles.paymentMethod,
-                selectedPaymentMethod === 'card' && styles.paymentMethodSelected,
-              ]}
-              onPress={() => handlePaymentMethodSelect('card')}
-            >
-              <View style={styles.methodIconContainer}>
-                <Icon name="credit-card" size={24} color="#4A90E2" />
-              </View>
-              <Text style={styles.methodText}>Credit/Debit Card</Text>
-              {selectedPaymentMethod === 'card' && (
-                <Icon name="check-circle" size={20} color="#4CAF50" />
-              )}
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.paymentMethod,
-                selectedPaymentMethod === 'wallet' && styles.paymentMethodSelected,
-              ]}
-              onPress={() => handlePaymentMethodSelect('wallet')}
-            >
-              <View style={styles.methodIconContainer}>
-                <Icon name="smartphone" size={24} color="#4A90E2" />
-              </View>
-              <Text style={styles.methodText}>Mobile Wallet</Text>
-              {selectedPaymentMethod === 'wallet' && (
-                <Icon name="check-circle" size={20} color="#4CAF50" />
-              )}
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.paymentMethod,
-                selectedPaymentMethod === 'cash' && styles.paymentMethodSelected,
-              ]}
-              onPress={() => handlePaymentMethodSelect('cash')}
-            >
-              <View style={styles.methodIconContainer}>
-                <Icon name="attach-money" size={24} color="#4A90E2" />
-              </View>
-              <Text style={styles.methodText}>Cash on Board</Text>
-              {selectedPaymentMethod === 'cash' && (
-                <Icon name="check-circle" size={20} color="#4CAF50" />
-              )}
-            </TouchableOpacity>
+            {paymentMethods.map((method) => (
+              <TouchableOpacity
+                key={method.id}
+                style={[
+                  styles.paymentMethod,
+                  selectedPaymentMethod === method.id && styles.paymentMethodSelected,
+                ]}
+                onPress={() => handlePaymentMethodSelect(method.id)}
+              >
+                <View style={styles.methodIconContainer}>
+                  <Icon name={method.icon as any} size={24} color="#4A90E2" />
+                </View>
+                <View style={styles.methodInfo}>
+                  <Text style={styles.methodName}>{method.name}</Text>
+                  <Text style={styles.methodDescription}>{method.description}</Text>
+                </View>
+                {selectedPaymentMethod === method.id && (
+                  <Icon name="check-circle" size={20} color="#4CAF50" />
+                )}
+              </TouchableOpacity>
+            ))}
           </View>
         </View>
 
         {/* Selected Payment Method Details */}
         <View style={styles.paymentDetailsCard}>
-          {renderPaymentMethod()}
+          <Text style={styles.sectionTitle}>
+            {paymentMethods.find(m => m.id === selectedPaymentMethod)?.name} DETAILS
+          </Text>
+          {renderPaymentMethodDetails()}
+        </View>
+
+        {/* Processing Time Note */}
+        <View style={styles.processingNote}>
+          <Icon
+            name={paymentMethods.find(m => m.id === selectedPaymentMethod)?.processingTime === 'instant' ? 'flash-on' : 'hourglass-empty'}
+            size={20}
+            color={paymentMethods.find(m => m.id === selectedPaymentMethod)?.processingTime === 'instant' ? '#4CAF50' : '#FF9800'}
+          />
+          <Text style={[
+            styles.processingText,
+            paymentMethods.find(m => m.id === selectedPaymentMethod)?.processingTime === 'instant'
+              ? styles.instantText : styles.pendingText
+          ]}>
+            {paymentMethods.find(m => m.id === selectedPaymentMethod)?.processingTime === 'instant'
+              ? 'Instant confirmation'
+              : `Processing time: ${paymentMethods.find(m => m.id === selectedPaymentMethod)?.processingTime}`}
+          </Text>
         </View>
 
         {/* Security Note */}
         <View style={styles.securityNote}>
           <Icon name="security" size={20} color="#4CAF50" />
           <Text style={styles.securityText}>
-            Your payment is secure and encrypted
+            Your payment information is secure and encrypted
           </Text>
         </View>
 
@@ -523,13 +855,13 @@ const PaymentScreen = () => {
         >
           {isProcessing ? (
             <>
-              <Icon name="hourglass-empty" size={20} color="#FFF" />
+              <ActivityIndicator size="small" color="#FFF" />
               <Text style={styles.confirmButtonText}>PROCESSING...</Text>
             </>
           ) : (
             <>
               <Text style={styles.confirmButtonText}>
-                CONFIRM PAYMENT - ${finalAmount.toFixed(2)}
+                CONFIRM PAYMENT - PKR {finalAmount.toFixed(2)}
               </Text>
               <Icon name="lock" size={20} color="#FFF" />
             </>
@@ -542,7 +874,7 @@ const PaymentScreen = () => {
           onPress={() => navigation.goBack()}
           disabled={isProcessing}
         >
-          <Text style={styles.cancelButtonText}>Cancel Payment</Text>
+          <Text style={styles.cancelButtonText}>Cancel</Text>
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
@@ -705,19 +1037,26 @@ const styles = StyleSheet.create({
     backgroundColor: '#F0F8FF',
   },
   methodIconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
     backgroundColor: '#F0F8FF',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 16,
   },
-  methodText: {
+  methodInfo: {
+    flex: 1,
+  },
+  methodName: {
     fontSize: 16,
     fontWeight: '600',
     color: '#1A1A1A',
-    flex: 1,
+    marginBottom: 4,
+  },
+  methodDescription: {
+    fontSize: 14,
+    color: '#666',
   },
   paymentDetailsCard: {
     backgroundColor: '#FFF',
@@ -828,70 +1167,42 @@ const styles = StyleSheet.create({
     color: '#666',
   },
   walletContainer: {
-    marginTop: 10,
-  },
-  walletOption: {
-    flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#E3E8EF',
-    marginBottom: 12,
+    padding: 10,
   },
-  walletIconContainer: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: '#F0F8FF',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 16,
+  walletTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#1A237E',
+    marginTop: 16,
+    marginBottom: 20,
   },
-  walletInfo: {
-    flex: 1,
-  },
-  walletName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1A1A1A',
-    marginBottom: 4,
-  },
-  walletStatus: {
-    fontSize: 14,
-    color: '#4CAF50',
-  },
-  walletNote: {
-    fontSize: 14,
-    color: '#666',
-    fontStyle: 'italic',
-    textAlign: 'center',
-    marginTop: 20,
-    lineHeight: 20,
+  walletInstructions: {
+    width: '100%',
+    marginBottom: 20,
   },
   cashContainer: {
     alignItems: 'center',
-    padding: 20,
+    padding: 10,
   },
   cashTitle: {
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: 'bold',
     color: '#1A237E',
-    marginTop: 20,
-    marginBottom: 12,
+    marginTop: 16,
+    marginBottom: 8,
   },
   cashDescription: {
-    fontSize: 16,
+    fontSize: 14,
     color: '#666',
     textAlign: 'center',
-    lineHeight: 24,
-    marginBottom: 30,
+    marginBottom: 20,
   },
   cashInstructions: {
     width: '100%',
   },
   instructionTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '600',
     color: '#1A1A1A',
     marginBottom: 16,
@@ -902,10 +1213,67 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   instructionText: {
-    fontSize: 16,
+    fontSize: 14,
     color: '#666',
     marginLeft: 12,
     flex: 1,
+  },
+  bankContainer: {
+    padding: 10,
+  },
+  bankTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#1A237E',
+    textAlign: 'center',
+    marginTop: 16,
+    marginBottom: 20,
+  },
+  bankDetailsCard: {
+    backgroundColor: '#F0F8FF',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 20,
+  },
+  bankDetailLabel: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 8,
+  },
+  bankDetailValue: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1A1A1A',
+    marginBottom: 8,
+  },
+  walletNote: {
+    fontSize: 14,
+    color: '#666',
+    fontStyle: 'italic',
+    textAlign: 'center',
+    marginTop: 20,
+    lineHeight: 20,
+  },
+  processingNote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+    backgroundColor: '#F0F0F0',
+    padding: 12,
+    borderRadius: 8,
+  },
+  processingText: {
+    fontSize: 14,
+    marginLeft: 8,
+  },
+  instantText: {
+    color: '#4CAF50',
+    fontWeight: '600',
+  },
+  pendingText: {
+    color: '#FF9800',
+    fontWeight: '600',
   },
   securityNote: {
     flexDirection: 'row',

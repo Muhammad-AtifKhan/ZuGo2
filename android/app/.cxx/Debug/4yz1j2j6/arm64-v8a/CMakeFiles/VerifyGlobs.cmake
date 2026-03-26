@@ -36,6 +36,30 @@ if(NOT "${NEW_GLOB}" STREQUAL "${OLD_GLOB}")
   file(TOUCH_NOCREATE "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/arm64-v8a/CMakeFiles/cmake.verify_globs")
 endif()
 
+# react_codegen_SRCS at D:/MyProjects/ZuGo2/node_modules/@react-native-clipboard/clipboard/android/build/generated/source/codegen/jni/CMakeLists.txt:9 (file)
+file(GLOB NEW_GLOB LIST_DIRECTORIES true "D:/MyProjects/ZuGo2/node_modules/@react-native-clipboard/clipboard/android/build/generated/source/codegen/jni/*.cpp")
+set(OLD_GLOB
+  "D:/MyProjects/ZuGo2/node_modules/@react-native-clipboard/clipboard/android/build/generated/source/codegen/jni/rnclipboard-generated.cpp"
+  )
+if(NOT "${NEW_GLOB}" STREQUAL "${OLD_GLOB}")
+  message("-- GLOB mismatch!")
+  file(TOUCH_NOCREATE "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/arm64-v8a/CMakeFiles/cmake.verify_globs")
+endif()
+
+# react_codegen_SRCS at D:/MyProjects/ZuGo2/node_modules/@react-native-clipboard/clipboard/android/build/generated/source/codegen/jni/CMakeLists.txt:9 (file)
+file(GLOB NEW_GLOB LIST_DIRECTORIES true "D:/MyProjects/ZuGo2/node_modules/@react-native-clipboard/clipboard/android/build/generated/source/codegen/jni/react/renderer/components/rnclipboard/*.cpp")
+set(OLD_GLOB
+  "D:/MyProjects/ZuGo2/node_modules/@react-native-clipboard/clipboard/android/build/generated/source/codegen/jni/react/renderer/components/rnclipboard/ComponentDescriptors.cpp"
+  "D:/MyProjects/ZuGo2/node_modules/@react-native-clipboard/clipboard/android/build/generated/source/codegen/jni/react/renderer/components/rnclipboard/EventEmitters.cpp"
+  "D:/MyProjects/ZuGo2/node_modules/@react-native-clipboard/clipboard/android/build/generated/source/codegen/jni/react/renderer/components/rnclipboard/Props.cpp"
+  "D:/MyProjects/ZuGo2/node_modules/@react-native-clipboard/clipboard/android/build/generated/source/codegen/jni/react/renderer/components/rnclipboard/ShadowNodes.cpp"
+  "D:/MyProjects/ZuGo2/node_modules/@react-native-clipboard/clipboard/android/build/generated/source/codegen/jni/react/renderer/components/rnclipboard/States.cpp"
+  )
+if(NOT "${NEW_GLOB}" STREQUAL "${OLD_GLOB}")
+  message("-- GLOB mismatch!")
+  file(TOUCH_NOCREATE "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/arm64-v8a/CMakeFiles/cmake.verify_globs")
+endif()
+
 # react_codegen_SRCS at D:/MyProjects/ZuGo2/node_modules/@react-native-community/datetimepicker/android/build/generated/source/codegen/jni/CMakeLists.txt:9 (file)
 file(GLOB NEW_GLOB LIST_DIRECTORIES true "D:/MyProjects/ZuGo2/node_modules/@react-native-community/datetimepicker/android/build/generated/source/codegen/jni/*.cpp")
 set(OLD_GLOB
@@ -54,6 +78,30 @@ set(OLD_GLOB
   "D:/MyProjects/ZuGo2/node_modules/@react-native-community/datetimepicker/android/build/generated/source/codegen/jni/react/renderer/components/RNDateTimePickerCGen/Props.cpp"
   "D:/MyProjects/ZuGo2/node_modules/@react-native-community/datetimepicker/android/build/generated/source/codegen/jni/react/renderer/components/RNDateTimePickerCGen/ShadowNodes.cpp"
   "D:/MyProjects/ZuGo2/node_modules/@react-native-community/datetimepicker/android/build/generated/source/codegen/jni/react/renderer/components/RNDateTimePickerCGen/States.cpp"
+  )
+if(NOT "${NEW_GLOB}" STREQUAL "${OLD_GLOB}")
+  message("-- GLOB mismatch!")
+  file(TOUCH_NOCREATE "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/arm64-v8a/CMakeFiles/cmake.verify_globs")
+endif()
+
+# react_codegen_SRCS at D:/MyProjects/ZuGo2/node_modules/@react-native-community/geolocation/android/build/generated/source/codegen/jni/CMakeLists.txt:9 (file)
+file(GLOB NEW_GLOB LIST_DIRECTORIES true "D:/MyProjects/ZuGo2/node_modules/@react-native-community/geolocation/android/build/generated/source/codegen/jni/*.cpp")
+set(OLD_GLOB
+  "D:/MyProjects/ZuGo2/node_modules/@react-native-community/geolocation/android/build/generated/source/codegen/jni/RNCGeolocationSpec-generated.cpp"
+  )
+if(NOT "${NEW_GLOB}" STREQUAL "${OLD_GLOB}")
+  message("-- GLOB mismatch!")
+  file(TOUCH_NOCREATE "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/arm64-v8a/CMakeFiles/cmake.verify_globs")
+endif()
+
+# react_codegen_SRCS at D:/MyProjects/ZuGo2/node_modules/@react-native-community/geolocation/android/build/generated/source/codegen/jni/CMakeLists.txt:9 (file)
+file(GLOB NEW_GLOB LIST_DIRECTORIES true "D:/MyProjects/ZuGo2/node_modules/@react-native-community/geolocation/android/build/generated/source/codegen/jni/react/renderer/components/RNCGeolocationSpec/*.cpp")
+set(OLD_GLOB
+  "D:/MyProjects/ZuGo2/node_modules/@react-native-community/geolocation/android/build/generated/source/codegen/jni/react/renderer/components/RNCGeolocationSpec/ComponentDescriptors.cpp"
+  "D:/MyProjects/ZuGo2/node_modules/@react-native-community/geolocation/android/build/generated/source/codegen/jni/react/renderer/components/RNCGeolocationSpec/EventEmitters.cpp"
+  "D:/MyProjects/ZuGo2/node_modules/@react-native-community/geolocation/android/build/generated/source/codegen/jni/react/renderer/components/RNCGeolocationSpec/Props.cpp"
+  "D:/MyProjects/ZuGo2/node_modules/@react-native-community/geolocation/android/build/generated/source/codegen/jni/react/renderer/components/RNCGeolocationSpec/ShadowNodes.cpp"
+  "D:/MyProjects/ZuGo2/node_modules/@react-native-community/geolocation/android/build/generated/source/codegen/jni/react/renderer/components/RNCGeolocationSpec/States.cpp"
   )
 if(NOT "${NEW_GLOB}" STREQUAL "${OLD_GLOB}")
   message("-- GLOB mismatch!")
@@ -225,6 +273,30 @@ set(OLD_GLOB
   "D:/MyProjects/ZuGo2/node_modules/react-native-screens/android/src/main/jni/../../../build/generated/source/codegen/jni/react/renderer/components/rnscreens/Props.cpp"
   "D:/MyProjects/ZuGo2/node_modules/react-native-screens/android/src/main/jni/../../../build/generated/source/codegen/jni/react/renderer/components/rnscreens/ShadowNodes.cpp"
   "D:/MyProjects/ZuGo2/node_modules/react-native-screens/android/src/main/jni/../../../build/generated/source/codegen/jni/react/renderer/components/rnscreens/States.cpp"
+  )
+if(NOT "${NEW_GLOB}" STREQUAL "${OLD_GLOB}")
+  message("-- GLOB mismatch!")
+  file(TOUCH_NOCREATE "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/arm64-v8a/CMakeFiles/cmake.verify_globs")
+endif()
+
+# react_codegen_SRCS at D:/MyProjects/ZuGo2/node_modules/react-native-sound/android/build/generated/source/codegen/jni/CMakeLists.txt:9 (file)
+file(GLOB NEW_GLOB LIST_DIRECTORIES true "D:/MyProjects/ZuGo2/node_modules/react-native-sound/android/build/generated/source/codegen/jni/*.cpp")
+set(OLD_GLOB
+  "D:/MyProjects/ZuGo2/node_modules/react-native-sound/android/build/generated/source/codegen/jni/RNSoundSpec-generated.cpp"
+  )
+if(NOT "${NEW_GLOB}" STREQUAL "${OLD_GLOB}")
+  message("-- GLOB mismatch!")
+  file(TOUCH_NOCREATE "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/arm64-v8a/CMakeFiles/cmake.verify_globs")
+endif()
+
+# react_codegen_SRCS at D:/MyProjects/ZuGo2/node_modules/react-native-sound/android/build/generated/source/codegen/jni/CMakeLists.txt:9 (file)
+file(GLOB NEW_GLOB LIST_DIRECTORIES true "D:/MyProjects/ZuGo2/node_modules/react-native-sound/android/build/generated/source/codegen/jni/react/renderer/components/RNSoundSpec/*.cpp")
+set(OLD_GLOB
+  "D:/MyProjects/ZuGo2/node_modules/react-native-sound/android/build/generated/source/codegen/jni/react/renderer/components/RNSoundSpec/ComponentDescriptors.cpp"
+  "D:/MyProjects/ZuGo2/node_modules/react-native-sound/android/build/generated/source/codegen/jni/react/renderer/components/RNSoundSpec/EventEmitters.cpp"
+  "D:/MyProjects/ZuGo2/node_modules/react-native-sound/android/build/generated/source/codegen/jni/react/renderer/components/RNSoundSpec/Props.cpp"
+  "D:/MyProjects/ZuGo2/node_modules/react-native-sound/android/build/generated/source/codegen/jni/react/renderer/components/RNSoundSpec/ShadowNodes.cpp"
+  "D:/MyProjects/ZuGo2/node_modules/react-native-sound/android/build/generated/source/codegen/jni/react/renderer/components/RNSoundSpec/States.cpp"
   )
 if(NOT "${NEW_GLOB}" STREQUAL "${OLD_GLOB}")
   message("-- GLOB mismatch!")

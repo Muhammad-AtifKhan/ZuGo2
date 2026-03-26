@@ -22,18 +22,34 @@ export type PassengerStackParamList = {
     date: string;
     time: string;
     routeId?: string;
+    fromCode?: string;
+    toCode?: string;
+    fromCityId?: string;
+    toCityId?: string;
   };
   SeatSelection: {
+    tripId: string;
     busId: string;
     from: string;
     to: string;
     date: string;
     time: string;
+    fare?: number;
+    busNumber?: string;
+    fromCode?: string;
+    toCode?: string;
   };
   Payment: {
+    tripId: string;
     busId: string;
     seatIds: string[];
     totalAmount: number;
+    from: string;
+    to: string;
+    date: string;
+    time: string;
+    fare?: number;
+    busNumber?: string;
   };
   BookingConfirmation: {
     bookingId: string;

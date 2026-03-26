@@ -62,97 +62,128 @@ const ScheduleScreen: React.FC<ScheduleScreenProps> = ({ navigation }) => {
   const [currentYear, setCurrentYear] = useState('');
   const [weekDays, setWeekDays] = useState<any[]>([]);
 
-  // Fetch driver schedule
+  // Map trip to duties for days it applies (trips have date ranges + repeatType)
+  const expandTripsToDuties = (trips: any[], weekStart: Date, weekEnd: Date): Duty[] => {
+    const dutiesList: Duty[] = [];
+    const weekStartStr = weekStart.toISOString().split('T')[0];
+    const weekEndStr = weekEnd.toISOString().split('T')[0];
+
+    for (let d = 0; d < 7; d++) {
+      const day = new Date(weekStart);
+      day.setDate(weekStart.getDate() + d);
+      const dateStr = day.toISOString().split('T')[0];
+      const dayName = day.toLocaleDateString('en-US', { weekday: 'short' });
+
+      trips.forEach(trip => {
+        const startDate = trip.startDate ?? trip.date ?? dateStr;
+        const endDate = trip.endDate ?? trip.date ?? dateStr;
+        if (dateStr < startDate || dateStr > endDate) return;
+
+        let applies = false;
+        if (trip.repeatType === 'daily') applies = true;
+        else if (trip.repeatType === 'weekly') applies = trip.days?.includes(dayName) ?? false;
+        else if (trip.repeatType === 'weekdays') applies = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].includes(dayName);
+        else if (trip.repeatType === 'weekends') applies = ['Sat', 'Sun'].includes(dayName);
+        else if (trip.repeatType === 'one-time') applies = startDate === dateStr;
+        else applies = true;
+
+        if (applies) {
+          dutiesList.push({
+            id: `${trip.id}-${dateStr}`,
+            date: dateStr,
+            dayOfWeek: dayName,
+            startTime: trip.departureTime ?? trip.startTime ?? '00:00',
+            endTime: trip.arrivalTime ?? trip.endTime ?? '00:00',
+            busNumber: trip.busNumber ?? 'N/A',
+            busId: trip.busId ?? '',
+            routeName: trip.routeName ?? 'Unknown',
+            routeId: trip.routeId ?? '',
+            status: mapDutyStatus(trip.status),
+            shiftType: 'MORNING',
+          });
+        }
+      });
+    }
+    return dutiesList.sort((a, b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime));
+  };
+
+  // Fetch driver schedule from trips (app uses trips, not duties)
   useEffect(() => {
     if (!user) return;
 
-    let unsubscribeDuties: () => void;
+    let unsubscribeTrips: () => void;
+
+    const setupSchedule = () => {
+      const now = new Date();
+      const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+        'July', 'August', 'September', 'October', 'November', 'December'];
+      setCurrentMonth(monthNames[now.getMonth()]);
+      setCurrentYear(now.getFullYear().toString());
+
+      const weekStart = new Date(now);
+      const dayOfWeek = now.getDay();
+      const diffToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+      weekStart.setDate(now.getDate() - diffToMonday);
+
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekStart.getDate() + 6);
+
+      const weekDaysArray = [];
+      for (let i = 0; i < 7; i++) {
+        const day = new Date(weekStart);
+        day.setDate(weekStart.getDate() + i);
+        weekDaysArray.push({
+          dayName: day.toLocaleDateString('en-US', { weekday: 'short' }),
+          date: day.getDate().toString(),
+          fullDate: day.toISOString().split('T')[0],
+          isToday: day.toDateString() === now.toDateString(),
+        });
+      }
+      setWeekDays(weekDaysArray);
+    };
 
     const fetchSchedule = async () => {
       try {
         setLoading(true);
+        setupSchedule();
 
-        // Get current date info
         const now = new Date();
-        const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
-          'July', 'August', 'September', 'October', 'November', 'December'];
-        setCurrentMonth(monthNames[now.getMonth()]);
-        setCurrentYear(now.getFullYear().toString());
-
-        // Calculate week start (Monday) and end (Sunday)
         const weekStart = new Date(now);
-        const dayOfWeek = now.getDay(); // 0 = Sunday, 1 = Monday, ...
-        const diffToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1; // Adjust to Monday as first day
+        const dayOfWeek = now.getDay();
+        const diffToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
         weekStart.setDate(now.getDate() - diffToMonday);
-
         const weekEnd = new Date(weekStart);
         weekEnd.setDate(weekStart.getDate() + 6);
 
-        // Format dates for display
-        const weekDaysArray = [];
-        for (let i = 0; i < 7; i++) {
-          const day = new Date(weekStart);
-          day.setDate(weekStart.getDate() + i);
-          weekDaysArray.push({
-            dayName: day.toLocaleDateString('en-US', { weekday: 'short' }),
-            date: day.getDate().toString(),
-            fullDate: day.toISOString().split('T')[0],
-            isToday: day.toDateString() === now.toDateString(),
-          });
-        }
-        setWeekDays(weekDaysArray);
-
-        // Listen to duties for this driver for the current week
-        unsubscribeDuties = firestore()
-          .collection('duties')
+        // Listen to trips for this driver (trips, not duties)
+        unsubscribeTrips = firestore()
+          .collection('trips')
           .where('driverId', '==', user.uid)
-          .where('date', '>=', weekStart.toISOString().split('T')[0])
-          .where('date', '<=', weekEnd.toISOString().split('T')[0])
-          .orderBy('date', 'asc')
-          .orderBy('startTime', 'asc')
           .onSnapshot(
             (snapshot) => {
-              const dutiesList: Duty[] = [];
+              const tripsData: any[] = [];
               snapshot.forEach(doc => {
-                const data = doc.data();
-                dutiesList.push({
-                  id: doc.id,
-                  date: data.date,
-                  dayOfWeek: data.dayOfWeek,
-                  startTime: data.startTime,
-                  endTime: data.endTime,
-                  busNumber: data.busNumber,
-                  busId: data.busId,
-                  routeName: data.routeName,
-                  routeId: data.routeId,
-                  status: mapDutyStatus(data.status),
-                  shiftType: data.shiftType,
-                });
+                tripsData.push({ id: doc.id, ...doc.data() });
               });
 
-              // Filter today's duties
+              const dutiesList = expandTripsToDuties(tripsData, weekStart, weekEnd);
               const todayStr = now.toISOString().split('T')[0];
               const today = dutiesList.filter(d => d.date === todayStr);
               setTodayDuties(today);
-
               setWeeklySchedule({
                 weekStart: weekStart.toISOString().split('T')[0],
                 weekEnd: weekEnd.toISOString().split('T')[0],
                 duties: dutiesList,
               });
-
               setLoading(false);
               setRefreshing(false);
             },
-            (error) => {
-              console.error('Error fetching duties:', error);
+            () => {
               setLoading(false);
               setRefreshing(false);
             }
           );
-
-      } catch (error) {
-        console.error('Error in fetchSchedule:', error);
+      } catch {
         setLoading(false);
         setRefreshing(false);
       }
@@ -161,7 +192,7 @@ const ScheduleScreen: React.FC<ScheduleScreenProps> = ({ navigation }) => {
     fetchSchedule();
 
     return () => {
-      if (unsubscribeDuties) unsubscribeDuties();
+      if (unsubscribeTrips) unsubscribeTrips();
     };
   }, [user]);
 

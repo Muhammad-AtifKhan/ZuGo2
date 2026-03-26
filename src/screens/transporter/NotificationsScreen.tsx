@@ -43,6 +43,7 @@ const NotificationsScreen = () => {
     const unsubscribe = firestore()
       .collection('notifications')
       .where('transporterId', '==', user.uid)
+      .where('target', '==', 'transporter')
       .orderBy('createdAt', 'desc')
       .limit(50)
       .onSnapshot(

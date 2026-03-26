@@ -1,84 +1,198 @@
-/**
- * Import function triggers from their respective submodules:
- *
- * const {onCall} = require("firebase-functions/v2/https");
- * const {onDocumentWritten} = require("firebase-functions/v2/firestore");
- *
- * See a full list of supported triggers at https://firebase.google.com/docs/functions
- */
-
-const {setGlobalOptions} = require("firebase-functions");
-const {onRequest} = require("firebase-functions/https");
-const logger = require("firebase-functions/logger");
-
-// For cost control, you can set the maximum number of containers that can be
-// running at the same time. This helps mitigate the impact of unexpected
-// traffic spikes by instead downgrading performance. This limit is a
-// per-function limit. You can override the limit for each function using the
-// `maxInstances` option in the function's options, e.g.
-// `onRequest({ maxInstances: 5 }, (req, res) => { ... })`.
-// NOTE: setGlobalOptions does not apply to functions using the v1 API. V1
-// functions should each use functions.runWith({ maxInstances: 10 }) instead.
-// In the v1 API, each function can only serve one request per container, so
-// this will be the maximum concurrent request count.
-setGlobalOptions({ maxInstances: 10 });
-
-// Create and deploy your first functions
-// https://firebase.google.com/docs/functions/get-started
-
-// exports.helloWorld = onRequest((request, response) => {
-//   logger.info("Hello logs!", {structuredData: true});
-//   response.send("Hello from Firebase!");
-// });
-
-const functions = require("firebase-functions");
-const admin = require("firebase-admin");
+// functions/index.js
+const functions = require('firebase-functions');
+const admin = require('firebase-admin');
 
 admin.initializeApp();
 
-exports.sendAnnouncementNotification =
-functions.firestore
-  .document("announcements/{announcementId}")
-  .onCreate(async (snapshot, context) => {
+const db = admin.firestore();
 
-    const announcement = snapshot.data();
+/**
+ * SCHEDULED FUNCTION: Runs every 15 minutes
+ * Cleans up expired pending bookings and releases seats
+ */
+exports.cleanupExpiredBookings = functions.pubsub
+  .schedule('every 15 minutes')
+  .onRun(async (context) => {
+    const now = admin.firestore.Timestamp.now();
+    const batch = db.batch();
+    let batchCount = 0;
+    const MAX_BATCH_SIZE = 500;
 
-    // Sab active drivers ka token fetch karo
-    const driversSnapshot = await admin
-      .firestore()
-      .collection("drivers")
-      .where("role", "==", "driver")
-      .where("status", "==", "active")
-      .get();
-
-    const tokens = [];
-
-    driversSnapshot.forEach(doc => {
-      const data = doc.data();
-      if (data.fcmToken) {
-        tokens.push(data.fcmToken);
-      }
-    });
-
-    if (tokens.length === 0) {
-      console.log("No tokens found for active drivers.");
-      return null;
-    }
-
-    const message = {
-      notification: {
-        title: "New Announcement",
-        body: announcement.message,
-      },
-      tokens: tokens,
-    };
+    console.log('🧹 Starting expired bookings cleanup at:', new Date().toISOString());
 
     try {
-      const response = await admin.messaging().sendMulticast(message);
-      console.log("Notifications sent:", response.successCount);
+      // Find all pending bookings with expired deadline
+      const expiredBookingsQuery = await db
+        .collection('bookings')
+        .where('status', '==', 'pending_payment')
+        .where('paymentDeadline', '<', now)
+        .limit(500)
+        .get();
+
+      console.log(`📊 Found ${expiredBookingsQuery.size} expired bookings`);
+
+      if (expiredBookingsQuery.empty) {
+        console.log('✅ No expired bookings found');
+        return null;
+      }
+
+      // Process each expired booking
+      for (const bookingDoc of expiredBookingsQuery.docs) {
+        const booking = bookingDoc.data();
+        const tripId = booking.tripId;
+        const seatNumbers = booking.seatNumbers || [];
+
+        console.log(`⏰ Expiring booking: ${bookingDoc.id}, Trip: ${tripId}, Seats: ${seatNumbers.join(', ')}`);
+
+        // 1. Update booking status
+        batch.update(bookingDoc.ref, {
+          status: 'expired',
+          paymentStatus: 'failed',
+          expiredAt: now,
+          updatedAt: now
+        });
+        batchCount++;
+
+        // 2. Release all seats for this booking
+        if (tripId && seatNumbers.length > 0) {
+          for (const seatNum of seatNumbers) {
+            const seatRef = db
+              .collection('trips')
+              .doc(tripId)
+              .collection('seats')
+              .doc(seatNum);
+
+            batch.update(seatRef, {
+              isBooked: false,
+              status: 'available',
+              reservedBy: null,
+              bookingId: null,
+              reservedUntil: null,
+              updatedAt: now
+            });
+            batchCount++;
+          }
+        }
+
+        // 3. Commit batch if reaching limit
+        if (batchCount >= MAX_BATCH_SIZE) {
+          await batch.commit();
+          console.log(`💾 Committed batch of ${batchCount} operations`);
+          // Start new batch
+          batchCount = 0;
+        }
+      }
+
+      // Commit final batch
+      if (batchCount > 0) {
+        await batch.commit();
+        console.log(`💾 Committed final batch of ${batchCount} operations`);
+      }
+
+      console.log(`✅ Cleanup completed successfully at: ${new Date().toISOString()}`);
+      return null;
+
     } catch (error) {
-      console.error("Error sending notifications:", error);
+      console.error('❌ Error in cleanupExpiredBookings:', error);
+      throw error;
     }
+  });
+
+/**
+ * TRIGGER FUNCTION: Runs when a new booking is created
+ * Logs booking creation (optional - for monitoring)
+ */
+exports.onBookingCreate = functions.firestore
+  .document('bookings/{bookingId}')
+  .onCreate(async (snapshot, context) => {
+    const booking = snapshot.data();
+    const bookingId = context.params.bookingId;
+
+    console.log('📝 New booking created:', {
+      bookingId,
+      userId: booking.userId,
+      tripId: booking.tripId,
+      status: booking.status,
+      paymentMethod: booking.paymentMethod,
+      total: booking.totalAmount,
+      seats: booking.seatNumbers
+    });
+
+    // Optional: Send notification or email here
+    // Keep it minimal to save quota
 
     return null;
   });
+
+/**
+ * OPTIONAL: Manual trigger function (for testing)
+ * Call this URL to manually run cleanup: https://your-project.cloudfunctions.net/manualCleanup
+ */
+exports.manualCleanup = functions.https.onRequest(async (req, res) => {
+  // Only allow POST requests
+  if (req.method !== 'POST') {
+    res.status(405).send('Method Not Allowed');
+    return;
+  }
+
+  // Optional: Add secret key for security
+  const secretKey = req.headers['x-cleanup-key'];
+  if (secretKey !== 'your-secret-key-here') {
+    res.status(401).send('Unauthorized');
+    return;
+  }
+
+  try {
+    const now = admin.firestore.Timestamp.now();
+    const batch = db.batch();
+    let count = 0;
+
+    const expiredBookingsQuery = await db
+      .collection('bookings')
+      .where('status', '==', 'pending_payment')
+      .where('paymentDeadline', '<', now)
+      .limit(100)
+      .get();
+
+    for (const bookingDoc of expiredBookingsQuery.docs) {
+      const booking = bookingDoc.data();
+      const tripId = booking.tripId;
+      const seatNumbers = booking.seatNumbers || [];
+
+      batch.update(bookingDoc.ref, {
+        status: 'expired',
+        paymentStatus: 'failed',
+        expiredAt: now,
+        updatedAt: now
+      });
+      count++;
+
+      if (tripId && seatNumbers.length > 0) {
+        for (const seatNum of seatNumbers) {
+          const seatRef = db
+            .collection('trips')
+            .doc(tripId)
+            .collection('seats')
+            .doc(seatNum);
+
+          batch.update(seatRef, {
+            status: 'available',
+            reservedBy: null,
+            bookingId: null,
+            reservedUntil: null,
+            updatedAt: now
+          });
+        }
+      }
+    }
+
+    if (count > 0) {
+      await batch.commit();
+    }
+
+    res.json({ success: true, cleaned: count });
+  } catch (error) {
+    console.error('Manual cleanup error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});

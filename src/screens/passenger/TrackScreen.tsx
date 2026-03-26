@@ -240,8 +240,7 @@ const TrackScreen = () => {
       // Start real-time tracking
       startTracking(trip);
 
-    } catch (error) {
-      console.error('Error loading trip data:', error);
+    } catch {
       Alert.alert('Error', 'Failed to load trip data');
     } finally {
       setLoading(false);
@@ -269,8 +268,7 @@ const TrackScreen = () => {
       const bookingDoc = snapshot.docs[0];
       await loadTripData(bookingDoc.id);
 
-    } catch (error) {
-      console.error('Error loading active trip:', error);
+    } catch {
       setLoading(false);
     }
   };

@@ -34,6 +34,7 @@ export type Notification = {
   actionId?: string;
   transporterId: string;
   userId?: string;
+  target?: 'transporter' | 'driver' | 'passenger';
   createdAt: firestore.Timestamp;
   updatedAt?: firestore.Timestamp;
   expiresAt?: firestore.Timestamp;

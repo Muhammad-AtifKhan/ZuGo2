@@ -58,10 +58,10 @@ export default function ForgotPasswordScreen() {
           [
             {
               text: 'Go to Login',
-              onPress: () => {
+                onPress: () => {
                 setEmail('');
                 setEmailSent(false);
-                navigation.navigate('Login', { message: 'Password reset email sent. Check your inbox.' });
+                navigation.navigate('Login');
               },
             },
             {

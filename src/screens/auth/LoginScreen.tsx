@@ -86,10 +86,8 @@ export default function LoginScreen() {
       }
 
       // Success - RootNavigator will handle navigation based on role
-      console.log('Login successful');
 
     } catch (error: any) {
-      console.error('Login error:', error);
 
       let msg = 'Login failed. Please try again.';
       if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {

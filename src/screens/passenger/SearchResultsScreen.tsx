@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+// src/screens/passenger/SearchResultsScreen.tsx - UPDATED TO USE FROMCODE/TOCODE
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -8,6 +9,7 @@ import {
   SafeAreaView,
   Alert,
   ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
@@ -40,6 +42,15 @@ interface Bus {
   operator: string;
   duration: string;
   distance: string;
+  from: string;
+  to: string;
+  fromCode: string;
+  toCode: string;
+  startDate: string;
+  endDate: string;
+  days: string[];
+  repeatType: string;
+  status: string;
 }
 
 const SearchResultsScreen = () => {
@@ -47,139 +58,179 @@ const SearchResultsScreen = () => {
   const route = useRoute<SearchResultsScreenRouteProp>();
   const user = auth().currentUser;
 
-  const { from, to, fromCode, toCode, date, time, routeId } = route.params;
+  const params = route.params ?? {};
+  const from = params.from ?? '';
+  const to = params.to ?? '';
+  const fromCode = params.fromCode;
+  const toCode = params.toCode;
+  const date = params.date ?? '';
+  const time = params.time ?? 'Anytime';
+  const routeId = params.routeId;
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [buses, setBuses] = useState<Bus[]>([]);
+  const [allTrips, setAllTrips] = useState<Bus[]>([]);
   const [filteredBuses, setFilteredBuses] = useState<Bus[]>([]);
   const [sortBy, setSortBy] = useState<'departure' | 'price' | 'rating'>('departure');
   const [filterType, setFilterType] = useState<string>('all');
 
-  // Fetch buses from Firebase
+  // Helper function to check if trip runs on selected date
+  const isTripRunningOnDate = useCallback((trip: any, selectedDate: string): boolean => {
+    if (!selectedDate || selectedDate === 'Anytime') return true;
+
+    const dateObj = new Date(selectedDate);
+    const dayOfWeek = dateObj.toLocaleDateString('en-US', { weekday: 'short' }).substring(0, 3);
+
+    // Check if date is within trip's date range
+    if (trip.startDate) {
+      const startDate = new Date(trip.startDate);
+      if (dateObj < startDate) return false;
+    }
+
+    if (trip.endDate) {
+      const endDate = new Date(trip.endDate);
+      if (dateObj > endDate) return false;
+    }
+
+    // Check if day is in trip's days array
+    if (trip.days && Array.isArray(trip.days)) {
+      return trip.days.includes(dayOfWeek);
+    }
+
+    return true;
+  }, []);
+
+  // Fetch buses from Firebase using fromCode and toCode
   useEffect(() => {
     fetchBuses();
-  }, [from, to, date]);
+  }, [fromCode, toCode, from, to, date, routeId]);
 
   const fetchBuses = async () => {
     try {
       setLoading(true);
 
-      // Query trips based on from/to locations
-      let query = firestore().collection('trips');
+      let query: any = firestore().collection('trips');
 
-      // If we have routeId from quick booking, use it
+      // ✅ UPDATED: Use fromCode and toCode for query
       if (routeId) {
         query = query.where('routeId', '==', routeId);
+      } else if (fromCode && toCode) {
+        // Primary search by codes (more accurate)
+        query = query.where('fromCode', '==', fromCode)
+                     .where('toCode', '==', toCode);
+      } else if (from && to) {
+        // Fallback to city names if codes not available
+        query = query.where('from', '==', from)
+                     .where('to', '==', to);
       } else {
-        // Otherwise search by from/to
-        if (fromCode) {
-          query = query.where('fromCode', '==', fromCode);
-        }
-        if (toCode) {
-          query = query.where('toCode', '==', toCode);
-        }
+        setAllTrips([]);
+        setFilteredBuses([]);
+        setLoading(false);
+        return;
       }
 
-      // Filter by date (if provided)
-      if (date && date !== 'Anytime') {
-        query = query.where('date', '==', date);
-      }
-
-      // Only show trips with available seats
-      query = query.where('availableSeats', '>', 0);
+      // Only show trips with available seats AND active/upcoming status
+      query = query.where('availableSeats', '>', 0)
+                   .where('status', 'in', ['active', 'upcoming']);
 
       const snapshot = await query.get();
 
-      const busesList: Bus[] = [];
-
-      for (const doc of snapshot.docs) {
+      const tripsList: Bus[] = snapshot.docs.map(doc => {
         const data = doc.data();
-
-        // Get route details
-        let routeName = data.routeName || '';
-        let routeCode = data.routeCode || '';
-
-        if (data.routeId) {
-          const routeDoc = await firestore().collection('routes').doc(data.routeId).get();
-          if (routeDoc.exists) {
-            const routeData = routeDoc.data();
-            routeName = routeData?.name || routeName;
-            routeCode = routeData?.code || routeCode;
-          }
-        }
-
-        // Get driver details
-        let driverName = 'Not assigned';
-        let driverRating = 0;
-
-        if (data.driverId) {
-          const driverDoc = await firestore().collection('drivers').doc(data.driverId).get();
-          if (driverDoc.exists) {
-            const driverData = driverDoc.data();
-            driverName = driverData?.fullName || 'Driver';
-            driverRating = driverData?.rating || 0;
-          }
-        }
-
-        busesList.push({
+        return {
           id: doc.id,
           busNumber: data.busNumber || 'N/A',
           busType: data.busType || 'Standard',
           departureTime: data.departureTime || '00:00',
           arrivalTime: data.arrivalTime || '00:00',
-          routeName: routeName,
+          routeName: data.routeName || '',
           routeCode: data.routeCode || '',
-          availableSeats: data.availableSeats || 0,
-          totalSeats: data.totalSeats || 40,
-          fare: data.fare || 0,
+          availableSeats: data.availableSeats ?? 0,
+          totalSeats: data.totalSeats ?? 40,
+          fare: data.fare ?? 0,
           driver: {
             id: data.driverId || '',
-            name: driverName,
-            rating: driverRating,
+            name: data.driverName || 'Not assigned',
+            rating: 4.0, // Default rating if not available
           },
-          amenities: data.amenities || ['AC', 'WiFi'],
-          busId: data.busId || '',
+          amenities: data.amenities ?? ['AC', 'WiFi'],
+          busId: data.busId || doc.id,
           operator: data.operator || 'ZUGO Transport',
-          duration: data.duration || '1h 30m',
+          duration: data.duration || calculateDuration(data.departureTime, data.arrivalTime),
           distance: data.distance || '45 km',
-        });
+          from: data.from || from,
+          to: data.to || to,
+          fromCode: data.fromCode || fromCode || '',
+          toCode: data.toCode || toCode || '',
+          startDate: data.startDate,
+          endDate: data.endDate,
+          days: data.days,
+          repeatType: data.repeatType,
+          status: data.status || 'upcoming',
+        };
+      });
+
+      // Apply date filtering in JavaScript
+      let filteredByDate = tripsList;
+      if (date && date !== 'Anytime') {
+        filteredByDate = tripsList.filter(trip => isTripRunningOnDate(trip, date));
       }
 
-      // Sort by departure time initially
-      const sorted = busesList.sort((a, b) =>
+      // Sort by departure time
+      const sorted = filteredByDate.sort((a, b) =>
         a.departureTime.localeCompare(b.departureTime)
       );
 
-      setBuses(sorted);
+      setAllTrips(filteredByDate);
       setFilteredBuses(sorted);
-      setLoading(false);
-
     } catch (error) {
       console.error('Error fetching buses:', error);
-      Alert.alert('Error', 'Failed to load bus schedules');
+      Alert.alert('Error', 'Failed to load bus schedules. Please try again.');
+      setAllTrips([]);
+      setFilteredBuses([]);
+    } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
-  const handleSelectBus = (busId: string) => {
-    const selectedBus = buses.find(bus => bus.id === busId);
-    if (selectedBus && selectedBus.availableSeats > 0) {
-      navigation.navigate('SeatSelection', {
-        tripId: busId,
-        busId: selectedBus.busId,
-        from,
-        to,
-        fromCode,
-        toCode,
-        date,
-        time: selectedBus.departureTime,
-        fare: selectedBus.fare,
-        busNumber: selectedBus.busNumber,
-      });
-    } else {
+  // Helper to calculate duration if not provided
+  const calculateDuration = (departure: string, arrival: string): string => {
+    if (!departure || !arrival) return '1h 30m';
+
+    const [depHour, depMin] = departure.split(':').map(Number);
+    const [arrHour, arrMin] = arrival.split(':').map(Number);
+
+    let diffMinutes = (arrHour * 60 + arrMin) - (depHour * 60 + depMin);
+    if (diffMinutes < 0) diffMinutes += 24 * 60; // Handle next day
+
+    const hours = Math.floor(diffMinutes / 60);
+    const minutes = diffMinutes % 60;
+
+    return `${hours}h ${minutes}m`;
+  };
+
+  const handleSelectBus = (tripDocId: string) => {
+    const selectedBus = filteredBuses.find(bus => bus.id === tripDocId);
+    if (!selectedBus) return;
+
+    if (selectedBus.availableSeats <= 0) {
       Alert.alert('No Seats Available', 'This bus has no available seats.');
+      return;
     }
+
+    navigation.navigate('SeatSelection', {
+      tripId: tripDocId,
+      busId: selectedBus.busId || tripDocId,
+      from,
+      to,
+      date,
+      time: selectedBus.departureTime,
+      fare: selectedBus.fare,
+      busNumber: selectedBus.busNumber,
+      fromCode: selectedBus.fromCode || fromCode,
+      toCode: selectedBus.toCode || toCode,
+    });
   };
 
   const handleSort = (type: 'departure' | 'price' | 'rating') => {
@@ -195,7 +246,7 @@ const SearchResultsScreen = () => {
         sortedBuses.sort((a, b) => a.fare - b.fare);
         break;
       case 'rating':
-        sortedBuses.sort((a, b) => b.driver.rating - a.driver.rating);
+        sortedBuses.sort((a, b) => (b.driver?.rating || 0) - (a.driver?.rating || 0));
         break;
     }
 
@@ -206,11 +257,13 @@ const SearchResultsScreen = () => {
     setFilterType(type);
 
     if (type === 'all') {
-      setFilteredBuses(buses);
+      setFilteredBuses(allTrips);
+      // Re-apply current sort
+      handleSort(sortBy);
       return;
     }
 
-    const filtered = buses.filter(bus => {
+    const filtered = allTrips.filter(bus => {
       if (type === 'ac' && bus.amenities.includes('AC')) return true;
       if (type === 'luxury' && bus.busType === 'Luxury') return true;
       if (type === 'economy' && bus.fare < 15) return true;
@@ -218,11 +271,21 @@ const SearchResultsScreen = () => {
     });
 
     setFilteredBuses(filtered);
+    // Re-apply current sort
+    setTimeout(() => handleSort(sortBy), 0);
   };
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    fetchBuses();
+  }, [fromCode, toCode, from, to, date, routeId]);
 
   const formatCurrency = (amount: number) => {
     return `PKR ${amount.toLocaleString()}`;
   };
+
+  // Memoized results count
+  const resultsCount = useMemo(() => filteredBuses.length, [filteredBuses]);
 
   if (loading) {
     return (
@@ -237,7 +300,12 @@ const SearchResultsScreen = () => {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <ScrollView style={styles.container}>
+      <ScrollView
+        style={styles.container}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+      >
         {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity
@@ -373,7 +441,7 @@ const SearchResultsScreen = () => {
 
         {/* Results Count */}
         <Text style={styles.resultsCount}>
-          {filteredBuses.length} buses found
+          {resultsCount} {resultsCount === 1 ? 'bus' : 'buses'} found
         </Text>
 
         {/* Bus Results */}
@@ -423,7 +491,7 @@ const SearchResultsScreen = () => {
                   <Text style={styles.driverText}>Driver: {bus.driver.name}</Text>
                   <View style={styles.ratingContainer}>
                     <Icon name="star" size={14} color="#FFD700" />
-                    <Text style={styles.ratingText}>{bus.driver.rating.toFixed(1)}★</Text>
+                    <Text style={styles.ratingText}>{bus.driver.rating.toFixed(1)}</Text>
                   </View>
                 </View>
 
@@ -495,6 +563,7 @@ const SearchResultsScreen = () => {
   );
 };
 
+// Styles remain the same as your original
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,

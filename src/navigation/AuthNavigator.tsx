@@ -6,6 +6,7 @@ import RoleSelectionScreen from '../screens/auth/RoleSelectionScreen';
 import PassengerRegistrationScreen from '../screens/auth/PassengerRegistrationScreen';
 import TransporterRegistrationScreen from '../screens/auth/TransporterRegistrationScreen';
 import ForgotPasswordScreen from '../screens/auth/ForgotPasswordScreen';
+import OTPVerificationScreen from '../screens/auth/OTPVerificationScreen';
 
 export type AuthStackParamList = {
   Login: undefined;
@@ -13,6 +14,7 @@ export type AuthStackParamList = {
   PassengerRegistration: { role: 'passenger' };
   TransporterRegistration: { role: 'transporter' };
   ForgotPassword: undefined;
+  OTPVerification: { phone?: string; role?: string; email?: string; userId?: string };
 };
 
 const Stack = createNativeStackNavigator<AuthStackParamList>();
@@ -38,6 +40,10 @@ export default function AuthNavigator() {
       <Stack.Screen
         name="ForgotPassword"
         component={ForgotPasswordScreen}
+      />
+      <Stack.Screen
+        name="OTPVerification"
+        component={OTPVerificationScreen}
       />
     </Stack.Navigator>
   );

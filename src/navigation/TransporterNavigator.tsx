@@ -22,6 +22,7 @@ import NotificationsScreen from '../screens/transporter/NotificationsScreen';
 import AddBusScreen from '../screens/transporter/subscreens/AddBusScreen';
 import AddDriverScreen from '../screens/transporter/subscreens/AddDriverScreen';
 import ScheduleTripScreen from '../screens/transporter/subscreens/ScheduleTripScreen';
+import TripTrackingScreen from '../screens/transporter/TripTrackingScreen';
 
 // ========== TYPE DEFINITIONS ==========
 export type TransporterStackParamList = {
@@ -31,9 +32,6 @@ export type TransporterStackParamList = {
   DriversMain: undefined;
   OperationsMain: undefined;
   ReportsMain: undefined;
-  Notifications: undefined;
-
-  // Sub Screens
   Notifications: undefined;
 
   // Fleet Module
@@ -50,12 +48,23 @@ export type TransporterStackParamList = {
     transporterId?: string;
   };
 
-  // Operations Module - 👇 YEH ADD KARO
+  // Operations Module
   ScheduleTripScreen: {
     mode: 'add' | 'edit' | 'view';
     trip?: Trip;
     preSelectedRoute?: string;
     transporterId?: string;
+  };
+
+  // 👇 ADD THIS NEW SCREEN TYPE
+  TripTrackingScreen: {
+    tripId: string;
+    busId: string;
+    busNumber: string;
+    routeFrom: string;
+    routeTo: string;
+    departureTime: string;
+    driverName: string;
   };
 };
 
@@ -178,6 +187,18 @@ const OperationsStackNavigator = () => (
         headerTintColor: '#FFFFFF',
         headerTitleStyle: styles.headerTitle,
       })}
+    />
+    {/* 👇 ADD THIS NEW SCREEN */}
+    <OperationsStack.Screen
+      name="TripTrackingScreen"
+      component={TripTrackingScreen}
+      options={{
+        headerShown: true,
+        headerTitle: 'Trip Tracking',
+        headerStyle: styles.header,
+        headerTintColor: '#FFFFFF',
+        headerTitleStyle: styles.headerTitle,
+      }}
     />
   </OperationsStack.Navigator>
 );

@@ -61,6 +61,7 @@ const NotificationsScreen: React.FC<NotificationsScreenProps> = ({ navigation })
     const unsubscribe = firestore()
       .collection('notifications')
       .where('driverId', '==', user.uid)
+      .where('target', '==', 'driver')
       .orderBy('timestamp', 'desc')
       .limit(50)
       .onSnapshot(
@@ -68,7 +69,8 @@ const NotificationsScreen: React.FC<NotificationsScreenProps> = ({ navigation })
           const notifs: Notification[] = [];
           snapshot.forEach(doc => {
             const data = doc.data();
-            const timestamp = data.timestamp?.toDate?.() || new Date();
+            const rawTimestamp = data.timestamp || data.createdAt;
+            const timestamp = rawTimestamp?.toDate?.() || new Date();
 
             notifs.push({
               id: doc.id,
@@ -90,8 +92,7 @@ const NotificationsScreen: React.FC<NotificationsScreenProps> = ({ navigation })
           setLoading(false);
           setRefreshing(false);
         },
-        (error) => {
-          console.error('Error fetching notifications:', error);
+        () => {
           setLoading(false);
           setRefreshing(false);
         }
@@ -129,8 +130,8 @@ const NotificationsScreen: React.FC<NotificationsScreenProps> = ({ navigation })
           notification.id === id ? { ...notification, read: true } : notification
         )
       );
-    } catch (error) {
-      console.error('Error marking as read:', error);
+    } catch {
+      // Ignore
     }
   };
 
@@ -209,7 +210,7 @@ const NotificationsScreen: React.FC<NotificationsScreenProps> = ({ navigation })
       switch (notification.actionType) {
         case 'view_trip':
           if (notification.actionId) {
-            navigation.navigate('Route', { tripId: notification.actionId });
+            navigation.navigate('Main', { screen: 'Route', params: { tripId: notification.actionId } });
           }
           break;
         case 'view_earnings':
@@ -220,7 +221,7 @@ const NotificationsScreen: React.FC<NotificationsScreenProps> = ({ navigation })
           break;
         case 'view_boarding':
           if (notification.actionId) {
-            navigation.navigate('Boarding', { tripId: notification.actionId });
+            navigation.navigate('Main', { screen: 'Boarding', params: { tripId: notification.actionId } });
           }
           break;
         case 'emergency':
@@ -265,7 +266,7 @@ const NotificationsScreen: React.FC<NotificationsScreenProps> = ({ navigation })
           switch (notification.actionType) {
             case 'view_trip':
               if (notification.actionId) {
-                navigation.navigate('Route', { tripId: notification.actionId });
+                navigation.navigate('Main', { screen: 'Route', params: { tripId: notification.actionId } });
               }
               break;
             case 'view_earnings':

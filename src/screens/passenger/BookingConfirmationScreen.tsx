@@ -10,41 +10,154 @@ import {
   Share,
   Linking,
   Platform,
+  ActivityIndicator,
+  Clipboard,
 } from 'react-native';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { PassengerStackParamList } from '../../navigation/PassengerNavigator';
 import Icon from 'react-native-vector-icons/MaterialIcons';
+import firestore from '@react-native-firebase/firestore';
 
 type BookingConfirmationScreenNavigationProp = StackNavigationProp<PassengerStackParamList, 'BookingConfirmation'>;
 type BookingConfirmationScreenRouteProp = RouteProp<PassengerStackParamList, 'BookingConfirmation'>;
 
+interface BookingDetails {
+  id: string;
+  ticketNumber: string;
+  bookingCode?: string;
+  passengerName: string;
+  passengerEmail: string;
+  passengerPhone: string;
+  busNumber: string;
+  busType: string;
+  from: string;
+  to: string;
+  fromCode: string;
+  toCode: string;
+  date: string;
+  time: string;
+  seatNumbers: string[];
+  seatCount: number;
+  boardingTime: string;
+  arrivalTime: string;
+  fare: number;
+  serviceFee: number;
+  discountAmount: number;
+  total: number;
+  paymentMethod: 'online_card' | 'jazzcash' | 'easypaisa' | 'cash_counter' | 'bank_transfer';
+  paymentStatus: 'paid' | 'pending' | 'failed';
+  status: 'confirmed' | 'pending_payment' | 'cancelled' | 'expired';
+  paymentDeadline?: Date;
+  bankDetails?: {
+    accountNumber: string;
+    accountTitle: string;
+    bankName: string;
+  };
+  createdAt: Date;
+}
+
 const BookingConfirmationScreen = () => {
   const navigation = useNavigation<BookingConfirmationScreenNavigationProp>();
   const route = useRoute<BookingConfirmationScreenRouteProp>();
-  const { bookingId } = route.params;
+  const bookingId = route.params?.bookingId ?? '';
 
-  const [bookingDetails, setBookingDetails] = useState({
-    ticketNumber: bookingId,
-    passengerName: 'Ali Ahmed',
-    busNumber: 'B-001',
-    busType: 'Toyota Coaster',
-    from: 'City Center',
-    to: 'Airport',
-    date: new Date().toLocaleDateString(),
-    time: '08:00 AM',
-    seat: '3A',
-    boardingTime: '07:45 AM',
-    arrivalTime: '09:30 AM',
-    fare: 12,
-    serviceFee: 1,
-    total: 13,
-  });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [bookingDetails, setBookingDetails] = useState<BookingDetails | null>(null);
+  const [timeRemaining, setTimeRemaining] = useState<string>('');
 
   useEffect(() => {
-    // In real app, fetch booking details from API
-    // setBookingDetails(fetchedData);
-  }, []);
+    const fetchBooking = async () => {
+      if (!bookingId) {
+        setError('Invalid booking ID');
+        setLoading(false);
+        return;
+      }
+      try {
+        const doc = await firestore().collection('bookings').doc(bookingId).get();
+        if (!doc.exists) {
+          setError('Booking not found');
+          setLoading(false);
+          return;
+        }
+        const data = doc.data() ?? {};
+
+        const travelDate = data.travelDate?.toDate?.() ?? new Date();
+        const paymentDeadline = data.paymentDeadline?.toDate?.();
+
+        let tripTime = '--:--';
+        let arrivalTime = '--:--';
+        if (data.tripId) {
+          const tripDoc = await firestore().collection('trips').doc(data.tripId).get();
+          const tripData = tripDoc.data();
+          tripTime = tripData?.departureTime ?? '--:--';
+          arrivalTime = tripData?.arrivalTime ?? '--:--';
+        }
+
+        setBookingDetails({
+          id: doc.id,
+          ticketNumber: data.ticketNumber ?? doc.id,
+          bookingCode: data.bookingCode,
+          passengerName: data.passengerName ?? 'Passenger',
+          passengerEmail: data.passengerEmail ?? '',
+          passengerPhone: data.passengerPhone ?? '',
+          busNumber: data.busNumber ?? 'N/A',
+          busType: data.busType ?? 'Standard',
+          from: data.from ?? '',
+          to: data.to ?? '',
+          fromCode: data.fromCode ?? '',
+          toCode: data.toCode ?? '',
+          date: travelDate.toLocaleDateString(),
+          time: tripTime,
+          seatNumbers: data.seatNumbers ?? [],
+          seatCount: data.seatCount ?? 1,
+          boardingTime: tripTime,
+          arrivalTime,
+          fare: data.baseFare ?? data.fare ?? 0,
+          serviceFee: data.serviceFee ?? 0,
+          discountAmount: data.discountAmount ?? 0,
+          total: data.totalAmount ?? data.total ?? 0,
+          paymentMethod: data.paymentMethod ?? 'online_card',
+          paymentStatus: data.paymentStatus ?? 'pending',
+          status: data.status ?? 'pending_payment',
+          paymentDeadline,
+          bankDetails: data.bankDetails,
+          createdAt: data.createdAt?.toDate?.() ?? new Date(),
+        });
+      } catch (err: any) {
+        setError(err?.message ?? 'Failed to load booking');
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchBooking();
+  }, [bookingId]);
+
+  // Countdown timer for pending payments
+  useEffect(() => {
+    if (!bookingDetails?.paymentDeadline || bookingDetails.paymentStatus === 'paid') {
+      return;
+    }
+
+    const timer = setInterval(() => {
+      const now = new Date();
+      const deadline = bookingDetails.paymentDeadline;
+      const diff = deadline.getTime() - now.getTime();
+
+      if (diff <= 0) {
+        setTimeRemaining('Expired');
+        clearInterval(timer);
+      } else {
+        const hours = Math.floor(diff / (1000 * 60 * 60));
+        const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+        const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+        setTimeRemaining(`${hours}h ${minutes}m ${seconds}s`);
+      }
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [bookingDetails]);
 
   const handleAddToCalendar = () => {
     Alert.alert(
@@ -55,17 +168,15 @@ const BookingConfirmationScreen = () => {
         {
           text: 'Add to Google Calendar',
           onPress: () => {
-            const eventTitle = `Bus Trip: ${bookingDetails.from} → ${bookingDetails.to}`;
-            const eventDetails = `Ticket: ${bookingDetails.ticketNumber}\nBus: ${bookingDetails.busNumber}\nSeat: ${bookingDetails.seat}\nBoarding: ${bookingDetails.boardingTime}\nFrom: ${bookingDetails.from}\nTo: ${bookingDetails.to}`;
+            const eventTitle = `Bus Trip: ${bookingDetails?.from} → ${bookingDetails?.to}`;
+            const eventDetails = `Ticket: ${bookingDetails?.ticketNumber}\nBus: ${bookingDetails?.busNumber}\nSeat: ${bookingDetails?.seatNumbers.join(', ')}\nBoarding: ${bookingDetails?.boardingTime}\nFrom: ${bookingDetails?.from}\nTo: ${bookingDetails?.to}`;
 
             if (Platform.OS === 'ios') {
-              // For iOS
               const calendarUrl = `calshow://?title=${encodeURIComponent(eventTitle)}&notes=${encodeURIComponent(eventDetails)}`;
               Linking.openURL(calendarUrl).catch(() => {
                 Alert.alert('Error', 'Could not open calendar app');
               });
             } else {
-              // For Android
               Alert.alert(
                 'Add to Calendar',
                 'Please add this event to your calendar manually:\n\n' + eventDetails,
@@ -73,57 +184,63 @@ const BookingConfirmationScreen = () => {
               );
             }
           }
-        },
-        {
-          text: 'Add to Phone Calendar',
-          onPress: () => {
-            Alert.alert(
-              'Calendar Added',
-              'Trip has been added to your calendar',
-              [
-                { text: 'OK' },
-                {
-                  text: 'View Calendar',
-                  onPress: () => {
-                    if (Platform.OS === 'ios') {
-                      Linking.openURL('calshow://');
-                    } else {
-                      Linking.openURL('content://com.android.calendar/time/');
-                    }
-                  }
-                }
-              ]
-            );
-          }
         }
       ]
     );
   };
 
   const handleShareTicket = async () => {
-    try {
-      const ticketContent = `
-🎫 BUS TICKET CONFIRMED 🎫
+    if (!bookingDetails) return;
 
+    const statusEmoji = bookingDetails.paymentStatus === 'paid' ? '✅' : '⏳';
+    const statusText = bookingDetails.paymentStatus === 'paid' ? 'CONFIRMED' : 'PENDING PAYMENT';
+
+    let ticketContent = `
+${statusEmoji} BUS TICKET ${statusEmoji}
+${statusText}
+`;
+
+    if (bookingDetails.paymentStatus === 'paid') {
+      ticketContent += `
 📋 Ticket: ${bookingDetails.ticketNumber}
 👤 Passenger: ${bookingDetails.passengerName}
 🚌 Bus: ${bookingDetails.busNumber} (${bookingDetails.busType})
 
-📍 FROM: ${bookingDetails.from}
-📍 TO: ${bookingDetails.to}
+📍 FROM: ${bookingDetails.from} (${bookingDetails.fromCode})
+📍 TO: ${bookingDetails.to} (${bookingDetails.toCode})
 
 📅 Date: ${bookingDetails.date}
 ⏰ Time: ${bookingDetails.time}
-💺 Seat: ${bookingDetails.seat}
+💺 Seats: ${bookingDetails.seatNumbers.join(', ')}
 
 ⌚ Boarding: ${bookingDetails.boardingTime}
 ✅ Arrival: ${bookingDetails.arrivalTime}
 
-💰 Total: $${bookingDetails.total}
-
-📱 Booked via Bus Booking App
+💰 Total: PKR ${bookingDetails.total.toLocaleString()}
 `;
+    } else {
+      ticketContent += `
+📋 Booking Code: ${bookingDetails.bookingCode}
+👤 Passenger: ${bookingDetails.passengerName}
 
+📍 FROM: ${bookingDetails.from} (${bookingDetails.fromCode})
+📍 TO: ${bookingDetails.to} (${bookingDetails.toCode})
+
+📅 Date: ${bookingDetails.date}
+⏰ Time: ${bookingDetails.time}
+💺 Seats: ${bookingDetails.seatNumbers.join(', ')}
+
+💰 Total: PKR ${bookingDetails.total.toLocaleString()}
+⏳ Payment Method: ${getPaymentMethodName(bookingDetails.paymentMethod)}
+⏰ Payment Deadline: ${bookingDetails.paymentDeadline?.toLocaleString()}
+
+⚠️ Please complete payment within the deadline to confirm your seats.
+`;
+    }
+
+    ticketContent += `\n📱 Booked via ZuGo`;
+
+    try {
       await Share.share({
         message: ticketContent,
         title: 'Share Bus Ticket',
@@ -133,11 +250,20 @@ const BookingConfirmationScreen = () => {
     }
   };
 
+  const handleCopyBookingCode = () => {
+    if (bookingDetails?.bookingCode) {
+      Clipboard.setString(bookingDetails.bookingCode);
+      Alert.alert('Copied!', 'Booking code copied to clipboard');
+    }
+  };
+
   const handleViewTrip = () => {
     navigation.navigate('MyTrips');
   };
 
   const handleSetReminder = () => {
+    if (!bookingDetails) return;
+
     Alert.alert(
       'Set Reminder',
       'When would you like to be reminded?',
@@ -155,20 +281,12 @@ const BookingConfirmationScreen = () => {
 
             const isPM = bookingDetails.boardingTime.includes('PM');
             reminderTime.setHours(isPM && hours !== 12 ? hours + 12 : hours, minutes, 0);
-            reminderTime.setHours(reminderTime.getHours() - 1); // 1 hour before
+            reminderTime.setHours(reminderTime.getHours() - 1);
 
             Alert.alert(
               'Reminder Set',
               `Reminder set for ${reminderTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
-              [
-                { text: 'OK' },
-                {
-                  text: 'View All Reminders',
-                  onPress: () => {
-                    Alert.alert('Your Reminders', '1. Bus boarding reminder - 1 hour before departure');
-                  }
-                }
-              ]
+              [{ text: 'OK' }]
             );
           }
         },
@@ -181,71 +299,44 @@ const BookingConfirmationScreen = () => {
               [{ text: 'OK' }]
             );
           }
-        },
-        {
-          text: '15 minutes before',
-          onPress: () => {
-            Alert.alert(
-              'Reminder Set',
-              `Reminder set for 15 minutes before boarding (${bookingDetails.boardingTime})`,
-              [{ text: 'OK' }]
-            );
-          }
-        },
-        {
-          text: 'Custom Time',
-          onPress: () => {
-            Alert.prompt(
-              'Set Custom Reminder',
-              'Enter minutes before boarding:',
-              [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                  text: 'Set',
-                  onPress: (minutes) => {
-                    const mins = parseInt(minutes || '0');
-                    if (mins > 0) {
-                      Alert.alert(
-                        'Reminder Set',
-                        `Reminder set for ${mins} minutes before boarding`,
-                        [{ text: 'OK' }]
-                      );
-                    } else {
-                      Alert.alert('Invalid', 'Please enter valid minutes');
-                    }
-                  }
-                }
-              ],
-              'plain-text',
-              '60'
-            );
-          }
         }
       ]
     );
   };
 
   const handleDownloadTicket = () => {
-    // Create ticket content for download
+    if (!bookingDetails) return;
+
+    const statusEmoji = bookingDetails.paymentStatus === 'paid' ? '✅' : '⏳';
+    const statusText = bookingDetails.paymentStatus === 'paid' ? 'CONFIRMED' : 'PENDING PAYMENT';
+
     const ticketContent = `
 ╔══════════════════════════════════════════╗
-║          BUS TICKET - CONFIRMED          ║
+║          ${statusEmoji} BUS TICKET ${statusEmoji}          ║
+║              ${statusText.padEnd(25)}              ║
 ╠══════════════════════════════════════════╣
-║ 🎫 Ticket: ${bookingDetails.ticketNumber.padEnd(25)} ║
+${bookingDetails.paymentStatus === 'paid' ?
+`║ 🎫 Ticket: ${bookingDetails.ticketNumber.padEnd(25)} ║` :
+`║ 🔑 Code: ${(bookingDetails.bookingCode || '').padEnd(27)} ║`}
 ║ 👤 Passenger: ${bookingDetails.passengerName.padEnd(22)} ║
 ╠══════════════════════════════════════════╣
 ║ 🚌 Bus: ${bookingDetails.busNumber.padEnd(29)} ║
 ║ 📅 Date: ${bookingDetails.date.padEnd(28)} ║
 ║ ⏰ Time: ${bookingDetails.time.padEnd(28)} ║
-║ 💺 Seat: ${bookingDetails.seat.padEnd(28)} ║
+║ 💺 Seats: ${bookingDetails.seatNumbers.join(', ').padEnd(26)} ║
 ╠══════════════════════════════════════════╣
-║ 📍 FROM: ${bookingDetails.from.padEnd(27)} ║
-║ 📍 TO:   ${bookingDetails.to.padEnd(27)} ║
+║ 📍 FROM: ${(bookingDetails.from + ' (' + bookingDetails.fromCode + ')').padEnd(26)} ║
+║ 📍 TO:   ${(bookingDetails.to + ' (' + bookingDetails.toCode + ')').padEnd(26)} ║
 ╠══════════════════════════════════════════╣
 ║ ⌚ Boarding: ${bookingDetails.boardingTime.padEnd(24)} ║
 ║ ✅ Arrival:  ${bookingDetails.arrivalTime.padEnd(24)} ║
 ╠══════════════════════════════════════════╣
-║ 💰 Total: $${bookingDetails.total.toFixed(2).padEnd(27)} ║
+║ 💰 Total: PKR ${bookingDetails.total.toLocaleString().padEnd(24)} ║
+║ 💳 Payment: ${getPaymentMethodName(bookingDetails.paymentMethod).padEnd(24)} ║
+${bookingDetails.paymentStatus !== 'paid' ?
+`╠══════════════════════════════════════════╣
+║ ⚠️  PAYMENT PENDING                      ║
+║ ⏰ Deadline: ${bookingDetails.paymentDeadline?.toLocaleString().padEnd(23)} ║` : ''}
 ╚══════════════════════════════════════════╝
     `;
 
@@ -257,19 +348,8 @@ const BookingConfirmationScreen = () => {
         {
           text: 'Copy to Clipboard',
           onPress: () => {
-            // In real app, use Clipboard from react-native
-            Alert.alert('Copied', 'Ticket copied to clipboard');
-          }
-        },
-        {
-          text: 'Save as File',
-          onPress: () => {
-            // In real app, use RNFS to save file
-            Alert.alert(
-              'Ticket Saved',
-              `Ticket saved as: ${bookingDetails.ticketNumber}.txt\n\nYou can find it in your Downloads folder.`,
-              [{ text: 'OK' }]
-            );
+            Clipboard.setString(ticketContent);
+            Alert.alert('Copied!', 'Ticket copied to clipboard');
           }
         }
       ]
@@ -277,6 +357,8 @@ const BookingConfirmationScreen = () => {
   };
 
   const handleContactSupport = () => {
+    if (!bookingDetails) return;
+
     Alert.alert(
       'Contact Support',
       'How would you like to contact support?',
@@ -293,64 +375,211 @@ const BookingConfirmationScreen = () => {
         {
           text: '📧 Email Support',
           onPress: () => {
-            const subject = `Support Request - Ticket: ${bookingDetails.ticketNumber}`;
-            const body = `Hello,\n\nI need support regarding my bus ticket:\n\nTicket: ${bookingDetails.ticketNumber}\nBus: ${bookingDetails.busNumber}\nFrom: ${bookingDetails.from}\nTo: ${bookingDetails.to}\nDate: ${bookingDetails.date}\nTime: ${bookingDetails.time}\n\nPlease assist with:\n`;
+            const subject = `Support Request - ${bookingDetails.paymentStatus === 'paid' ? 'Ticket' : 'Booking'}: ${bookingDetails.ticketNumber || bookingDetails.bookingCode}`;
+            const body = `Hello,\n\nI need support regarding my bus booking:\n\n${bookingDetails.paymentStatus === 'paid' ? 'Ticket' : 'Booking Code'}: ${bookingDetails.ticketNumber || bookingDetails.bookingCode}\nBus: ${bookingDetails.busNumber}\nFrom: ${bookingDetails.from}\nTo: ${bookingDetails.to}\nDate: ${bookingDetails.date}\nTime: ${bookingDetails.time}\nPayment Status: ${bookingDetails.paymentStatus}\n\nPlease assist with:\n`;
 
-            Linking.openURL(`mailto:support@busapp.com?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`)
+            Linking.openURL(`mailto:support@zugo.com?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`)
               .catch(() => {
                 Alert.alert('Error', 'Cannot open email app');
               });
-          }
-        },
-        {
-          text: '💬 Live Chat',
-          onPress: () => {
-            Alert.alert(
-              'Live Chat',
-              'Our support hours are 9 AM - 6 PM, 7 days a week.\n\nA support agent will connect with you shortly.',
-              [
-                { text: 'OK' },
-                {
-                  text: 'Start Chat',
-                  onPress: () => {
-                    Alert.alert('Chat Started', 'Connecting you with support agent...');
-                  }
-                }
-              ]
-            );
-          }
-        },
-        {
-          text: '🌐 Visit Help Center',
-          onPress: () => {
-            Linking.openURL('https://support.busapp.com').catch(() => {
-              Alert.alert('Help Center', 'Visit: https://support.busapp.com');
-            });
           }
         }
       ]
     );
   };
 
+  const getPaymentMethodName = (method: string): string => {
+    const methods: Record<string, string> = {
+      'online_card': 'Credit/Debit Card',
+      'jazzcash': 'JazzCash',
+      'easypaisa': 'Easypaisa',
+      'cash_counter': 'Cash at Counter',
+      'bank_transfer': 'Bank Transfer',
+    };
+    return methods[method] || method;
+  };
+
+  const getStatusColor = () => {
+    if (!bookingDetails) return '#666';
+    if (bookingDetails.paymentStatus === 'paid') return '#4CAF50';
+    if (bookingDetails.status === 'expired') return '#F44336';
+    return '#FF9800';
+  };
+
+  const getStatusIcon = () => {
+    if (!bookingDetails) return 'info';
+    if (bookingDetails.paymentStatus === 'paid') return 'check-circle';
+    if (bookingDetails.status === 'expired') return 'error';
+    return 'hourglass-empty';
+  };
+
+  const getStatusText = () => {
+    if (!bookingDetails) return '';
+    if (bookingDetails.paymentStatus === 'paid') return 'CONFIRMED';
+    if (bookingDetails.status === 'expired') return 'EXPIRED';
+    return 'PENDING PAYMENT';
+  };
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#4A90E2" />
+          <Text style={styles.loadingText}>Loading booking details...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (error || !bookingDetails) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.errorContainer}>
+          <Icon name="error-outline" size={60} color="#F44336" />
+          <Text style={styles.errorText}>{error || 'Booking not found'}</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={() => navigation.goBack()}>
+            <Text style={styles.retryButtonText}>Go Back</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  const isPaid = bookingDetails.paymentStatus === 'paid';
+  const isPending = !isPaid && bookingDetails.status === 'pending_payment';
+  const isExpired = bookingDetails.status === 'expired';
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView style={styles.container}>
-        {/* Success Icon */}
-        <View style={styles.successContainer}>
-          <View style={styles.successCircle}>
-            <Icon name="check" size={60} color="#FFF" />
+        {/* Status Icon */}
+        <View style={styles.statusContainer}>
+          <View style={[styles.statusCircle, { backgroundColor: getStatusColor() }]}>
+            <Icon name={getStatusIcon()} size={60} color="#FFF" />
           </View>
-          <Text style={styles.successTitle}>BOOKING CONFIRMED!</Text>
-          <Text style={styles.successSubtitle}>Your ticket has been issued</Text>
+          <Text style={[styles.statusTitle, { color: getStatusColor() }]}>
+            {getStatusText()}
+          </Text>
+          {isPaid && (
+            <Text style={styles.statusSubtitle}>Your ticket has been issued</Text>
+          )}
+          {isPending && (
+            <Text style={styles.statusSubtitle}>
+              Complete payment to confirm your seats
+            </Text>
+          )}
+          {isExpired && (
+            <Text style={styles.statusSubtitle}>
+              Payment deadline has passed
+            </Text>
+          )}
         </View>
 
-        {/* Ticket Number */}
+        {/* Booking Code / Ticket Number */}
         <View style={styles.ticketNumberCard}>
-          <Text style={styles.ticketNumberLabel}>TICKET NUMBER</Text>
-          <Text style={styles.ticketNumber}>{bookingDetails.ticketNumber}</Text>
+          <Text style={styles.ticketNumberLabel}>
+            {isPaid ? 'TICKET NUMBER' : 'BOOKING CODE'}
+          </Text>
+          <Text style={styles.ticketNumber}>
+            {isPaid ? bookingDetails.ticketNumber : bookingDetails.bookingCode}
+          </Text>
+          {!isPaid && bookingDetails.bookingCode && (
+            <TouchableOpacity style={styles.copyButton} onPress={handleCopyBookingCode}>
+              <Icon name="content-copy" size={20} color="#4A90E2" />
+              <Text style={styles.copyButtonText}>Copy Code</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
-        {/* Ticket Details */}
+        {/* Payment Deadline - Only for pending payments */}
+        {isPending && bookingDetails.paymentDeadline && (
+          <View style={styles.deadlineCard}>
+            <Icon name="access-time" size={24} color="#FF9800" />
+            <View style={styles.deadlineInfo}>
+              <Text style={styles.deadlineLabel}>Payment Deadline</Text>
+              <Text style={styles.deadlineTime}>
+                {bookingDetails.paymentDeadline.toLocaleString()}
+              </Text>
+              <Text style={styles.deadlineCountdown}>
+                Time remaining: {timeRemaining}
+              </Text>
+            </View>
+          </View>
+        )}
+
+        {/* Payment Instructions - For cash/transfer */}
+        {isPending && bookingDetails.paymentMethod === 'cash_counter' && (
+          <View style={styles.instructionsCard}>
+            <Icon name="store" size={24} color="#4A90E2" />
+            <Text style={styles.instructionsTitle}>Cash Payment Instructions</Text>
+            <View style={styles.instructionItem}>
+              <Icon name="looks-one" size={20} color="#4A90E2" />
+              <Text style={styles.instructionText}>
+                Visit any ZUGO customer service counter
+              </Text>
+            </View>
+            <View style={styles.instructionItem}>
+              <Icon name="looks-two" size={20} color="#4A90E2" />
+              <Text style={styles.instructionText}>
+                Show your booking code: {bookingDetails.bookingCode}
+              </Text>
+            </View>
+            <View style={styles.instructionItem}>
+              <Icon name="looks-3" size={20} color="#4A90E2" />
+              <Text style={styles.instructionText}>
+                Pay PKR {bookingDetails.total.toLocaleString()} in cash
+              </Text>
+            </View>
+            <View style={styles.instructionItem}>
+              <Icon name="looks-4" size={20} color="#FF9800" />
+              <Text style={styles.instructionText}>
+                Complete payment within {timeRemaining}
+              </Text>
+            </View>
+          </View>
+        )}
+
+        {isPending && bookingDetails.paymentMethod === 'bank_transfer' && (
+          <View style={styles.instructionsCard}>
+            <Icon name="account-balance" size={24} color="#4A90E2" />
+            <Text style={styles.instructionsTitle}>Bank Transfer Instructions</Text>
+
+            <View style={styles.bankDetailsCard}>
+              <Text style={styles.bankDetailLabel}>Bank Name:</Text>
+              <Text style={styles.bankDetailValue}>HBL - Habib Bank Limited</Text>
+
+              <Text style={styles.bankDetailLabel}>Account Title:</Text>
+              <Text style={styles.bankDetailValue}>ZUGO TRANSPORT SERVICES</Text>
+
+              <Text style={styles.bankDetailLabel}>Account Number:</Text>
+              <Text style={styles.bankDetailValue}>1234 5678 9012 3456</Text>
+
+              <Text style={styles.bankDetailLabel}>Amount:</Text>
+              <Text style={styles.bankDetailValue}>PKR {bookingDetails.total.toLocaleString()}</Text>
+            </View>
+
+            <View style={styles.instructionItem}>
+              <Icon name="check-circle" size={20} color="#4CAF50" />
+              <Text style={styles.instructionText}>
+                Transfer the exact amount to above account
+              </Text>
+            </View>
+            <View style={styles.instructionItem}>
+              <Icon name="check-circle" size={20} color="#4CAF50" />
+              <Text style={styles.instructionText}>
+                Use booking code {bookingDetails.bookingCode} as reference
+              </Text>
+            </View>
+            <View style={styles.instructionItem}>
+              <Icon name="info" size={20} color="#FF9800" />
+              <Text style={styles.instructionText}>
+                Seats will be confirmed after transfer verification (2-4 hours)
+              </Text>
+            </View>
+          </View>
+        )}
+
+        {/* Ticket Details - Show for all bookings */}
         <View style={styles.ticketCard}>
           {/* Passenger Info */}
           <View style={styles.ticketSection}>
@@ -359,6 +588,8 @@ const BookingConfirmationScreen = () => {
               <Text style={styles.sectionTitle}>PASSENGER</Text>
             </View>
             <Text style={styles.detailText}>{bookingDetails.passengerName}</Text>
+            <Text style={styles.detailSubText}>{bookingDetails.passengerEmail}</Text>
+            <Text style={styles.detailSubText}>{bookingDetails.passengerPhone}</Text>
           </View>
 
           {/* Journey Info */}
@@ -373,7 +604,9 @@ const BookingConfirmationScreen = () => {
                 <View style={styles.locationDot} />
                 <View>
                   <Text style={styles.locationLabel}>FROM</Text>
-                  <Text style={styles.locationText}>{bookingDetails.from}</Text>
+                  <Text style={styles.locationText}>
+                    {bookingDetails.from} ({bookingDetails.fromCode})
+                  </Text>
                 </View>
               </View>
 
@@ -383,7 +616,9 @@ const BookingConfirmationScreen = () => {
                 <View style={[styles.locationDot, styles.destinationDot]} />
                 <View>
                   <Text style={styles.locationLabel}>TO</Text>
-                  <Text style={styles.locationText}>{bookingDetails.to}</Text>
+                  <Text style={styles.locationText}>
+                    {bookingDetails.to} ({bookingDetails.toCode})
+                  </Text>
                 </View>
               </View>
             </View>
@@ -411,8 +646,8 @@ const BookingConfirmationScreen = () => {
 
               <View style={styles.detailItem}>
                 <Icon name="event-seat" size={16} color="#666" />
-                <Text style={styles.detailLabel}>Seat</Text>
-                <Text style={styles.detailValue}>{bookingDetails.seat}</Text>
+                <Text style={styles.detailLabel}>Seats</Text>
+                <Text style={styles.detailValue}>{bookingDetails.seatNumbers.join(', ')}</Text>
               </View>
 
               <View style={styles.detailItem}>
@@ -434,7 +669,7 @@ const BookingConfirmationScreen = () => {
               <View style={styles.boardingItem}>
                 <Icon name="access-time" size={20} color="#4CAF50" />
                 <View style={styles.boardingTextContainer}>
-                  <Text style={styles.boardingLabel}>Boarding Starts</Text>
+                  <Text style={styles.boardingLabel}>Boarding Time</Text>
                   <Text style={styles.boardingValue}>{bookingDetails.boardingTime}</Text>
                 </View>
               </View>
@@ -442,20 +677,72 @@ const BookingConfirmationScreen = () => {
               <View style={styles.boardingItem}>
                 <Icon name="location-on" size={20} color="#4CAF50" />
                 <View style={styles.boardingTextContainer}>
-                  <Text style={styles.boardingLabel}>Location</Text>
+                  <Text style={styles.boardingLabel}>Boarding Point</Text>
                   <Text style={styles.boardingValue}>City Center Bus Stop, Gate 3</Text>
                 </View>
               </View>
             </View>
           </View>
 
-          {/* QR Code Placeholder */}
-          <View style={styles.qrContainer}>
-            <View style={styles.qrPlaceholder}>
-              <Icon name="qr-code" size={100} color="#4A90E2" />
-              <Text style={styles.qrText}>Scan at boarding</Text>
+          {/* Payment Summary */}
+          <View style={styles.ticketSection}>
+            <View style={styles.sectionHeader}>
+              <Icon name="payment" size={20} color="#4A90E2" />
+              <Text style={styles.sectionTitle}>PAYMENT SUMMARY</Text>
+            </View>
+
+            <View style={styles.paymentSummary}>
+              <View style={styles.paymentRow}>
+                <Text style={styles.paymentLabel}>Base Fare ({bookingDetails.seatCount} seats)</Text>
+                <Text style={styles.paymentValue}>PKR {bookingDetails.fare.toLocaleString()}</Text>
+              </View>
+
+              <View style={styles.paymentRow}>
+                <Text style={styles.paymentLabel}>Service Fee</Text>
+                <Text style={styles.paymentValue}>PKR {bookingDetails.serviceFee}</Text>
+              </View>
+
+              {bookingDetails.discountAmount > 0 && (
+                <View style={styles.paymentRow}>
+                  <Text style={styles.paymentLabel}>Discount</Text>
+                  <Text style={[styles.paymentValue, styles.discountText]}>
+                    -PKR {bookingDetails.discountAmount.toLocaleString()}
+                  </Text>
+                </View>
+              )}
+
+              <View style={[styles.paymentRow, styles.totalRow]}>
+                <Text style={styles.totalLabel}>TOTAL</Text>
+                <Text style={styles.totalValue}>PKR {bookingDetails.total.toLocaleString()}</Text>
+              </View>
+
+              <View style={styles.paymentMethodRow}>
+                <Text style={styles.paymentMethodLabel}>Payment Method:</Text>
+                <Text style={styles.paymentMethodValue}>
+                  {getPaymentMethodName(bookingDetails.paymentMethod)}
+                </Text>
+              </View>
+
+              <View style={styles.paymentStatusRow}>
+                <Text style={styles.paymentStatusLabel}>Payment Status:</Text>
+                <View style={[styles.paymentStatusBadge, { backgroundColor: getStatusColor() }]}>
+                  <Text style={styles.paymentStatusBadgeText}>
+                    {bookingDetails.paymentStatus.toUpperCase()}
+                  </Text>
+                </View>
+              </View>
             </View>
           </View>
+
+          {/* QR Code - Only for paid bookings */}
+          {isPaid && (
+            <View style={styles.qrContainer}>
+              <View style={styles.qrPlaceholder}>
+                <Icon name="qr-code" size={100} color="#4A90E2" />
+                <Text style={styles.qrText}>Scan at boarding</Text>
+              </View>
+            </View>
+          )}
         </View>
 
         {/* Important Notes */}
@@ -467,19 +754,23 @@ const BookingConfirmationScreen = () => {
             <Text style={styles.noteText}>Arrive at least 15 minutes before boarding time</Text>
           </View>
 
-          <View style={styles.noteItem}>
-            <Icon name="check-circle" size={16} color="#4CAF50" />
-            <Text style={styles.noteText}>Show QR code to driver for boarding</Text>
-          </View>
+          {isPaid && (
+            <View style={styles.noteItem}>
+              <Icon name="check-circle" size={16} color="#4CAF50" />
+              <Text style={styles.noteText}>Show QR code or ticket to driver for boarding</Text>
+            </View>
+          )}
+
+          {!isPaid && (
+            <View style={styles.noteItem}>
+              <Icon name="warning" size={16} color="#FF9800" />
+              <Text style={styles.noteText}>Complete payment within deadline to confirm seats</Text>
+            </View>
+          )}
 
           <View style={styles.noteItem}>
             <Icon name="check-circle" size={16} color="#4CAF50" />
             <Text style={styles.noteText}>Carry valid ID proof</Text>
-          </View>
-
-          <View style={styles.noteItem}>
-            <Icon name="check-circle" size={16} color="#4CAF50" />
-            <Text style={styles.noteText}>Boarding starts at {bookingDetails.boardingTime}</Text>
           </View>
         </View>
 
@@ -541,7 +832,7 @@ const BookingConfirmationScreen = () => {
         {/* Done Button */}
         <TouchableOpacity
           style={styles.doneButton}
-          onPress={() => navigation.navigate('HomeTab')}
+          onPress={() => navigation.navigate('Home')}
         >
           <Text style={styles.doneButtonText}>DONE</Text>
           <Icon name="check-circle" size={20} color="#FFF" />
@@ -556,36 +847,66 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#F8F9FA',
   },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#666',
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  errorText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#F44336',
+    textAlign: 'center',
+  },
+  retryButton: {
+    marginTop: 24,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    backgroundColor: '#4A90E2',
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: '#FFF',
+    fontWeight: '600',
+  },
   container: {
     flex: 1,
     padding: 16,
   },
-  successContainer: {
+  statusContainer: {
     alignItems: 'center',
-    marginVertical: 30,
+    marginVertical: 20,
   },
-  successCircle: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: '#4CAF50',
+  statusCircle: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 20,
-    shadowColor: '#4CAF50',
+    marginBottom: 16,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 4,
   },
-  successTitle: {
-    fontSize: 28,
+  statusTitle: {
+    fontSize: 24,
     fontWeight: 'bold',
-    color: '#1A237E',
-    marginBottom: 8,
-    textAlign: 'center',
+    marginBottom: 4,
   },
-  successSubtitle: {
+  statusSubtitle: {
     fontSize: 16,
     color: '#666',
     textAlign: 'center',
@@ -594,7 +915,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFF',
     borderRadius: 16,
     padding: 20,
-    marginBottom: 20,
+    marginBottom: 16,
     alignItems: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
@@ -609,16 +930,90 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   ticketNumber: {
-    fontSize: 32,
+    fontSize: 24,
     fontWeight: 'bold',
     color: '#4A90E2',
-    letterSpacing: 2,
+    letterSpacing: 1,
+    marginBottom: 8,
+  },
+  copyButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 8,
+  },
+  copyButtonText: {
+    fontSize: 14,
+    color: '#4A90E2',
+    marginLeft: 4,
+  },
+  deadlineCard: {
+    backgroundColor: '#FFF3E0',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#FFE0B2',
+  },
+  deadlineInfo: {
+    marginLeft: 12,
+    flex: 1,
+  },
+  deadlineLabel: {
+    fontSize: 14,
+    color: '#E65100',
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  deadlineTime: {
+    fontSize: 16,
+    color: '#1A1A1A',
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  deadlineCountdown: {
+    fontSize: 14,
+    color: '#FF9800',
+    fontWeight: '600',
+  },
+  instructionsCard: {
+    backgroundColor: '#F0F8FF',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#BBDEFB',
+  },
+  instructionsTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#1A237E',
+    marginTop: 12,
+    marginBottom: 16,
+  },
+  bankDetailsCard: {
+    backgroundColor: '#FFF',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+  },
+  bankDetailLabel: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 8,
+  },
+  bankDetailValue: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1A1A1A',
+    marginBottom: 8,
   },
   ticketCard: {
     backgroundColor: '#FFF',
     borderRadius: 16,
     padding: 20,
-    marginBottom: 20,
+    marginBottom: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
@@ -643,6 +1038,12 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
     color: '#1A1A1A',
+    marginBottom: 4,
+  },
+  detailSubText: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 2,
   },
   journeyRow: {
     flexDirection: 'row',
@@ -670,7 +1071,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   locationText: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '600',
     color: '#1A1A1A',
   },
@@ -721,6 +1122,81 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#1A1A1A',
   },
+  paymentSummary: {
+    backgroundColor: '#F8F9FA',
+    borderRadius: 12,
+    padding: 16,
+  },
+  paymentRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  paymentLabel: {
+    fontSize: 14,
+    color: '#666',
+  },
+  paymentValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1A1A1A',
+  },
+  discountText: {
+    color: '#4CAF50',
+  },
+  totalRow: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#E0E0E0',
+  },
+  totalLabel: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#1A237E',
+  },
+  totalValue: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#4CAF50',
+  },
+  paymentMethodRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#E0E0E0',
+  },
+  paymentMethodLabel: {
+    fontSize: 14,
+    color: '#666',
+  },
+  paymentMethodValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1A1A1A',
+  },
+  paymentStatusRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  paymentStatusLabel: {
+    fontSize: 14,
+    color: '#666',
+  },
+  paymentStatusBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  paymentStatusBadgeText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#FFF',
+  },
   qrContainer: {
     alignItems: 'center',
     padding: 20,
@@ -742,7 +1218,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFF',
     borderRadius: 16,
     padding: 20,
-    marginBottom: 20,
+    marginBottom: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
@@ -771,7 +1247,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFF',
     borderRadius: 16,
     padding: 20,
-    marginBottom: 20,
+    marginBottom: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,

@@ -15,16 +15,12 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 
-// Define navigation types
-type RootStackParamList = {
-  Passenger: undefined;
-  Transporter: undefined;
-  Driver: undefined;
+type AuthStackParamList = {
   Login: undefined;
-  Home: undefined;
+  OTPVerification: { phone?: string; role?: string; email?: string; userId?: string };
 };
 
-type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
+type NavigationProp = NativeStackNavigationProp<AuthStackParamList>;
 
 export default function OTPVerificationScreen() {
   const navigation = useNavigation<NavigationProp>();
@@ -171,21 +167,14 @@ export default function OTPVerificationScreen() {
 
           Alert.alert(
             'Success! 🎉',
-            `Phone verification complete!\n\nWelcome ${role === 'passenger' ? 'Passenger' : 'Transporter'}!`,
+            `Verification complete!\n\nPlease sign in to continue.`,
             [
               {
-                text: 'Go to Dashboard',
+                text: 'Go to Login',
                 onPress: () => {
-                  // Navigate based on role
-                  const routeMap = {
-                    passenger: 'Passenger',
-                    transporter: 'Transporter',
-                    driver: 'Driver'
-                  };
-
                   navigation.reset({
                     index: 0,
-                    routes: [{ name: routeMap[role as keyof typeof routeMap] as any }],
+                    routes: [{ name: 'Login' }],
                   });
                 },
               },
@@ -207,21 +196,15 @@ export default function OTPVerificationScreen() {
   const handleSkipForNow = () => {
     Alert.alert(
       'Skip Phone Verification',
-      'You can verify your phone number later from your profile settings. Continue to dashboard?',
+      'You can verify your phone number later from your profile settings. Continue to login?',
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Continue',
           onPress: () => {
-            const routeMap = {
-              passenger: 'Passenger',
-              transporter: 'Transporter',
-              driver: 'Driver'
-            };
-
             navigation.reset({
               index: 0,
-              routes: [{ name: routeMap[role as keyof typeof routeMap] as any }],
+              routes: [{ name: 'Login' }],
             });
           }
         }

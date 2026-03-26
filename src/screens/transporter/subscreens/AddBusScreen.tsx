@@ -1,5 +1,5 @@
-// src/screens/transporter/subscreens/AddBusScreen.tsx
-import React, { useState, useEffect } from 'react';
+// src/screens/transporter/subscreens/AddBusScreen.tsx - COMPLETE FIXED VERSION
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -20,6 +20,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 import storage from '@react-native-firebase/storage';
+import ImageResizer from 'react-native-image-resizer'; // Optional: for image compression
 
 // Types
 import { Bus } from '../../../types/fleet.types';
@@ -30,7 +31,7 @@ import { COLORS, SIZES, SHADOWS } from '../../../constants/theme';
 const AddBusScreen = () => {
   const navigation = useNavigation();
   const route = useRoute();
-  const { mode, bus, transporterId } = route.params as {
+  const { mode, bus, transporterId: routeTransporterId } = route.params as {
     mode: 'add' | 'edit';
     bus?: Bus;
     transporterId?: string;
@@ -38,27 +39,28 @@ const AddBusScreen = () => {
 
   const [loading, setLoading] = useState(false);
   const [uploadingImages, setUploadingImages] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
 
   // Date picker states
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [currentDateField, setCurrentDateField] = useState('');
   const [selectedDate, setSelectedDate] = useState(new Date());
 
-  // Image states - Ab URIs store karenge
-  const [busImages, setBusImages] = useState({
-    frontView: null as string | null,
-    backView: null as string | null,
-    interior: null as string | null,
-    documents: null as string | null,
-  });
-
-  // Uploaded image URLs (Firebase Storage se)
-  const [uploadedImageUrls, setUploadedImageUrls] = useState({
+  // ✅ FIX: Single source of truth for images - removed busImages + uploadedImageUrls duplication
+  const [images, setImages] = useState({
     frontView: '',
     backView: '',
     interior: '',
     documents: '',
   });
+
+  // Track which images are new and need uploading
+  const [newImageUris, setNewImageUris] = useState<Record<string, string>>({});
+
+  // ✅ FIX: Update field helper
+  const updateField = useCallback((key: string, value: any) => {
+    setFormData(prev => ({ ...prev, [key]: value }));
+  }, []);
 
   const [formData, setFormData] = useState({
     busNumber: '',
@@ -69,10 +71,18 @@ const AddBusScreen = () => {
     capacity: '',
     fuelType: 'diesel',
     color: '',
+    busType: 'standard',
     insuranceNumber: '',
     insuranceExpiry: '',
     fitnessExpiry: '',
+    assignedDriverId: '',
   });
+
+  const user = auth().currentUser;
+  const effectiveTransporterId = routeTransporterId || user?.uid;
+
+  // Debounce ref for duplicate check
+  const duplicateCheckTimeout = useRef<NodeJS.Timeout>();
 
   // Load existing bus data if in edit mode
   useEffect(() => {
@@ -86,14 +96,16 @@ const AddBusScreen = () => {
         capacity: bus.capacity?.toString() || '',
         fuelType: bus.fuelType || 'diesel',
         color: bus.color || '',
+        busType: bus.busType || 'standard',
         insuranceNumber: bus.insuranceNumber || '',
         insuranceExpiry: bus.insuranceExpiry || '',
         fitnessExpiry: bus.fitnessExpiry || '',
+        assignedDriverId: bus.assignedDriverId || '',
       });
 
       // Load existing image URLs
       if (bus.images) {
-        setUploadedImageUrls({
+        setImages({
           frontView: bus.images.frontView || '',
           backView: bus.images.backView || '',
           interior: bus.images.interior || '',
@@ -103,6 +115,16 @@ const AddBusScreen = () => {
     }
   }, [mode, bus]);
 
+  // Bus Types
+  const busTypes = [
+    { id: 'standard', label: 'Standard', icon: '🚌' },
+    { id: 'ac', label: 'AC', icon: '❄️' },
+    { id: 'luxury', label: 'Luxury', icon: '✨' },
+    { id: 'sleeper', label: 'Sleeper', icon: '🛏️' },
+    { id: 'minibus', label: 'Mini Bus', icon: '🚐' },
+  ];
+
+  // Fuel Types
   const fuelTypes = [
     { id: 'diesel', label: 'Diesel', icon: '⛽' },
     { id: 'petrol', label: 'Petrol', icon: '⛽' },
@@ -110,13 +132,35 @@ const AddBusScreen = () => {
     { id: 'electric', label: 'Electric', icon: '⚡' },
   ];
 
-  const user = auth().currentUser;
+  // ✅ FIX: Delete image from Firebase Storage
+  const deleteImageFromStorage = useCallback(async (imageUrl: string): Promise<void> => {
+    if (!imageUrl) return;
+
+    try {
+      const ref = storage().refFromURL(imageUrl);
+      await ref.delete();
+      console.log('✅ Image deleted from storage:', imageUrl);
+    } catch (error) {
+      // Don't throw error if image doesn't exist
+      if (error.code !== 'storage/object-not-found') {
+        console.error('Error deleting image:', error);
+      }
+    }
+  }, []);
 
   // ========== DATE PICKER FUNCTIONS ==========
   const handleDatePress = (field: string) => {
     setCurrentDateField(field);
-    if (formData[field as keyof typeof formData]) {
-      setSelectedDate(new Date(formData[field as keyof typeof formData] as string));
+    const dateValue = formData[field as keyof typeof formData];
+
+    // ✅ FIX: Safe date parsing
+    if (dateValue && typeof dateValue === 'string') {
+      const parsedDate = new Date(dateValue);
+      if (!isNaN(parsedDate.getTime())) {
+        setSelectedDate(parsedDate);
+      } else {
+        setSelectedDate(new Date());
+      }
     } else {
       setSelectedDate(new Date());
     }
@@ -128,27 +172,16 @@ const AddBusScreen = () => {
       setShowDatePicker(false);
     }
 
-    if (date) {
+    if (date && !isNaN(date.getTime())) {
       setSelectedDate(date);
       const formattedDate = date.toISOString().split('T')[0];
-
-      if (currentDateField === 'insuranceExpiry') {
-        setFormData({...formData, insuranceExpiry: formattedDate});
-      } else if (currentDateField === 'fitnessExpiry') {
-        setFormData({...formData, fitnessExpiry: formattedDate});
-      }
+      updateField(currentDateField, formattedDate);
     }
   };
 
   const handleAndroidDateConfirm = () => {
     const formattedDate = selectedDate.toISOString().split('T')[0];
-
-    if (currentDateField === 'insuranceExpiry') {
-      setFormData({...formData, insuranceExpiry: formattedDate});
-    } else if (currentDateField === 'fitnessExpiry') {
-      setFormData({...formData, fitnessExpiry: formattedDate});
-    }
-
+    updateField(currentDateField, formattedDate);
     setShowDatePicker(false);
   };
 
@@ -174,20 +207,44 @@ const AddBusScreen = () => {
     );
   };
 
-  // 📸 Upload image to Firebase Storage
-  const uploadImageToStorage = async (imageUri: string, imageType: string): Promise<string | null> => {
+  // ✅ FIX: Optional image compression before upload
+  const compressImage = async (imageUri: string): Promise<string> => {
+    try {
+      // If you have react-native-image-resizer installed
+      // const compressed = await ImageResizer.createResizedImage(
+      //   imageUri,
+      //   800,
+      //   800,
+      //   'JPEG',
+      //   80
+      // );
+      // return compressed.uri;
+
+      // Fallback: return original
+      return imageUri;
+    } catch (error) {
+      console.error('Image compression error:', error);
+      return imageUri;
+    }
+  };
+
+  // ✅ FIX: Upload image with timestamp to avoid overwrites
+  const uploadImageToStorage = async (imageUri: string, imageType: string, busId?: string): Promise<string | null> => {
     if (!user) return null;
 
     try {
-      const filename = `buses/${user.uid}/${Date.now()}_${imageType}.jpg`;
+      // Compress image first (optional)
+      const compressedUri = await compressImage(imageUri);
+
+      const busIdentifier = busId || 'new';
+      // ✅ FIX: Add timestamp to avoid overwriting
+      const timestamp = Date.now();
+      const filename = `buses/${user.uid}/${busIdentifier}/${imageType}_${timestamp}.jpg`;
       const reference = storage().ref(filename);
 
       console.log('Uploading image:', filename);
 
-      // Upload file
-      await reference.putFile(imageUri);
-
-      // Get download URL
+      await reference.putFile(compressedUri);
       const downloadUrl = await reference.getDownloadURL();
       console.log('Image uploaded:', downloadUrl);
 
@@ -207,16 +264,21 @@ const AddBusScreen = () => {
       saveToPhotos: true,
     };
 
-    launchCamera(options, (response) => {
+    launchCamera(options, async (response) => {
       if (response.didCancel) {
         console.log('User cancelled camera');
       } else if (response.errorCode) {
         Alert.alert('Error', response.errorMessage || 'Camera error');
       } else if (response.assets && response.assets[0]) {
         const imageUri = response.assets[0].uri;
-
         if (imageUri) {
-          setBusImages(prev => ({
+          // Store local URI for preview
+          setImages(prev => ({
+            ...prev,
+            [imageType]: imageUri
+          }));
+          // Track as new image
+          setNewImageUris(prev => ({
             ...prev,
             [imageType]: imageUri
           }));
@@ -235,16 +297,19 @@ const AddBusScreen = () => {
       selectionLimit: 1,
     };
 
-    launchImageLibrary(options, (response) => {
+    launchImageLibrary(options, async (response) => {
       if (response.didCancel) {
         console.log('User cancelled gallery');
       } else if (response.errorCode) {
         Alert.alert('Error', response.errorMessage || 'Gallery error');
       } else if (response.assets && response.assets[0]) {
         const imageUri = response.assets[0].uri;
-
         if (imageUri) {
-          setBusImages(prev => ({
+          setImages(prev => ({
+            ...prev,
+            [imageType]: imageUri
+          }));
+          setNewImageUris(prev => ({
             ...prev,
             [imageType]: imageUri
           }));
@@ -254,7 +319,11 @@ const AddBusScreen = () => {
     });
   };
 
-  const removeImage = (imageType: string) => {
+  // ✅ FIX: Proper removeImage with storage deletion
+  const removeImage = useCallback(async (imageType: string) => {
+    const existingUrl = images[imageType as keyof typeof images];
+    const isNewImage = newImageUris[imageType];
+
     Alert.alert(
       "Remove Image",
       "Are you sure you want to remove this image?",
@@ -266,25 +335,32 @@ const AddBusScreen = () => {
         {
           text: "Remove",
           style: "destructive",
-          onPress: () => {
-            setBusImages(prev => ({
-              ...prev,
-              [imageType]: null
-            }));
-            setUploadedImageUrls(prev => ({
+          onPress: async () => {
+            // Delete from storage if it's an existing URL (not a local URI)
+            if (existingUrl && !isNewImage && existingUrl.startsWith('http')) {
+              await deleteImageFromStorage(existingUrl);
+            }
+
+            // Update state
+            setImages(prev => ({
               ...prev,
               [imageType]: ''
             }));
+
+            // Remove from new images tracking
+            setNewImageUris(prev => {
+              const newState = { ...prev };
+              delete newState[imageType];
+              return newState;
+            });
           }
         }
       ]
     );
-  };
+  }, [images, newImageUris, deleteImageFromStorage]);
 
   const renderImagePreview = (imageType: string, label: string) => {
-    // Pehle local URI check karo, phir uploaded URL
-    const imageUri = busImages[imageType as keyof typeof busImages] ||
-                    uploadedImageUrls[imageType as keyof typeof uploadedImageUrls];
+    const imageUri = images[imageType as keyof typeof images];
 
     if (imageUri) {
       return (
@@ -324,38 +400,145 @@ const AddBusScreen = () => {
     );
   };
 
+  // Format registration number (ABC-123)
+  const formatRegistrationNumber = (text: string) => {
+    let cleaned = text.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+    if (cleaned.length > 3) {
+      const letters = cleaned.substring(0, 3);
+      const numbers = cleaned.substring(3, 7);
+      return `${letters}-${numbers}`;
+    }
+    return cleaned;
+  };
+
+  const handleBusNumberChange = (text: string) => {
+    updateField('busNumber', text.toUpperCase());
+  };
+
+  const handleRegistrationChange = (text: string) => {
+    updateField('registrationNumber', formatRegistrationNumber(text));
+  };
+
+  // ✅ FIX: Case-insensitive duplicate check with debounce
+  const checkDuplicateBus = useCallback(async (): Promise<boolean> => {
+    if (!effectiveTransporterId) return true;
+
+    const registrationNumber = formData.registrationNumber.trim().toUpperCase();
+    if (!registrationNumber) return true;
+
+    try {
+      const existingBus = await firestore()
+        .collection('buses')
+        .where('transporterId', '==', effectiveTransporterId)
+        .where('registrationNumber', '==', registrationNumber)
+        .where('isDeleted', '==', false)
+        .limit(1)
+        .get();
+
+      if (!existingBus.empty) {
+        if (mode === 'edit' && bus?.id) {
+          const isSameBus = existingBus.docs.some(doc => doc.id === bus.id);
+          if (!isSameBus) {
+            Alert.alert('Error', 'A bus with this registration number already exists');
+            return false;
+          }
+        } else if (mode === 'add') {
+          Alert.alert('Error', 'A bus with this registration number already exists');
+          return false;
+        }
+      }
+      return true;
+    } catch (error) {
+      console.error('Error checking duplicate:', error);
+      return true;
+    }
+  }, [effectiveTransporterId, formData.registrationNumber, mode, bus]);
+
+  // ✅ FIX: Debounced duplicate check
+  useEffect(() => {
+    if (duplicateCheckTimeout.current) {
+      clearTimeout(duplicateCheckTimeout.current);
+    }
+
+    if (formData.registrationNumber.length >= 7) {
+      duplicateCheckTimeout.current = setTimeout(() => {
+        checkDuplicateBus();
+      }, 500);
+    }
+
+    return () => {
+      if (duplicateCheckTimeout.current) {
+        clearTimeout(duplicateCheckTimeout.current);
+      }
+    };
+  }, [formData.registrationNumber, checkDuplicateBus]);
+
   // ========== FORM VALIDATION ==========
-  const validateForm = () => {
+  const validateForm = (): boolean => {
     if (!formData.busNumber.trim()) {
       Alert.alert('Error', 'Please enter bus number');
       return false;
     }
+
     if (!formData.registrationNumber.trim()) {
       Alert.alert('Error', 'Please enter registration number');
       return false;
     }
+
+    // ✅ FIX: Case-insensitive regex
+    const regRegex = /^[A-Z]{3}-\d{3,4}$/i;
+    if (!regRegex.test(formData.registrationNumber)) {
+      Alert.alert('Error', 'Registration number must be in format: ABC-123 or ABC-1234');
+      return false;
+    }
+
     if (!formData.capacity.trim()) {
       Alert.alert('Error', 'Please enter seating capacity');
       return false;
     }
+
     const capacityNum = parseInt(formData.capacity);
-    if (isNaN(capacityNum) || capacityNum <= 0) {
-      Alert.alert('Error', 'Please enter valid capacity');
+    if (isNaN(capacityNum) || capacityNum < 10 || capacityNum > 80) {
+      Alert.alert('Error', 'Capacity must be between 10 and 80 seats');
       return false;
     }
+
+    if (formData.year) {
+      const currentYear = new Date().getFullYear();
+      const yearNum = parseInt(formData.year);
+      if (isNaN(yearNum) || yearNum < 1990 || yearNum > currentYear) {
+        Alert.alert('Error', `Year must be between 1990 and ${currentYear}`);
+        return false;
+      }
+    }
+
     return true;
   };
 
   // ========== UPLOAD ALL IMAGES ==========
-  const uploadAllImages = async (): Promise<any> => {
-    const imageUrls: any = {};
-    const uploadPromises = [];
+  const uploadAllImages = async (busId?: string): Promise<Record<string, string>> => {
+    const imageUrls: Record<string, string> = {};
+    const uploadPromises: Promise<void>[] = [];
+    let completedUploads = 0;
+    const totalUploads = Object.keys(newImageUris).length;
 
-    for (const [key, uri] of Object.entries(busImages)) {
+    // Keep existing URLs that are not being replaced
+    for (const [key, value] of Object.entries(images)) {
+      if (value && !newImageUris[key]) {
+        imageUrls[key] = value;
+      }
+    }
+
+    // Upload new images
+    for (const [key, uri] of Object.entries(newImageUris)) {
       if (uri) {
         uploadPromises.push(
-          uploadImageToStorage(uri, key).then(url => {
-            if (url) imageUrls[key] = url;
+          uploadImageToStorage(uri, key, busId).then(url => {
+            if (url) {
+              imageUrls[key] = url;
+              completedUploads++;
+              setUploadProgress((completedUploads / totalUploads) * 100);
+            }
           })
         );
       }
@@ -363,8 +546,17 @@ const AddBusScreen = () => {
 
     if (uploadPromises.length > 0) {
       setUploadingImages(true);
-      await Promise.all(uploadPromises);
-      setUploadingImages(false);
+      setUploadProgress(0);
+
+      try {
+        await Promise.all(uploadPromises);
+      } catch (error) {
+        console.error('Upload error:', error);
+        throw error;
+      } finally {
+        setUploadingImages(false);
+        setUploadProgress(0);
+      }
     }
 
     return imageUrls;
@@ -372,63 +564,122 @@ const AddBusScreen = () => {
 
   // ========== HANDLE SUBMIT ==========
   const handleSubmit = async () => {
+    // ✅ FIX: Loading lock
+    if (loading) return;
+
     if (!validateForm()) return;
-    if (!user) {
+
+    if (!user || !effectiveTransporterId) {
       Alert.alert('Error', 'You must be logged in');
       return;
     }
 
+    // ✅ FIX: Use consistent transporterId
+    const transporterId = effectiveTransporterId;
+
+    const isUnique = await checkDuplicateBus();
+    if (!isUnique) return;
+
     setLoading(true);
 
     try {
-      // Upload images first
-      const imageUrls = await uploadAllImages();
+      const normalizedRegistration = formData.registrationNumber.trim().toUpperCase();
 
-      // Prepare bus data
       const busData = {
         busNumber: formData.busNumber.trim(),
-        registrationNumber: formData.registrationNumber.trim(),
-        make: formData.make.trim(),
-        model: formData.model.trim(),
+        registrationNumber: normalizedRegistration,
+        make: formData.make.trim() || null,
+        model: formData.model.trim() || null,
         year: formData.year ? parseInt(formData.year) : null,
         capacity: parseInt(formData.capacity),
         fuelType: formData.fuelType,
-        color: formData.color.trim(),
+        color: formData.color.trim() || null,
+        busType: formData.busType,
         status: 'active',
-        insuranceNumber: formData.insuranceNumber.trim(),
-        insuranceExpiry: formData.insuranceExpiry,
-        fitnessExpiry: formData.fitnessExpiry,
-        images: imageUrls,
-        transporterId: user.uid,
+        insuranceNumber: formData.insuranceNumber.trim() || null,
+        insuranceExpiry: formData.insuranceExpiry || null,
+        fitnessExpiry: formData.fitnessExpiry || null,
+        assignedDriverId: formData.assignedDriverId || null,
+        transporterId: transporterId,
+        isDeleted: false,
+        searchKeywords: [
+          formData.busNumber.trim().toLowerCase(),
+          normalizedRegistration.toLowerCase(),
+          formData.make.trim().toLowerCase(),
+          formData.model.trim().toLowerCase(),
+        ],
         updatedAt: firestore.FieldValue.serverTimestamp(),
       };
 
+      let busId = bus?.id;
+
       if (mode === 'add') {
-        // Add new bus
-        await firestore()
-          .collection('buses')
-          .add({
-            ...busData,
-            createdAt: firestore.FieldValue.serverTimestamp(),
+        // Create bus document
+        const busRef = await firestore().collection('buses').add({
+          ...busData,
+          createdAt: firestore.FieldValue.serverTimestamp(),
+        });
+
+        busId = busRef.id;
+
+        // Upload images
+        const imageUrls = await uploadAllImages(busId);
+
+        // Update bus with image URLs
+        await busRef.update({ images: imageUrls });
+
+        // Update transporter's bus count
+        const transporterRef = firestore().collection('transporters').doc(transporterId);
+        const transporterDoc = await transporterRef.get();
+        if (transporterDoc.exists) {
+          await transporterRef.update({
+            busesCount: firestore.FieldValue.increment(1),
+            updatedAt: firestore.FieldValue.serverTimestamp(),
           });
+        } else {
+          await transporterRef.set({
+            transporterId,
+            busesCount: 1,
+            createdAt: firestore.FieldValue.serverTimestamp(),
+            updatedAt: firestore.FieldValue.serverTimestamp(),
+          });
+        }
 
         Alert.alert('Success', 'Bus added successfully!', [
           { text: 'OK', onPress: () => navigation.goBack() }
         ]);
       } else {
         // Update existing bus
+        if (!bus?.id) throw new Error('Bus ID not found');
+
+        // Upload new images
+        const newImageUrls = await uploadAllImages(bus.id);
+
+        // ✅ FIX: Properly merge images (don't lose removed ones)
+        const finalImages = {
+          frontView: newImageUrls.frontView || (images.frontView && !newImageUris.frontView ? images.frontView : ''),
+          backView: newImageUrls.backView || (images.backView && !newImageUris.backView ? images.backView : ''),
+          interior: newImageUrls.interior || (images.interior && !newImageUris.interior ? images.interior : ''),
+          documents: newImageUrls.documents || (images.documents && !newImageUris.documents ? images.documents : ''),
+        };
+
         await firestore()
           .collection('buses')
-          .doc(bus?.id)
-          .update(busData);
+          .doc(bus.id)
+          .update({
+            ...busData,
+            images: finalImages,
+          });
 
         Alert.alert('Success', 'Bus updated successfully!', [
           { text: 'OK', onPress: () => navigation.goBack() }
         ]);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error saving bus:', error);
-      Alert.alert('Error', 'Failed to save bus. Please try again.');
+      // ✅ FIX: Better error message
+      const message = error instanceof Error ? error.message : 'Failed to save bus. Please try again.';
+      Alert.alert('Error', message);
     } finally {
       setLoading(false);
     }
@@ -453,8 +704,13 @@ const AddBusScreen = () => {
           <View style={styles.loadingOverlay}>
             <ActivityIndicator size="large" color={COLORS.primary} />
             <Text style={styles.loadingOverlayText}>
-              {uploadingImages ? 'Uploading images...' : 'Saving bus...'}
+              {uploadingImages ? `Uploading images... ${Math.round(uploadProgress)}%` : 'Saving bus...'}
             </Text>
+            {uploadingImages && uploadProgress > 0 && (
+              <View style={styles.progressBarContainer}>
+                <View style={[styles.progressBar, { width: `${uploadProgress}%` }]} />
+              </View>
+            )}
           </View>
         )}
 
@@ -467,9 +723,10 @@ const AddBusScreen = () => {
             <Text style={styles.label}>Bus Number *</Text>
             <TextInput
               style={styles.input}
-              placeholder="B-001"
+              placeholder="BUS-001"
               value={formData.busNumber}
-              onChangeText={(text) => setFormData({...formData, busNumber: text})}
+              onChangeText={handleBusNumberChange}
+              autoCapitalize="characters"
               editable={!loading}
             />
           </View>
@@ -480,9 +737,12 @@ const AddBusScreen = () => {
               style={styles.input}
               placeholder="ABC-123"
               value={formData.registrationNumber}
-              onChangeText={(text) => setFormData({...formData, registrationNumber: text})}
+              onChangeText={handleRegistrationChange}
+              autoCapitalize="characters"
+              maxLength={8}
               editable={!loading}
             />
+            <Text style={styles.inputNote}>Format: ABC-123 or ABC-1234 (auto-uppercase)</Text>
           </View>
 
           <View style={styles.row}>
@@ -492,7 +752,7 @@ const AddBusScreen = () => {
                 style={styles.input}
                 placeholder="Toyota"
                 value={formData.make}
-                onChangeText={(text) => setFormData({...formData, make: text})}
+                onChangeText={(text) => updateField('make', text)}
                 editable={!loading}
               />
             </View>
@@ -502,7 +762,7 @@ const AddBusScreen = () => {
                 style={styles.input}
                 placeholder="Coaster"
                 value={formData.model}
-                onChangeText={(text) => setFormData({...formData, model: text})}
+                onChangeText={(text) => updateField('model', text)}
                 editable={!loading}
               />
             </View>
@@ -513,9 +773,9 @@ const AddBusScreen = () => {
               <Text style={styles.label}>Year</Text>
               <TextInput
                 style={styles.input}
-                placeholder="2022"
+                placeholder={`1990-${new Date().getFullYear()}`}
                 value={formData.year}
-                onChangeText={(text) => setFormData({...formData, year: text})}
+                onChangeText={(text) => updateField('year', text)}
                 keyboardType="numeric"
                 editable={!loading}
               />
@@ -524,12 +784,38 @@ const AddBusScreen = () => {
               <Text style={styles.label}>Seating Capacity *</Text>
               <TextInput
                 style={styles.input}
-                placeholder="40"
+                placeholder="10-80 seats"
                 value={formData.capacity}
-                onChangeText={(text) => setFormData({...formData, capacity: text})}
+                onChangeText={(text) => updateField('capacity', text)}
                 keyboardType="numeric"
                 editable={!loading}
               />
+            </View>
+          </View>
+
+          {/* Bus Type */}
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Bus Type</Text>
+            <View style={styles.optionsContainer}>
+              {busTypes.map((type) => (
+                <TouchableOpacity
+                  key={type.id}
+                  style={[
+                    styles.optionButton,
+                    formData.busType === type.id && styles.optionButtonSelected
+                  ]}
+                  onPress={() => updateField('busType', type.id)}
+                  disabled={loading}
+                >
+                  <Text style={styles.optionIcon}>{type.icon}</Text>
+                  <Text style={[
+                    styles.optionLabel,
+                    formData.busType === type.id && styles.optionLabelSelected
+                  ]}>
+                    {type.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
             </View>
           </View>
 
@@ -538,21 +824,21 @@ const AddBusScreen = () => {
 
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Fuel Type</Text>
-            <View style={styles.fuelTypesContainer}>
+            <View style={styles.optionsContainer}>
               {fuelTypes.map((fuel) => (
                 <TouchableOpacity
                   key={fuel.id}
                   style={[
-                    styles.fuelTypeButton,
-                    formData.fuelType === fuel.id && styles.fuelTypeButtonSelected
+                    styles.optionButton,
+                    formData.fuelType === fuel.id && styles.optionButtonSelected
                   ]}
-                  onPress={() => setFormData({...formData, fuelType: fuel.id})}
+                  onPress={() => updateField('fuelType', fuel.id)}
                   disabled={loading}
                 >
-                  <Text style={styles.fuelTypeIcon}>{fuel.icon}</Text>
+                  <Text style={styles.optionIcon}>{fuel.icon}</Text>
                   <Text style={[
-                    styles.fuelTypeLabel,
-                    formData.fuelType === fuel.id && styles.fuelTypeLabelSelected
+                    styles.optionLabel,
+                    formData.fuelType === fuel.id && styles.optionLabelSelected
                   ]}>
                     {fuel.label}
                   </Text>
@@ -567,7 +853,7 @@ const AddBusScreen = () => {
               style={styles.input}
               placeholder="White"
               value={formData.color}
-              onChangeText={(text) => setFormData({...formData, color: text})}
+              onChangeText={(text) => updateField('color', text)}
               editable={!loading}
             />
           </View>
@@ -581,7 +867,7 @@ const AddBusScreen = () => {
               style={styles.input}
               placeholder="INS-123456"
               value={formData.insuranceNumber}
-              onChangeText={(text) => setFormData({...formData, insuranceNumber: text})}
+              onChangeText={(text) => updateField('insuranceNumber', text)}
               editable={!loading}
             />
           </View>
@@ -617,12 +903,29 @@ const AddBusScreen = () => {
 
           {/* Photo Upload Section */}
           <Text style={styles.sectionTitle}>📸 Photos</Text>
+          <Text style={styles.imageNote}>
+            Upload clear photos of the bus from different angles
+            {'\n'}💡 Long press to remove image
+          </Text>
+
           <View style={styles.photoUploadContainer}>
             {renderImagePreview('frontView', 'Front View')}
             {renderImagePreview('backView', 'Back View')}
             {renderImagePreview('interior', 'Interior')}
             {renderImagePreview('documents', 'Documents')}
           </View>
+
+          {/* Expiry Info */}
+          {(formData.insuranceExpiry || formData.fitnessExpiry) && (
+            <View style={styles.expiryInfo}>
+              <Text style={styles.expiryInfoTitle}>📅 Document Expiry Tracking</Text>
+              <Text style={styles.expiryInfoText}>
+                • System will automatically check expiry dates{'\n'}
+                • Warning shown 30 days before expiry{'\n'}
+                • Expired documents will flag bus as inactive
+              </Text>
+            </View>
+          )}
 
           {/* Action Buttons */}
           <View style={styles.actionButtons}>
@@ -635,7 +938,7 @@ const AddBusScreen = () => {
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[styles.actionButton, styles.submitButton]}
+              style={[styles.actionButton, styles.submitButton, loading && styles.buttonDisabled]}
               onPress={handleSubmit}
               disabled={loading}
             >
@@ -743,6 +1046,19 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginTop: SIZES.sm,
   },
+  progressBarContainer: {
+    width: 200,
+    height: 4,
+    backgroundColor: 'rgba(255,255,255,0.3)',
+    borderRadius: 2,
+    marginTop: SIZES.sm,
+    overflow: 'hidden',
+  },
+  progressBar: {
+    height: '100%',
+    backgroundColor: COLORS.white,
+    borderRadius: 2,
+  },
   formContainer: {
     padding: SIZES.md,
     paddingBottom: 30,
@@ -772,39 +1088,45 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.white,
     color: COLORS.text,
   },
+  inputNote: {
+    fontSize: 11,
+    color: COLORS.textLight,
+    marginTop: 4,
+    fontStyle: 'italic',
+  },
   row: {
     flexDirection: 'row',
   },
-  fuelTypesContainer: {
+  optionsContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     marginHorizontal: -4,
   },
-  fuelTypeButton: {
+  optionButton: {
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
     borderColor: COLORS.border,
     borderRadius: SIZES.xs,
-    paddingHorizontal: SIZES.md,
-    paddingVertical: SIZES.sm,
+    paddingHorizontal: SIZES.sm,
+    paddingVertical: SIZES.xs,
     margin: 4,
     backgroundColor: COLORS.white,
     minWidth: 100,
   },
-  fuelTypeButtonSelected: {
+  optionButtonSelected: {
     backgroundColor: COLORS.infoLight,
     borderColor: COLORS.secondary,
   },
-  fuelTypeIcon: {
-    fontSize: 20,
-    marginRight: SIZES.xs,
+  optionIcon: {
+    fontSize: 16,
+    marginRight: 4,
   },
-  fuelTypeLabel: {
-    fontSize: 14,
+  optionLabel: {
+    fontSize: 12,
     color: COLORS.text,
   },
-  fuelTypeLabelSelected: {
+  optionLabelSelected: {
     color: COLORS.primary,
     fontWeight: '600',
   },
@@ -829,6 +1151,12 @@ const styles = StyleSheet.create({
   calendarIcon: {
     fontSize: 20,
     color: COLORS.secondary,
+  },
+  imageNote: {
+    fontSize: 12,
+    color: COLORS.textLight,
+    marginBottom: SIZES.md,
+    fontStyle: 'italic',
   },
   photoUploadContainer: {
     flexDirection: 'row',
@@ -909,6 +1237,25 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: 'bold',
   },
+  expiryInfo: {
+    backgroundColor: '#FFF3E0',
+    padding: SIZES.md,
+    borderRadius: SIZES.xs,
+    marginTop: SIZES.md,
+    borderLeftWidth: 4,
+    borderLeftColor: '#FFB300',
+  },
+  expiryInfoTitle: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#E65100',
+    marginBottom: SIZES.xs,
+  },
+  expiryInfoText: {
+    fontSize: 12,
+    color: '#5D4037',
+    lineHeight: 18,
+  },
   actionButtons: {
     flexDirection: 'row',
     marginTop: SIZES.xxxl,
@@ -927,6 +1274,9 @@ const styles = StyleSheet.create({
   submitButton: {
     backgroundColor: COLORS.secondary,
   },
+  buttonDisabled: {
+    backgroundColor: COLORS.grey,
+  },
   cancelButtonText: {
     color: COLORS.textLight,
     fontWeight: '600',
@@ -937,7 +1287,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontSize: 16,
   },
-  // Modal styles
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',

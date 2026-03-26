@@ -1,4 +1,4 @@
-// src/screens/transporter/DriversScreen.tsx
+// src/screens/transporter/DriversScreen.tsx - IMPROVED VERSION
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
@@ -11,6 +11,7 @@ import {
   Alert,
   ActivityIndicator,
   RefreshControl,
+  FlatList,
 } from 'react-native';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import auth from '@react-native-firebase/auth';
@@ -26,35 +27,75 @@ import { COLORS, SIZES, SHADOWS } from '../../constants/theme';
 
 type DriversScreenNavigationProp = StackNavigationProp<TransporterStackParamList, 'Drivers'>;
 
+// ✅ FIX: Consistent driver status type
+type DisplayStatus = 'online' | 'on_trip' | 'offline' | 'on_leave' | 'suspended';
+
+// Enhanced bus type with driver info
+type AvailableBus = {
+  id: string;
+  busNumber: string;
+  driverId: string | null;
+  driverName: string | null;
+};
+
 const DriversScreen = () => {
   const navigation = useNavigation<DriversScreenNavigationProp>();
   const route = useRoute();
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [filter, setFilter] = useState<DriverStatus | 'all' | 'assigned' | 'unassigned'>('all');
+  const [filter, setFilter] = useState<DisplayStatus | 'all' | 'assigned' | 'unassigned'>('all');
   const [selectedDriver, setSelectedDriver] = useState<Driver | null>(null);
   const [assignModalVisible, setAssignModalVisible] = useState(false);
   const [profileModalVisible, setProfileModalVisible] = useState(false);
-  const [availableBuses, setAvailableBuses] = useState<{id: string, busNumber: string}[]>([]);
+  const [availableBuses, setAvailableBuses] = useState<AvailableBus[]>([]);
   const [transporterName, setTransporterName] = useState('');
 
   const user = auth().currentUser;
 
   // Helper function to get initials
-  const getInitials = (name: string) => {
+  const getInitials = useCallback((name: string) => {
     if (!name) return '?';
     return name.split(' ').map(n => n[0]).join('').toUpperCase();
-  };
+  }, []);
 
-  // Helper function to map Firebase status to display status
-  const getDisplayStatus = (status: string): DriverStatus => {
+  // ✅ FIX: Map Firebase status to display status
+  const getDisplayStatus = useCallback((status: string): DisplayStatus => {
     switch(status) {
-      case 'active': return 'on-duty';
-      case 'inactive': return 'offline';
-      default: return status as DriverStatus;
+      case 'active':
+      case 'on-duty':
+        return 'on_trip';
+      case 'online':
+        return 'online';
+      case 'inactive':
+      case 'offline':
+        return 'offline';
+      case 'on_leave':
+        return 'on_leave';
+      case 'suspended':
+        return 'suspended';
+      default:
+        return 'offline';
     }
-  };
+  }, []);
+
+  // ✅ FIX: Map display status back to Firebase status
+  const getFirebaseStatus = useCallback((displayStatus: DisplayStatus): string => {
+    switch(displayStatus) {
+      case 'on_trip':
+        return 'active';
+      case 'online':
+        return 'online';
+      case 'offline':
+        return 'inactive';
+      case 'on_leave':
+        return 'on_leave';
+      case 'suspended':
+        return 'suspended';
+      default:
+        return 'inactive';
+    }
+  }, []);
 
   // 🔥 IMPORTANT: useEffect for opening AddDriverScreen automatically
   useFocusEffect(
@@ -92,6 +133,9 @@ const DriversScreen = () => {
 
     setLoading(true);
 
+    // Note: Create index in Firebase Console:
+    // Collection: drivers
+    // Fields: transporterId (Ascending), createdAt (Descending)
     const unsubscribe = firestore()
       .collection('drivers')
       .where('transporterId', '==', user.uid)
@@ -109,7 +153,26 @@ const DriversScreen = () => {
         },
         (error) => {
           console.error('Error fetching drivers:', error);
-          Alert.alert('Error', 'Failed to load drivers. Please try again.');
+
+          if (error.message?.includes('index')) {
+            Alert.alert(
+              'Database Index Required',
+              'Please create the required index in Firebase Console:\n\n' +
+              'Collection: drivers\n' +
+              'Fields: transporterId (Ascending), createdAt (Descending)',
+              [
+                { text: 'OK' },
+                {
+                  text: 'Open Console',
+                  onPress: () => {
+                    // Linking.openURL('https://console.firebase.google.com');
+                  }
+                }
+              ]
+            );
+          } else {
+            Alert.alert('Error', 'Failed to load drivers. Please try again.');
+          }
           setLoading(false);
           setRefreshing(false);
         }
@@ -118,7 +181,7 @@ const DriversScreen = () => {
     return () => unsubscribe();
   }, [user]);
 
-  // 🔥 FETCH AVAILABLE BUSES for assignment
+  // 🔥 FETCH AVAILABLE BUSES with driver info
   useEffect(() => {
     if (!user) return;
 
@@ -128,10 +191,15 @@ const DriversScreen = () => {
       .where('status', '==', 'active')
       .onSnapshot(
         (snapshot) => {
-          const busesList = snapshot.docs.map(doc => ({
-            id: doc.id,
-            busNumber: doc.data().busNumber,
-          }));
+          const busesList = snapshot.docs.map(doc => {
+            const data = doc.data();
+            return {
+              id: doc.id,
+              busNumber: data.busNumber,
+              driverId: data.driverId || null,
+              driverName: data.driverName || null,
+            };
+          });
           setAvailableBuses(busesList);
         },
         (error) => console.error('Error fetching buses:', error)
@@ -143,32 +211,35 @@ const DriversScreen = () => {
   // Stats calculation
   const stats = useMemo(() => {
     const total = drivers.length;
-    const onDuty = drivers.filter(d => d.status === 'active').length;
+    const onTrip = drivers.filter(d => d.status === 'active').length;
     const online = drivers.filter(d => d.status === 'online').length;
-    const offline = drivers.filter(d => d.status === 'inactive' || d.status === 'offline').length;
-    const assigned = drivers.filter(d => d.vehicleAssigned).length;
-    const unassigned = drivers.filter(d => !d.vehicleAssigned).length;
+    const offline = drivers.filter(d => d.status === 'inactive').length;
+    const onLeave = drivers.filter(d => d.status === 'on_leave').length;
+    const suspended = drivers.filter(d => d.status === 'suspended').length;
+    const assigned = drivers.filter(d => d.busAssignedId).length;
+    const unassigned = drivers.filter(d => !d.busAssignedId).length;
     const avgRating = drivers.length > 0
       ? drivers.reduce((sum, d) => sum + (d.rating || 0), 0) / drivers.length
       : 0;
 
-    return { total, onDuty, online, offline, assigned, unassigned, avgRating };
+    return { total, onTrip, online, offline, onLeave, suspended, assigned, unassigned, avgRating };
   }, [drivers]);
 
   // Filter drivers
   const filteredDrivers = useMemo(() => {
     if (filter === 'all') return drivers;
-    if (filter === 'assigned') return drivers.filter(d => d.vehicleAssigned);
-    if (filter === 'unassigned') return drivers.filter(d => !d.vehicleAssigned);
-    if (filter === 'on-duty') return drivers.filter(d => d.status === 'active');
-    if (filter === 'offline') return drivers.filter(d => d.status === 'inactive' || d.status === 'offline');
-    return drivers.filter(d => d.status === filter);
-  }, [drivers, filter]);
+    if (filter === 'assigned') return drivers.filter(d => d.busAssignedId);
+    if (filter === 'unassigned') return drivers.filter(d => !d.busAssignedId);
+
+    const firebaseStatus = getFirebaseStatus(filter);
+    return drivers.filter(d => d.status === firebaseStatus);
+  }, [drivers, filter, getFirebaseStatus]);
 
   // Manual refresh
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     // Listeners will auto-update
+    setTimeout(() => setRefreshing(false), 1000);
   }, []);
 
   // Add Driver handler
@@ -193,71 +264,102 @@ const DriversScreen = () => {
     setProfileModalVisible(true);
   };
 
-  // 🔧 Assign Bus handler
+  // 🔧 Assign Bus handler - Optimized
   const handleAssignBus = async (driverId: string, busId: string, busNumber: string) => {
     if (!user) return;
 
     try {
-      // Update driver with bus assignment
-      await firestore()
-        .collection('drivers')
-        .doc(driverId)
-        .update({
-          vehicleAssigned: busNumber,
-          updatedAt: firestore.FieldValue.serverTimestamp(),
-        });
+      // ✅ Direct document access (faster than query)
+      const busDoc = await firestore().collection('buses').doc(busId).get();
+      const busData = busDoc.data();
 
-      // Update bus with driver assignment
-      await firestore()
-        .collection('buses')
-        .doc(busId)
-        .update({
-          driverId: driverId,
-          driverName: drivers.find(d => d.id === driverId)?.fullName,
-          updatedAt: firestore.FieldValue.serverTimestamp(),
-        });
-
-      setAssignModalVisible(false);
-      Alert.alert('Success', `Bus ${busNumber} assigned to driver`);
+      // Check if bus is already assigned to someone else
+      if (busData?.driverId && busData.driverId !== driverId) {
+        Alert.alert(
+          'Bus Already Assigned',
+          `Bus ${busNumber} is currently assigned to ${busData.driverName || 'another driver'}. Do you want to reassign it?`,
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Reassign',
+              onPress: async () => performBusAssignment(driverId, busId, busNumber, busData.driverId)
+            }
+          ]
+        );
+      } else {
+        await performBusAssignment(driverId, busId, busNumber);
+      }
     } catch (error) {
-      console.error('Error assigning bus:', error);
-      Alert.alert('Error', 'Failed to assign bus');
+      console.error('Error checking bus status:', error);
+      Alert.alert('Error', 'Failed to check bus assignment status');
     }
   };
 
-  // Unassign Bus handler
-  const handleUnassignBus = async (driverId: string, busNumber?: string) => {
-    if (!user || !busNumber) return;
-
+  const performBusAssignment = async (driverId: string, busId: string, busNumber: string, previousDriverId?: string) => {
     try {
-      // Find bus ID from bus number
-      const busSnapshot = await firestore()
-        .collection('buses')
-        .where('transporterId', '==', user.uid)
-        .where('busNumber', '==', busNumber)
-        .get();
+      const batch = firestore().batch();
+      const driverData = drivers.find(d => d.id === driverId);
 
-      // Update driver - remove bus assignment
-      await firestore()
-        .collection('drivers')
-        .doc(driverId)
-        .update({
+      // 1. Unassign previous driver if exists
+      if (previousDriverId) {
+        const prevDriverRef = firestore().collection('drivers').doc(previousDriverId);
+        batch.update(prevDriverRef, {
+          busAssignedId: null,
           vehicleAssigned: '',
           updatedAt: firestore.FieldValue.serverTimestamp(),
         });
-
-      // Update bus - remove driver assignment if found
-      if (!busSnapshot.empty) {
-        const busDoc = busSnapshot.docs[0];
-        await firestore()
-          .collection('buses')
-          .doc(busDoc.id)
-          .update({
-            driverId: null,
-            driverName: null,
-            updatedAt: firestore.FieldValue.serverTimestamp(),
-          });
       }
+
+      // 2. Update new driver with bus assignment (only store ID, not number)
+      const newDriverRef = firestore().collection('drivers').doc(driverId);
+      batch.update(newDriverRef, {
+        busAssignedId: busId,
+        vehicleAssigned: busNumber, // Keep for backward compatibility
+        updatedAt: firestore.FieldValue.serverTimestamp(),
+      });
+
+      // 3. Update bus with new driver assignment
+      const busRef = firestore().collection('buses').doc(busId);
+      batch.update(busRef, {
+        driverId: driverId,
+        driverName: driverData?.fullName,
+        updatedAt: firestore.FieldValue.serverTimestamp(),
+      });
+
+      await batch.commit();
+
+      setAssignModalVisible(false);
+      Alert.alert('✅ Success', `Bus ${busNumber} assigned to ${driverData?.fullName || 'driver'}`);
+    } catch (error) {
+      console.error('Error assigning bus:', error);
+      Alert.alert('Error', 'Failed to complete bus assignment');
+    }
+  };
+
+  // Unassign Bus handler - Optimized with direct document reference
+  const handleUnassignBus = async (driverId: string, busAssignedId?: string) => {
+    if (!user || !busAssignedId) return;
+
+    try {
+      const batch = firestore().batch();
+
+      // Update driver - remove bus assignment
+      const driverRef = firestore().collection('drivers').doc(driverId);
+      batch.update(driverRef, {
+        busAssignedId: null,
+        vehicleAssigned: '',
+        updatedAt: firestore.FieldValue.serverTimestamp(),
+      });
+
+      // Update bus - remove driver assignment (direct document access)
+      const busRef = firestore().collection('buses').doc(busAssignedId);
+      batch.update(busRef, {
+        driverId: null,
+        driverName: null,
+        updatedAt: firestore.FieldValue.serverTimestamp(),
+      });
+
+      await batch.commit();
 
       Alert.alert('Success', 'Bus unassigned from driver');
     } catch (error) {
@@ -267,23 +369,30 @@ const DriversScreen = () => {
   };
 
   // 🔄 Change Status handler
-  const handleChangeStatus = async (driverId: string, newStatus: string) => {
+  const handleChangeStatus = async (driverId: string, currentStatus: string, newDisplayStatus: DisplayStatus) => {
     if (!user) return;
 
-    let firebaseStatus = newStatus;
-    if (newStatus === 'on-duty') firebaseStatus = 'active';
-    if (newStatus === 'offline') firebaseStatus = 'inactive';
+    // ✅ Requirement: Prevent manual status change if driver is on-trip
+    if (currentStatus === 'active') {
+      Alert.alert(
+        'Action Restricted',
+        'This driver is currently ON-TRIP (on an active trip). Their status will automatically change when the trip ends.'
+      );
+      return;
+    }
+
+    const newFirebaseStatus = getFirebaseStatus(newDisplayStatus);
 
     try {
       await firestore()
         .collection('drivers')
         .doc(driverId)
         .update({
-          status: firebaseStatus,
+          status: newFirebaseStatus,
           updatedAt: firestore.FieldValue.serverTimestamp(),
         });
 
-      Alert.alert('Status Updated', `Driver status changed to ${newStatus}`);
+      Alert.alert('Status Updated', `Driver status changed to ${newDisplayStatus.replace('_', ' ')}`);
     } catch (error) {
       console.error('Error updating status:', error);
       Alert.alert('Error', 'Failed to update status');
@@ -291,70 +400,249 @@ const DriversScreen = () => {
   };
 
   // Get next status based on current
-  const getNextStatus = (currentStatus: string): { next: string; label: string } => {
+  const getNextStatus = useCallback((currentStatus: string): { next: DisplayStatus; label: string; disabled: boolean } => {
     switch(currentStatus) {
       case 'active':
-        return { next: 'inactive', label: 'Go Offline' };
+        return { next: 'offline', label: 'On Trip (Locked)', disabled: true };
       case 'online':
-        return { next: 'active', label: 'Go On Duty' };
+        return { next: 'on_trip', label: 'Start Trip', disabled: false };
       case 'inactive':
       case 'offline':
-        return { next: 'online', label: 'Go Online' };
+        return { next: 'online', label: 'Go Online', disabled: false };
+      case 'on_leave':
+        return { next: 'online', label: 'Return from Leave', disabled: false };
+      case 'suspended':
+        return { next: 'offline', label: 'Suspended (Locked)', disabled: true };
       default:
-        return { next: 'online', label: 'Go Online' };
+        return { next: 'online', label: 'Go Online', disabled: false };
     }
+  }, []);
+
+  // ✅ FIX: Delete driver with cleanup
+  const handleDeleteDriver = async (driver: Driver) => {
+    if (!user) return;
+
+    Alert.alert(
+      'Delete Driver',
+      `Are you sure you want to delete ${driver.fullName}? This action cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const batch = firestore().batch();
+
+              // If driver has a bus assigned, unassign it first
+              if (driver.busAssignedId) {
+                const busRef = firestore().collection('buses').doc(driver.busAssignedId);
+                batch.update(busRef, {
+                  driverId: null,
+                  driverName: null,
+                  updatedAt: firestore.FieldValue.serverTimestamp(),
+                });
+              }
+
+              // Delete driver document
+              const driverRef = firestore().collection('drivers').doc(driver.id);
+              batch.delete(driverRef);
+
+              // Also delete from users collection if exists
+              const userRef = firestore().collection('users').doc(driver.id);
+              batch.delete(userRef);
+
+              await batch.commit();
+
+              Alert.alert('Success', 'Driver deleted successfully');
+            } catch (error) {
+              console.error('Error deleting driver:', error);
+              Alert.alert('Error', 'Failed to delete driver');
+            }
+          }
+        }
+      ]
+    );
   };
 
   // Helper functions
-  const getStatusColor = (status: string) => {
+  const getStatusColor = useCallback((status: DisplayStatus) => {
     switch(status) {
-      case 'active':
-      case 'on-duty':
+      case 'on_trip':
         return COLORS.success;
       case 'online':
         return COLORS.info;
-      case 'inactive':
       case 'offline':
         return COLORS.grey;
+      case 'on_leave':
+        return COLORS.warning;
+      case 'suspended':
+        return COLORS.danger;
       default:
         return COLORS.textLight;
     }
-  };
+  }, []);
 
-  const getStatusIcon = (status: string) => {
+  const getStatusIcon = useCallback((status: DisplayStatus) => {
     switch(status) {
-      case 'active':
-      case 'on-duty':
+      case 'on_trip':
         return '🟢';
       case 'online':
         return '🔵';
-      case 'inactive':
       case 'offline':
         return '⚫';
+      case 'on_leave':
+        return '🟡';
+      case 'suspended':
+        return '🔴';
       default:
         return '⚪';
     }
-  };
+  }, []);
 
-  const getDisplayStatusText = (status: string) => {
-    switch(status) {
-      case 'active': return 'ON DUTY';
-      case 'inactive': return 'OFFLINE';
-      default: return status.toUpperCase();
-    }
-  };
+  const getDisplayStatusText = useCallback((status: DisplayStatus) => {
+    return status.replace('_', ' ').toUpperCase();
+  }, []);
 
-  const renderStars = (rating: number) => {
-    const stars = [];
-    for (let i = 1; i <= 5; i++) {
-      stars.push(
-        <Text key={i} style={styles.star}>
-          {i <= rating ? '⭐' : '☆'}
-        </Text>
-      );
-    }
-    return <View style={styles.starsContainer}>{stars}</View>;
-  };
+  const renderStars = useCallback((rating: number) => {
+    return (
+      <View style={styles.starsContainer}>
+        {[1, 2, 3, 4, 5].map((star) => (
+          <Text key={star} style={styles.star}>
+            {star <= (rating || 0) ? '⭐' : '☆'}
+          </Text>
+        ))}
+      </View>
+    );
+  }, []);
+
+  // ✅ FIX: Render driver item with useCallback for FlatList
+  const renderDriverItem = useCallback(({ item: driver }: { item: Driver }) => {
+    const displayStatus = getDisplayStatus(driver.status);
+    const nextStatus = getNextStatus(driver.status);
+
+    return (
+      <View style={[styles.driverCard, SHADOWS.medium]}>
+        {/* Driver Info Section - Clickable for edit */}
+        <TouchableOpacity
+          style={styles.driverInfoSection}
+          onPress={() => handleEditDriver(driver)}
+          activeOpacity={0.7}
+        >
+          <View style={styles.driverHeader}>
+            <View style={styles.driverAvatar}>
+              <Text style={styles.avatarText}>
+                {getInitials(driver.fullName)}
+              </Text>
+            </View>
+            <View style={styles.driverInfo}>
+              <Text style={styles.driverName}>{driver.fullName}</Text>
+              <Text style={styles.driverContact}>{driver.contactNumber}</Text>
+              {renderStars(driver.rating || 0)}
+            </View>
+            <View style={[styles.statusBadge, { backgroundColor: getStatusColor(displayStatus) }]}>
+              <Text style={styles.statusText}>
+                {getStatusIcon(displayStatus)} {getDisplayStatusText(displayStatus)}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.driverDetails}>
+            <View style={styles.detailRow}>
+              <View style={styles.detailItem}>
+                <Text style={styles.detailLabel}>CNIC:</Text>
+                <Text style={styles.detailValue}>{driver.cnic}</Text>
+              </View>
+              <View style={styles.detailItem}>
+                <Text style={styles.detailLabel}>License:</Text>
+                <Text style={styles.detailValue}>{driver.licenseNumber}</Text>
+              </View>
+            </View>
+
+            <View style={styles.detailRow}>
+              <View style={styles.detailItem}>
+                <Text style={styles.detailLabel}>Bus Assigned:</Text>
+                <Text style={[
+                  styles.detailValue,
+                  driver.busAssignedId ? styles.assigned : styles.unassigned
+                ]}>
+                  {driver.vehicleAssigned || 'Not Assigned'}
+                </Text>
+              </View>
+              <View style={styles.detailItem}>
+                <Text style={styles.detailLabel}>Rides:</Text>
+                <Text style={styles.detailValue}>{driver.totalRides || 0}</Text>
+              </View>
+            </View>
+          </View>
+        </TouchableOpacity>
+
+        {/* Action Buttons */}
+        <View style={styles.actionButtons}>
+          <TouchableOpacity
+            style={styles.actionButton}
+            onPress={() => {
+              if (driver.status === 'active') {
+                Alert.alert('Action Restricted', 'Cannot assign or change bus while driver is on an active trip.');
+                return;
+              }
+              setSelectedDriver(driver);
+              setAssignModalVisible(true);
+            }}
+          >
+            <Text style={styles.actionButtonText}>
+              {driver.busAssignedId ? '🔄 Change Bus' : '🚌 Assign Bus'}
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.actionButton}
+            onPress={() => handleViewProfile(driver)}
+          >
+            <Text style={styles.actionButtonText}>👤 Profile</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.actionButton,
+              displayStatus === 'on_trip' ? styles.deactivateButton : styles.activateButton,
+              nextStatus.disabled && { opacity: 0.5 }
+            ]}
+            onPress={() => {
+              if (nextStatus.disabled) {
+                handleChangeStatus(driver.id, driver.status, nextStatus.next);
+              } else {
+                handleChangeStatus(driver.id, driver.status, nextStatus.next);
+              }
+            }}
+          >
+            <Text style={[
+              styles.actionButtonText,
+              displayStatus === 'on_trip' ? styles.deactivateText : styles.activateText
+            ]}>
+              {nextStatus.label}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Unassign Button if bus assigned */}
+        {driver.busAssignedId && (
+          <TouchableOpacity
+            style={styles.unassignButton}
+            onPress={() => {
+              if (driver.status === 'active') {
+                Alert.alert('Action Restricted', 'Cannot unassign bus while driver is on an active trip.');
+                return;
+              }
+              handleUnassignBus(driver.id, driver.busAssignedId);
+            }}
+          >
+            <Text style={styles.unassignButtonText}>❌ Unassign Bus</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    );
+  }, [getInitials, getDisplayStatus, getStatusColor, getStatusIcon, getDisplayStatusText, getNextStatus, renderStars]);
 
   // Profile Modal
   const renderProfileModal = () => (
@@ -381,10 +669,10 @@ const DriversScreen = () => {
                   <View style={styles.profileStatus}>
                     <View style={[
                       styles.statusIndicator,
-                      { backgroundColor: getStatusColor(selectedDriver.status) }
+                      { backgroundColor: getStatusColor(getDisplayStatus(selectedDriver.status)) }
                     ]} />
                     <Text style={styles.profileStatusText}>
-                      {getDisplayStatusText(selectedDriver.status)}
+                      {getDisplayStatusText(getDisplayStatus(selectedDriver.status))}
                     </Text>
                   </View>
                 </View>
@@ -416,10 +704,6 @@ const DriversScreen = () => {
                   <View style={styles.detailRow}>
                     <Text style={styles.detailLabel}>CNIC:</Text>
                     <Text style={styles.detailValue}>{selectedDriver.cnic}</Text>
-                  </View>
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Date of Birth:</Text>
-                    <Text style={styles.detailValue}>{selectedDriver.dob || 'N/A'}</Text>
                   </View>
                   <View style={styles.detailRow}>
                     <Text style={styles.detailLabel}>Address:</Text>
@@ -459,7 +743,7 @@ const DriversScreen = () => {
                     <Text style={styles.detailLabel}>Bus Assigned:</Text>
                     <Text style={[
                       styles.detailValue,
-                      selectedDriver.vehicleAssigned ? styles.assigned : styles.unassigned
+                      selectedDriver.busAssignedId ? styles.assigned : styles.unassigned
                     ]}>
                       {selectedDriver.vehicleAssigned || 'Not Assigned'}
                     </Text>
@@ -535,7 +819,7 @@ const DriversScreen = () => {
 
       {/* Stats */}
       <View style={styles.statsContainer}>
-        <View style={styles.statsGrid}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
           <TouchableOpacity
             style={[styles.statCard, SHADOWS.small, filter === 'all' && styles.statCardActive]}
             onPress={() => setFilter('all')}
@@ -545,11 +829,11 @@ const DriversScreen = () => {
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.statCard, { backgroundColor: '#E8F5E8' }, SHADOWS.small, filter === 'on-duty' && styles.statCardActive]}
-            onPress={() => setFilter('on-duty')}
+            style={[styles.statCard, { backgroundColor: '#E8F5E8' }, SHADOWS.small, filter === 'on_trip' && styles.statCardActive]}
+            onPress={() => setFilter('on_trip')}
           >
-            <Text style={[styles.statValue, { color: COLORS.success }]}>{stats.onDuty}</Text>
-            <Text style={styles.statLabel}>On Duty</Text>
+            <Text style={[styles.statValue, { color: COLORS.success }]}>{stats.onTrip}</Text>
+            <Text style={styles.statLabel}>On Trip</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -567,7 +851,15 @@ const DriversScreen = () => {
             <Text style={[styles.statValue, { color: COLORS.warning }]}>{stats.assigned}</Text>
             <Text style={styles.statLabel}>Assigned</Text>
           </TouchableOpacity>
-        </View>
+
+          <TouchableOpacity
+            style={[styles.statCard, { backgroundColor: '#FFEBEE' }, SHADOWS.small, filter === 'offline' && styles.statCardActive]}
+            onPress={() => setFilter('offline')}
+          >
+            <Text style={[styles.statValue, { color: COLORS.danger }]}>{stats.offline}</Text>
+            <Text style={styles.statLabel}>Offline</Text>
+          </TouchableOpacity>
+        </ScrollView>
       </View>
 
       {/* Filter Buttons */}
@@ -580,10 +872,10 @@ const DriversScreen = () => {
             <Text style={[styles.filterText, filter === 'all' && styles.filterTextActive]}>All</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.filterButton, filter === 'on-duty' && styles.filterButtonActive]}
-            onPress={() => setFilter('on-duty')}
+            style={[styles.filterButton, filter === 'on_trip' && styles.filterButtonActive]}
+            onPress={() => setFilter('on_trip')}
           >
-            <Text style={[styles.filterText, filter === 'on-duty' && styles.filterTextActive]}>On Duty</Text>
+            <Text style={[styles.filterText, filter === 'on_trip' && styles.filterTextActive]}>On Trip</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.filterButton, filter === 'online' && styles.filterButtonActive]}
@@ -596,6 +888,12 @@ const DriversScreen = () => {
             onPress={() => setFilter('offline')}
           >
             <Text style={[styles.filterText, filter === 'offline' && styles.filterTextActive]}>Offline</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.filterButton, filter === 'on_leave' && styles.filterButtonActive]}
+            onPress={() => setFilter('on_leave')}
+          >
+            <Text style={[styles.filterText, filter === 'on_leave' && styles.filterTextActive]}>On Leave</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.filterButton, filter === 'assigned' && styles.filterButtonActive]}
@@ -612,142 +910,43 @@ const DriversScreen = () => {
         </ScrollView>
       </View>
 
-      {/* Driver List */}
-      <ScrollView
-        style={styles.listContainer}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-      >
-        {filteredDrivers.length === 0 ? (
-          <View style={styles.emptyContainer}>
-            <Text style={styles.emptyIcon}>👤</Text>
-            <Text style={styles.emptyTitle}>No Drivers Found</Text>
-            <Text style={styles.emptyText}>
-              {filter === 'all'
-                ? 'Add your first driver to get started'
-                : `No ${filter} drivers available`}
-            </Text>
-            <TouchableOpacity
-              style={styles.emptyButton}
-              onPress={handleAddDriver}
-            >
-              <Text style={styles.emptyButtonText}>Add Driver</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          filteredDrivers.map((driver) => {
-            const displayStatus = getDisplayStatus(driver.status);
-            const nextStatus = getNextStatus(driver.status);
-
-            return (
-              <View key={driver.id} style={[styles.driverCard, SHADOWS.medium]}>
-                {/* Driver Info Section - Clickable for edit */}
-                <TouchableOpacity
-                  style={styles.driverInfoSection}
-                  onPress={() => handleEditDriver(driver)}
-                  activeOpacity={0.7}
-                >
-                  <View style={styles.driverHeader}>
-                    <View style={styles.driverAvatar}>
-                      <Text style={styles.avatarText}>
-                        {getInitials(driver.fullName)}
-                      </Text>
-                    </View>
-                    <View style={styles.driverInfo}>
-                      <Text style={styles.driverName}>{driver.fullName}</Text>
-                      <Text style={styles.driverContact}>{driver.contactNumber}</Text>
-                      {renderStars(driver.rating || 0)}
-                    </View>
-                    <View style={[styles.statusBadge, { backgroundColor: getStatusColor(displayStatus) }]}>
-                      <Text style={styles.statusText}>
-                        {getStatusIcon(displayStatus)} {getDisplayStatusText(driver.status)}
-                      </Text>
-                    </View>
-                  </View>
-
-                  <View style={styles.driverDetails}>
-                    <View style={styles.detailRow}>
-                      <View style={styles.detailItem}>
-                        <Text style={styles.detailLabel}>CNIC:</Text>
-                        <Text style={styles.detailValue}>{driver.cnic}</Text>
-                      </View>
-                      <View style={styles.detailItem}>
-                        <Text style={styles.detailLabel}>License:</Text>
-                        <Text style={styles.detailValue}>{driver.licenseNumber}</Text>
-                      </View>
-                    </View>
-
-                    <View style={styles.detailRow}>
-                      <View style={styles.detailItem}>
-                        <Text style={styles.detailLabel}>Bus Assigned:</Text>
-                        <Text style={[
-                          styles.detailValue,
-                          driver.vehicleAssigned ? styles.assigned : styles.unassigned
-                        ]}>
-                          {driver.vehicleAssigned || 'Not Assigned'}
-                        </Text>
-                      </View>
-                      <View style={styles.detailItem}>
-                        <Text style={styles.detailLabel}>Rides:</Text>
-                        <Text style={styles.detailValue}>{driver.totalRides || 0}</Text>
-                      </View>
-                    </View>
-                  </View>
-                </TouchableOpacity>
-
-                {/* Action Buttons */}
-                <View style={styles.actionButtons}>
-                  <TouchableOpacity
-                    style={styles.actionButton}
-                    onPress={() => {
-                      setSelectedDriver(driver);
-                      setAssignModalVisible(true);
-                    }}
-                  >
-                    <Text style={styles.actionButtonText}>
-                      {driver.vehicleAssigned ? '🔄 Change Bus' : '🚌 Assign Bus'}
-                    </Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={styles.actionButton}
-                    onPress={() => handleViewProfile(driver)}
-                  >
-                    <Text style={styles.actionButtonText}>👤 Profile</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={[
-                      styles.actionButton,
-                      displayStatus === 'on-duty' ? styles.deactivateButton : styles.activateButton
-                    ]}
-                    onPress={() => handleChangeStatus(driver.id, nextStatus.next)}
-                  >
-                    <Text style={[
-                      styles.actionButtonText,
-                      displayStatus === 'on-duty' ? styles.deactivateText : styles.activateText
-                    ]}>
-                      {nextStatus.label}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-
-                {/* Unassign Button if bus assigned */}
-                {driver.vehicleAssigned && (
-                  <TouchableOpacity
-                    style={styles.unassignButton}
-                    onPress={() => handleUnassignBus(driver.id, driver.vehicleAssigned)}
-                  >
-                    <Text style={styles.unassignButtonText}>❌ Unassign Bus</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-            );
-          })
-        )}
-      </ScrollView>
+      {/* Driver List - FlatList for better performance */}
+      {filteredDrivers.length === 0 ? (
+        <ScrollView
+          contentContainerStyle={styles.emptyContainer}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
+        >
+          <Text style={styles.emptyIcon}>👤</Text>
+          <Text style={styles.emptyTitle}>No Drivers Found</Text>
+          <Text style={styles.emptyText}>
+            {filter === 'all'
+              ? 'Add your first driver to get started'
+              : `No ${filter.replace('_', ' ')} drivers available`}
+          </Text>
+          <TouchableOpacity
+            style={styles.emptyButton}
+            onPress={handleAddDriver}
+          >
+            <Text style={styles.emptyButtonText}>Add Driver</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      ) : (
+        <FlatList
+          data={filteredDrivers}
+          keyExtractor={(item) => item.id}
+          renderItem={renderDriverItem}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
+          initialNumToRender={10}
+          maxToRenderPerBatch={10}
+          windowSize={5}
+        />
+      )}
 
       {/* Assign Bus Modal */}
       <Modal
@@ -766,45 +965,51 @@ const DriversScreen = () => {
               Select a bus to assign:
             </Text>
 
-            <ScrollView style={styles.busList}>
-              {availableBuses.length === 0 ? (
+            <FlatList
+              data={availableBuses}
+              keyExtractor={(item) => item.id}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={[
+                    styles.busOption,
+                    selectedDriver?.busAssignedId === item.id && styles.busOptionSelected
+                  ]}
+                  onPress={() => {
+                    if (selectedDriver) {
+                      handleAssignBus(selectedDriver.id, item.id, item.busNumber);
+                    }
+                  }}
+                >
+                  <Text style={[
+                    styles.busOptionText,
+                    selectedDriver?.busAssignedId === item.id && styles.busOptionTextSelected
+                  ]}>
+                    🚌 {item.busNumber}
+                  </Text>
+                  <Text style={styles.busOptionStatus}>
+                    {item.driverId
+                      ? `Currently assigned to ${item.driverName}`
+                      : 'Available'}
+                  </Text>
+                </TouchableOpacity>
+              )}
+              ListEmptyComponent={
                 <View style={styles.noBusesContainer}>
                   <Text style={styles.noBusesText}>No active buses available</Text>
                   <TouchableOpacity
                     style={styles.addBusButton}
                     onPress={() => {
                       setAssignModalVisible(false);
+                      // @ts-ignore - navigation param type issue
                       navigation.navigate('AddBusScreen', { mode: 'add' });
                     }}
                   >
                     <Text style={styles.addBusButtonText}>+ Add New Bus</Text>
                   </TouchableOpacity>
                 </View>
-              ) : (
-                availableBuses.map((bus) => (
-                  <TouchableOpacity
-                    key={bus.id}
-                    style={[
-                      styles.busOption,
-                      selectedDriver?.vehicleAssigned === bus.busNumber && styles.busOptionSelected
-                    ]}
-                    onPress={() => handleAssignBus(selectedDriver?.id, bus.id, bus.busNumber)}
-                  >
-                    <Text style={[
-                      styles.busOptionText,
-                      selectedDriver?.vehicleAssigned === bus.busNumber && styles.busOptionTextSelected
-                    ]}>
-                      🚌 {bus.busNumber}
-                    </Text>
-                    <Text style={styles.busOptionStatus}>
-                      {selectedDriver?.vehicleAssigned === bus.busNumber
-                        ? 'Currently Assigned'
-                        : 'Click to Assign'}
-                    </Text>
-                  </TouchableOpacity>
-                ))
-              )}
-            </ScrollView>
+              }
+              contentContainerStyle={styles.busList}
+            />
 
             <TouchableOpacity
               style={[styles.modalButton, styles.cancelButton]}
@@ -873,18 +1078,15 @@ const styles = StyleSheet.create({
     borderBottomColor: COLORS.border,
     paddingVertical: SIZES.sm,
   },
-  statsGrid: {
-    flexDirection: 'row',
-    paddingHorizontal: SIZES.sm,
-  },
   statCard: {
-    flex: 1,
+    minWidth: 80,
     borderRadius: SIZES.xs,
     padding: SIZES.xs,
     marginHorizontal: 2,
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: 60,
+    backgroundColor: COLORS.greyLight,
   },
   statCardActive: {
     borderWidth: 2,
@@ -923,12 +1125,12 @@ const styles = StyleSheet.create({
   filterTextActive: {
     color: COLORS.white,
   },
-  listContainer: {
-    flex: 1,
+  listContent: {
     paddingHorizontal: SIZES.md,
     paddingVertical: SIZES.sm,
   },
   emptyContainer: {
+    flexGrow: 1,
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 60,
@@ -1187,23 +1389,6 @@ const styles = StyleSheet.create({
   },
   profileDetails: {
     marginLeft: SIZES.xs,
-  },
-  detailRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 6,
-  },
-  detailLabel: {
-    fontSize: 14,
-    color: COLORS.textLight,
-    flex: 1,
-  },
-  detailValue: {
-    fontSize: 14,
-    color: COLORS.text,
-    fontWeight: '500',
-    flex: 1,
-    textAlign: 'right',
   },
   profileActions: {
     padding: SIZES.lg,

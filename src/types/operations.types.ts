@@ -5,6 +5,8 @@ export type Route = {
   id: string;
   code: string;
   name: string;
+  from?: string;
+  to?: string;
   distance: string;
   duration: string;
   stops: number;
