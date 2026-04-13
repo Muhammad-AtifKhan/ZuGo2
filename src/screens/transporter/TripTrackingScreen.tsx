@@ -10,6 +10,7 @@ import {
   Alert,
   ScrollView,
   RefreshControl,
+  Modal,
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import firestore from '@react-native-firebase/firestore';
@@ -17,6 +18,13 @@ import auth from '@react-native-firebase/auth';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 
 import { COLORS, SIZES, SHADOWS } from '../../constants/theme';
+import {
+  TRIP_STATUS,
+  TRIP_STATUS_CONFIG,
+  BUS_STATUS,
+  DRIVER_STATUS,
+  getTripStatusConfig
+} from '../../constants/status';
 
 interface LocationData {
   id: string;
@@ -32,6 +40,7 @@ interface LocationData {
 
 interface TripData {
   id: string;
+  busId: string;
   busNumber: string;
   routeName: string;
   driverName: string;
@@ -57,6 +66,12 @@ const TripTrackingScreen = () => {
   const [currentLocation, setCurrentLocation] = useState<LocationData | null>(null);
   const [lastUpdate, setLastUpdate] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
+
+  // Action modals
+  const [showStartModal, setShowStartModal] = useState(false);
+  const [showCompleteModal, setShowCompleteModal] = useState(false);
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [actionLoading, setActionLoading] = useState(false);
 
   // Fetch trip details and locations
   useEffect(() => {
@@ -84,6 +99,7 @@ const TripTrackingScreen = () => {
                 const data = doc.data();
                 setTripData({
                   id: doc.id,
+                  busId: data?.busId || '',
                   busNumber: data?.busNumber || 'N/A',
                   routeName: data?.routeName || 'Unknown Route',
                   driverName: data?.driverName || 'Unknown Driver',
@@ -92,7 +108,7 @@ const TripTrackingScreen = () => {
                   arrivalTime: data?.arrivalTime || '--:--',
                   from: data?.from || 'Unknown',
                   to: data?.to || 'Unknown',
-                  status: data?.status || 'unknown',
+                  status: data?.status || TRIP_STATUS.SCHEDULED,
                 });
               } else {
                 setError('Trip not found');
@@ -130,7 +146,6 @@ const TripTrackingScreen = () => {
 
               setLocations(locationsList);
 
-              // Set current location (most recent)
               if (locationsList.length > 0) {
                 setCurrentLocation(locationsList[0]);
                 const updateTime = locationsList[0].timestamp;
@@ -167,7 +182,6 @@ const TripTrackingScreen = () => {
 
     fetchData();
 
-    // Cleanup listeners
     return () => {
       if (unsubscribeTrip) unsubscribeTrip();
       if (unsubscribeLocations) unsubscribeLocations();
@@ -176,7 +190,249 @@ const TripTrackingScreen = () => {
 
   const onRefresh = () => {
     setRefreshing(true);
-    // Data will auto-refresh via listeners
+  };
+
+  // ✅ START TRIP - Updates Trip, Bus, and Driver statuses
+  const handleStartTrip = async () => {
+    if (!tripData || !user) return;
+
+    setActionLoading(true);
+
+    try {
+      const batch = firestore().batch();
+      const now = firestore.FieldValue.serverTimestamp();
+
+      // 1. Update Trip status to IN_PROGRESS
+      const tripRef = firestore().collection('trips').doc(tripData.id);
+      batch.update(tripRef, {
+        status: TRIP_STATUS.IN_PROGRESS,
+        startedAt: now,
+        updatedAt: now,
+      });
+
+      // 2. Update Bus status to ON_TRIP
+      if (tripData.busId) {
+        const busRef = firestore().collection('buses').doc(tripData.busId);
+        batch.update(busRef, {
+          status: BUS_STATUS.ON_TRIP,
+          currentTripId: tripData.id,
+          updatedAt: now,
+        });
+      }
+
+      // 3. Update Driver status to ON_TRIP
+      if (tripData.driverId) {
+        const driverRef = firestore().collection('drivers').doc(tripData.driverId);
+        batch.update(driverRef, {
+          status: DRIVER_STATUS.ON_TRIP,
+          currentTripId: tripData.id,
+          updatedAt: now,
+        });
+      }
+
+      // 4. Create activity log
+      const activityRef = firestore().collection('trip_activities').doc();
+      batch.set(activityRef, {
+        tripId: tripData.id,
+        type: 'started',
+        timestamp: now,
+        driverId: tripData.driverId,
+        busId: tripData.busId,
+        transporterId: user.uid,
+        createdAt: now,
+      });
+
+      await batch.commit();
+
+      Alert.alert(
+        '✅ Trip Started',
+        `Trip ${tripData.routeName} has been started.\nBus and Driver statuses updated to ON_TRIP.`,
+        [{ text: 'OK' }]
+      );
+
+      setShowStartModal(false);
+    } catch (error) {
+      console.error('Error starting trip:', error);
+      Alert.alert('Error', 'Failed to start trip. Please try again.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // ✅ COMPLETE TRIP - Resets Trip, Bus, and Driver statuses
+  const handleCompleteTrip = async () => {
+    if (!tripData || !user) return;
+
+    setActionLoading(true);
+
+    try {
+      const batch = firestore().batch();
+      const now = firestore.FieldValue.serverTimestamp();
+
+      // 1. Update Trip status to COMPLETED
+      const tripRef = firestore().collection('trips').doc(tripData.id);
+      batch.update(tripRef, {
+        status: TRIP_STATUS.COMPLETED,
+        completedAt: now,
+        updatedAt: now,
+      });
+
+      // 2. Reset Bus status to AVAILABLE
+      if (tripData.busId) {
+        const busRef = firestore().collection('buses').doc(tripData.busId);
+        batch.update(busRef, {
+          status: BUS_STATUS.AVAILABLE,
+          currentTripId: null,
+          updatedAt: now,
+        });
+      }
+
+      // 3. Reset Driver status to AVAILABLE
+      if (tripData.driverId) {
+        const driverRef = firestore().collection('drivers').doc(tripData.driverId);
+        batch.update(driverRef, {
+          status: DRIVER_STATUS.AVAILABLE,
+          currentTripId: null,
+          updatedAt: now,
+        });
+      }
+
+      // 4. Create activity log
+      const activityRef = firestore().collection('trip_activities').doc();
+      batch.set(activityRef, {
+        tripId: tripData.id,
+        type: 'completed',
+        timestamp: now,
+        driverId: tripData.driverId,
+        busId: tripData.busId,
+        transporterId: user.uid,
+        createdAt: now,
+      });
+
+      await batch.commit();
+
+      Alert.alert(
+        '✅ Trip Completed',
+        `Trip ${tripData.routeName} has been completed.\nBus and Driver are now AVAILABLE for new assignments.`,
+        [
+          {
+            text: 'OK',
+            onPress: () => navigation.goBack()
+          }
+        ]
+      );
+
+      setShowCompleteModal(false);
+    } catch (error) {
+      console.error('Error completing trip:', error);
+      Alert.alert('Error', 'Failed to complete trip. Please try again.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // ✅ CANCEL TRIP - Updates Trip status, resets Bus/Driver
+  const handleCancelTrip = async () => {
+    if (!tripData || !user) return;
+
+    setActionLoading(true);
+
+    try {
+      const batch = firestore().batch();
+      const now = firestore.FieldValue.serverTimestamp();
+
+      // 1. Update Trip status to CANCELLED
+      const tripRef = firestore().collection('trips').doc(tripData.id);
+      batch.update(tripRef, {
+        status: TRIP_STATUS.CANCELLED,
+        cancelledAt: now,
+        updatedAt: now,
+      });
+
+      // 2. Reset Bus status to AVAILABLE
+      if (tripData.busId) {
+        const busRef = firestore().collection('buses').doc(tripData.busId);
+        batch.update(busRef, {
+          status: BUS_STATUS.AVAILABLE,
+          currentTripId: null,
+          updatedAt: now,
+        });
+      }
+
+      // 3. Reset Driver status to AVAILABLE
+      if (tripData.driverId) {
+        const driverRef = firestore().collection('drivers').doc(tripData.driverId);
+        batch.update(driverRef, {
+          status: DRIVER_STATUS.AVAILABLE,
+          currentTripId: null,
+          updatedAt: now,
+        });
+      }
+
+      // 4. Create activity log
+      const activityRef = firestore().collection('trip_activities').doc();
+      batch.set(activityRef, {
+        tripId: tripData.id,
+        type: 'cancelled',
+        timestamp: now,
+        driverId: tripData.driverId,
+        busId: tripData.busId,
+        transporterId: user.uid,
+        createdAt: now,
+      });
+
+      await batch.commit();
+
+      Alert.alert(
+        '❌ Trip Cancelled',
+        `Trip ${tripData.routeName} has been cancelled.\nBus and Driver are now AVAILABLE.`,
+        [
+          {
+            text: 'OK',
+            onPress: () => navigation.goBack()
+          }
+        ]
+      );
+
+      setShowCancelModal(false);
+    } catch (error) {
+      console.error('Error cancelling trip:', error);
+      Alert.alert('Error', 'Failed to cancel trip. Please try again.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // ✅ DELAY TRIP - Quick action
+  const handleDelayTrip = () => {
+    if (!tripData || !user) return;
+
+    Alert.alert(
+      '⚠️ Report Delay',
+      'Mark this trip as delayed?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Mark Delayed',
+          onPress: async () => {
+            try {
+              await firestore()
+                .collection('trips')
+                .doc(tripData.id)
+                .update({
+                  status: TRIP_STATUS.DELAYED,
+                  updatedAt: firestore.FieldValue.serverTimestamp(),
+                });
+
+              Alert.alert('✅ Updated', 'Trip marked as delayed');
+            } catch (error) {
+              console.error('Error updating trip:', error);
+              Alert.alert('Error', 'Failed to update trip status');
+            }
+          }
+        }
+      ]
+    );
   };
 
   const openInMaps = () => {
@@ -186,54 +442,27 @@ const TripTrackingScreen = () => {
     }
 
     const { latitude, longitude } = currentLocation;
-    const url = `https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`;
-
     Alert.alert(
-      'Open in Maps',
-      'Choose map application:',
-      [
-        { text: 'Google Maps', onPress: () => openLink(url) },
-        { text: 'Cancel', style: 'cancel' }
-      ]
+      '📍 Current Location',
+      `Lat: ${latitude.toFixed(6)}\nLng: ${longitude.toFixed(6)}`,
+      [{ text: 'OK' }]
     );
   };
 
-  const openLink = (url: string) => {
-    // In a real app, you'd use Linking.openURL
-    Alert.alert('Open URL', url);
+  // ✅ Get status display using centralized config
+  const getStatusDisplay = (status: string) => {
+    return getTripStatusConfig(status);
   };
 
-  const getStatusColor = (status: string) => {
-    switch(status) {
-      case 'active':
-      case 'in-progress':
-        return COLORS.success;
-      case 'upcoming':
-        return COLORS.info;
-      case 'delayed':
-        return COLORS.warning;
-      case 'completed':
-        return COLORS.purple;
-      default:
-        return COLORS.textLight;
-    }
-  };
+  // Check if trip can be started
+  const canStartTrip = tripData?.status === TRIP_STATUS.SCHEDULED;
 
-  const getStatusIcon = (status: string) => {
-    switch(status) {
-      case 'active':
-      case 'in-progress':
-        return '🟢';
-      case 'upcoming':
-        return '🔵';
-      case 'delayed':
-        return '🟡';
-      case 'completed':
-        return '🟣';
-      default:
-        return '⚫';
-    }
-  };
+  // Check if trip can be completed
+  const canCompleteTrip = tripData?.status === TRIP_STATUS.IN_PROGRESS || tripData?.status === TRIP_STATUS.DELAYED;
+
+  // Check if trip can be cancelled
+  const canCancelTrip = tripData?.status === TRIP_STATUS.SCHEDULED ||
+                        tripData?.status === TRIP_STATUS.DELAYED;
 
   if (loading) {
     return (
@@ -260,6 +489,8 @@ const TripTrackingScreen = () => {
     );
   }
 
+  const statusConfig = tripData ? getStatusDisplay(tripData.status) : null;
+
   return (
     <SafeAreaView style={styles.container}>
       {/* Header */}
@@ -282,13 +513,13 @@ const TripTrackingScreen = () => {
         }
       >
         {/* Trip Info Card */}
-        {tripData && (
+        {tripData && statusConfig && (
           <View style={[styles.card, SHADOWS.medium]}>
             <View style={styles.cardHeader}>
               <Text style={styles.cardTitle}>🚌 Trip Details</Text>
-              <View style={[styles.statusBadge, { backgroundColor: getStatusColor(tripData.status) }]}>
+              <View style={[styles.statusBadge, { backgroundColor: statusConfig.color }]}>
                 <Text style={styles.statusText}>
-                  {getStatusIcon(tripData.status)} {tripData.status.toUpperCase()}
+                  {statusConfig.icon} {statusConfig.label}
                 </Text>
               </View>
             </View>
@@ -323,6 +554,49 @@ const TripTrackingScreen = () => {
                 <Text style={styles.infoLabel}>Route:</Text>
                 <Text style={styles.infoValue}>{tripData.from} → {tripData.to}</Text>
               </View>
+            </View>
+
+            {/* ✅ Action Buttons */}
+            <View style={styles.actionButtonsContainer}>
+              {canStartTrip && (
+                <TouchableOpacity
+                  style={[styles.actionButton, styles.startButton]}
+                  onPress={() => setShowStartModal(true)}
+                >
+                  <Icon name="play-arrow" size={20} color={COLORS.white} />
+                  <Text style={styles.actionButtonText}>Start Trip</Text>
+                </TouchableOpacity>
+              )}
+
+              {canCompleteTrip && (
+                <TouchableOpacity
+                  style={[styles.actionButton, styles.completeButton]}
+                  onPress={() => setShowCompleteModal(true)}
+                >
+                  <Icon name="check" size={20} color={COLORS.white} />
+                  <Text style={styles.actionButtonText}>Complete</Text>
+                </TouchableOpacity>
+              )}
+
+              {tripData.status === TRIP_STATUS.IN_PROGRESS && (
+                <TouchableOpacity
+                  style={[styles.actionButton, styles.delayButton]}
+                  onPress={handleDelayTrip}
+                >
+                  <Icon name="warning" size={20} color={COLORS.white} />
+                  <Text style={styles.actionButtonText}>Delay</Text>
+                </TouchableOpacity>
+              )}
+
+              {canCancelTrip && (
+                <TouchableOpacity
+                  style={[styles.actionButton, styles.cancelButton]}
+                  onPress={() => setShowCancelModal(true)}
+                >
+                  <Icon name="close" size={20} color={COLORS.white} />
+                  <Text style={styles.actionButtonText}>Cancel</Text>
+                </TouchableOpacity>
+              )}
             </View>
           </View>
         )}
@@ -373,8 +647,8 @@ const TripTrackingScreen = () => {
                 style={styles.mapButton}
                 onPress={openInMaps}
               >
-                <Icon name="map" size={20} color={COLORS.white} />
-                <Text style={styles.mapButtonText}>View on Google Maps</Text>
+                <Icon name="location-on" size={20} color={COLORS.white} />
+                <Text style={styles.mapButtonText}>View Coordinates</Text>
               </TouchableOpacity>
             </>
           ) : (
@@ -392,7 +666,7 @@ const TripTrackingScreen = () => {
         {locations.length > 1 && (
           <View style={[styles.card, SHADOWS.medium]}>
             <Text style={styles.cardTitle}>📊 Location History</Text>
-            <Text style={styles.historySubtitle}>Last {locations.length} updates</Text>
+            <Text style={styles.historySubtitle}>Last {Math.min(locations.length, 5)} updates</Text>
 
             {locations.slice(1, 6).map((loc, index) => (
               <View key={loc.id} style={styles.historyItem}>
@@ -405,16 +679,138 @@ const TripTrackingScreen = () => {
                 <Text style={styles.historyLocation}>
                   {loc.city || 'Unknown'}{loc.area ? `, ${loc.area}` : ''}
                 </Text>
-                {index < 4 && <View style={styles.historyDivider} />}
+                {index < 4 && index < locations.length - 2 && <View style={styles.historyDivider} />}
               </View>
             ))}
 
-            <Text style={styles.historyNote}>
-              {locations.length - 1} more location updates available
-            </Text>
+            {locations.length > 6 && (
+              <Text style={styles.historyNote}>
+                {locations.length - 6} more location updates available
+              </Text>
+            )}
           </View>
         )}
       </ScrollView>
+
+      {/* Start Trip Confirmation Modal */}
+      <Modal
+        visible={showStartModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => !actionLoading && setShowStartModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>🚌 Start Trip</Text>
+            <Text style={styles.modalText}>
+              Are you sure you want to start this trip?
+            </Text>
+            <Text style={styles.modalSubtext}>
+              This will update the trip status to IN PROGRESS and mark the bus and driver as ON TRIP.
+            </Text>
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalCancelButton]}
+                onPress={() => setShowStartModal(false)}
+                disabled={actionLoading}
+              >
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalConfirmButton]}
+                onPress={handleStartTrip}
+                disabled={actionLoading}
+              >
+                {actionLoading ? (
+                  <ActivityIndicator size="small" color={COLORS.white} />
+                ) : (
+                  <Text style={styles.modalConfirmText}>Start Trip</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Complete Trip Confirmation Modal */}
+      <Modal
+        visible={showCompleteModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => !actionLoading && setShowCompleteModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>✅ Complete Trip</Text>
+            <Text style={styles.modalText}>
+              Confirm that this trip has been completed?
+            </Text>
+            <Text style={styles.modalSubtext}>
+              This will mark the trip as COMPLETED and make the bus and driver AVAILABLE for new assignments.
+            </Text>
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalCancelButton]}
+                onPress={() => setShowCompleteModal(false)}
+                disabled={actionLoading}
+              >
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalConfirmButton]}
+                onPress={handleCompleteTrip}
+                disabled={actionLoading}
+              >
+                {actionLoading ? (
+                  <ActivityIndicator size="small" color={COLORS.white} />
+                ) : (
+                  <Text style={styles.modalConfirmText}>Complete</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Cancel Trip Confirmation Modal */}
+      <Modal
+        visible={showCancelModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => !actionLoading && setShowCancelModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={[styles.modalTitle, { color: COLORS.danger }]}>❌ Cancel Trip</Text>
+            <Text style={styles.modalText}>
+              Are you sure you want to cancel this trip?
+            </Text>
+            <Text style={styles.modalSubtext}>
+              This action cannot be undone. The bus and driver will become AVAILABLE.
+            </Text>
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalCancelButton]}
+                onPress={() => setShowCancelModal(false)}
+                disabled={actionLoading}
+              >
+                <Text style={styles.modalCancelText}>Go Back</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalDangerButton]}
+                onPress={handleCancelTrip}
+                disabled={actionLoading}
+              >
+                {actionLoading ? (
+                  <ActivityIndicator size="small" color={COLORS.white} />
+                ) : (
+                  <Text style={styles.modalConfirmText}>Cancel Trip</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -518,6 +914,7 @@ const styles = StyleSheet.create({
   },
   tripInfo: {
     marginTop: SIZES.xs,
+    marginBottom: SIZES.md,
   },
   infoRow: {
     flexDirection: 'row',
@@ -536,6 +933,43 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
     color: COLORS.text,
+  },
+  actionButtonsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    marginTop: SIZES.sm,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+    paddingTop: SIZES.md,
+  },
+  actionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: SIZES.sm,
+    paddingHorizontal: SIZES.md,
+    borderRadius: SIZES.xs,
+    minWidth: '48%',
+    marginBottom: SIZES.xs,
+  },
+  startButton: {
+    backgroundColor: COLORS.success,
+  },
+  completeButton: {
+    backgroundColor: COLORS.info,
+  },
+  delayButton: {
+    backgroundColor: COLORS.warning,
+  },
+  cancelButton: {
+    backgroundColor: COLORS.danger,
+  },
+  actionButtonText: {
+    color: COLORS.white,
+    fontSize: 13,
+    fontWeight: '600',
+    marginLeft: SIZES.xs,
   },
   locationContainer: {
     marginVertical: SIZES.sm,
@@ -564,7 +998,6 @@ const styles = StyleSheet.create({
   coordinates: {
     fontSize: 13,
     color: COLORS.textLight,
-    fontFamily: 'monospace',
   },
   speedContainer: {
     flexDirection: 'row',
@@ -655,6 +1088,69 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
     textAlign: 'center',
     marginTop: SIZES.sm,
+  },
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    backgroundColor: COLORS.white,
+    borderRadius: SIZES.lg,
+    padding: SIZES.xl,
+    width: '85%',
+    maxWidth: 400,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: COLORS.primary,
+    marginBottom: SIZES.md,
+    textAlign: 'center',
+  },
+  modalText: {
+    fontSize: 16,
+    color: COLORS.text,
+    marginBottom: SIZES.sm,
+    textAlign: 'center',
+  },
+  modalSubtext: {
+    fontSize: 13,
+    color: COLORS.textLight,
+    marginBottom: SIZES.lg,
+    textAlign: 'center',
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  modalButton: {
+    flex: 1,
+    paddingVertical: SIZES.md,
+    borderRadius: SIZES.xs,
+    alignItems: 'center',
+    marginHorizontal: SIZES.xs,
+  },
+  modalCancelButton: {
+    backgroundColor: COLORS.greyLight,
+  },
+  modalConfirmButton: {
+    backgroundColor: COLORS.success,
+  },
+  modalDangerButton: {
+    backgroundColor: COLORS.danger,
+  },
+  modalCancelText: {
+    color: COLORS.text,
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  modalConfirmText: {
+    color: COLORS.white,
+    fontWeight: '600',
+    fontSize: 14,
   },
 });
 

@@ -1,4 +1,4 @@
-// src/screens/transporter/subscreens/ScheduleTripScreen.tsx - COMPLETE FIXED VERSION
+// src/screens/transporter/subscreens/ScheduleTripScreen.tsx
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   View,
@@ -20,11 +20,30 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 
-// Types
 import { Route, Trip } from '../../../types/operations.types';
+import { TRIP_STATUS, BUS_STATUS, DRIVER_STATUS, SCHEDULE_STATUS } from '../../../constants/status';
 
-// Constants
-import { COLORS, SIZES, SHADOWS } from '../../../constants/theme';
+const COLORS = {
+  primary: '#1A237E',
+  secondary: '#4A90E2',
+  success: '#4CAF50',
+  danger: '#F44336',
+  warning: '#FF9800',
+  warningDark: '#E65100',
+  info: '#2196F3',
+  infoLight: '#E3F2FD',
+  text: '#1A237E',
+  textLight: '#666666',
+  textLighter: '#999999',
+  background: '#F8F9FA',
+  white: '#FFFFFF',
+  border: '#E0E0E0',
+  purple: '#9C27B0',
+};
+
+const SIZES = {
+  xs: 4, sm: 8, md: 12, lg: 16, xl: 20, xxl: 24, xxxl: 32,
+};
 
 type FirebaseBus = {
   id: string;
@@ -40,7 +59,6 @@ type FirebaseDriver = {
   contactNumber?: string;
 };
 
-// Types for validation states
 type ValidationState = {
   busAvailable: boolean;
   driverAvailable: boolean;
@@ -56,22 +74,71 @@ type ValidationState = {
   dateMessage?: string;
   durationValid: boolean;
   durationMessage?: string;
+  busLocationMatch: boolean;
+  driverLocationMatch: boolean;
 };
 
 const daysOfWeek = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
-// Validation Constants
 const BUS_TURNAROUND_MINUTES = 30;
 const DRIVER_REST_MINUTES = 60;
 const MIN_FARE = 1;
 const MAX_FARE = 50000;
 const MAX_TRIP_DURATION_HOURS = 24;
 const MIN_ROUTE_GAP_MINUTES = 30;
+const MAX_FUTURE_DAYS = 90;
+const MIN_ADVANCE_BOOKING_HOURS = 2;
+
+// ============================================================
+// ✅ TIMEZONE FIX — Pakistan Standard Time (UTC+5)
+//
+// PROBLEM: new Date("2026-04-14") creates UTC midnight
+//          In PKT (UTC+5) that equals April 13 at 11:00 PM
+//          So date shows as April 13 instead of April 14
+//
+// SOLUTION: Never use new Date("YYYY-MM-DD") for local display.
+//           Always extract year/month/day manually.
+// ============================================================
+
+/** Safe local date string: Date object => "YYYY-MM-DD" using LOCAL timezone */
+const toLocalDateString = (date: Date): string => {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
+
+/**
+ * Normalize any date value to "YYYY-MM-DD" string safely.
+ * Handles: plain string, Firestore Timestamp, JS Date
+ * Uses LOCAL timezone — never UTC midnight trap.
+ */
+const normDateStr = (val: any): string => {
+  if (!val) return '';
+  if (typeof val === 'string') return val.split('T')[0]; // already "YYYY-MM-DD" or ISO
+  if (val?.toDate && typeof val.toDate === 'function') {
+    // Firestore Timestamp -> JS Date -> local string
+    return toLocalDateString(val.toDate());
+  }
+  if (val instanceof Date) return toLocalDateString(val);
+  return '';
+};
+
+/**
+ * Parse "YYYY-MM-DD" to a local JS Date (noon to avoid DST edge cases).
+ * NEVER use new Date("YYYY-MM-DD") — that's UTC and causes off-by-one in PKT.
+ */
+const parseLocalDate = (str: string): Date => {
+  const [y, m, d] = str.split('-').map(Number);
+  return new Date(y, m - 1, d, 12, 0, 0);
+};
 
 const ScheduleTripScreen = () => {
   const navigation = useNavigation();
   const route = useRoute();
-  const { mode, trip, preSelectedRoute, transporterId: routeTransporterId } = route.params as {
+  const {
+    mode, trip, preSelectedRoute, transporterId: routeTransporterId,
+  } = route.params as {
     mode: 'add' | 'edit' | 'view';
     trip?: Trip;
     preSelectedRoute?: string;
@@ -81,1491 +148,840 @@ const ScheduleTripScreen = () => {
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [fetchingData, setFetchingData] = useState(true);
+  const [isGeneratingTrips, setIsGeneratingTrips] = useState(false);
+  const [generatedTripsCount, setGeneratedTripsCount] = useState(0);
+  const [generatedTrips, setGeneratedTrips] = useState<any[]>([]);
 
-  // Data states
   const [routes, setRoutes] = useState<Route[]>([]);
   const [buses, setBuses] = useState<FirebaseBus[]>([]);
   const [drivers, setDrivers] = useState<FirebaseDriver[]>([]);
 
-  // Cache for existing trips to avoid repeated Firestore queries
+  // ✅ Both state + ref: state for renders, ref for latest value in callbacks
   const [existingTrips, setExistingTrips] = useState<any[]>([]);
+  const existingTripsRef = useRef<any[]>([]);
+  const busesRef = useRef<FirebaseBus[]>([]);
 
-  // Real-time validation states
   const [validation, setValidation] = useState<ValidationState>({
-    busAvailable: true,
-    driverAvailable: true,
-    routeFrequencyValid: true,
-    fareValid: true,
-    seatsValid: true,
-    dateValid: true,
-    durationValid: true,
+    busAvailable: true, driverAvailable: true,
+    routeFrequencyValid: true, fareValid: true, seatsValid: true,
+    dateValid: true, durationValid: true,
+    busLocationMatch: true, driverLocationMatch: true,
   });
 
-  // City codes cache
   const [cityCodesCache, setCityCodesCache] = useState<Record<string, string>>({});
-
-  // Date picker states
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [currentDateField, setCurrentDateField] = useState('');
   const [selectedDate, setSelectedDate] = useState(new Date());
-
-  // Time picker states
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [currentTimeField, setCurrentTimeField] = useState('');
-
-  // ✅ FIX: Update field helper
-  const updateField = useCallback((key: string, value: any) => {
-    setFormData(prev => ({ ...prev, [key]: value }));
-  }, []);
+  const [showBusModal, setShowBusModal] = useState(false);
+  const [showDriverModal, setShowDriverModal] = useState(false);
+  const [busSearchQuery, setBusSearchQuery] = useState('');
+  const [driverSearchQuery, setDriverSearchQuery] = useState('');
 
   const [formData, setFormData] = useState({
-    routeId: '',
-    routeCode: '',
-    routeName: '',
-    from: '',
-    to: '',
-    fromCode: '',
-    toCode: '',
-    busId: '',
-    busNumber: '',
-    driverId: '',
-    driverName: '',
-    departureTime: '08:00',
-    arrivalTime: '',
+    routeId: '', routeCode: '', routeName: '',
+    from: '', to: '', fromCode: '', toCode: '',
+    busId: '', busNumber: '', driverId: '', driverName: '',
+    departureTime: '08:00', arrivalTime: '',
     selectedDays: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'] as string[],
-    startDate: '',
-    endDate: '',
+    startDate: '', endDate: '',
     repeatType: 'weekdays' as 'daily' | 'weekdays' | 'weekends' | 'weekly' | 'custom',
-    fare: '50',
-    totalSeats: '40',
-    distance: '',
-    duration: '',
+    fare: '50', totalSeats: '40', distance: '', duration: '',
   });
+
+  // ✅ formDataRef — avoid stale closure in checkAllConflicts
+  const formDataRef = useRef(formData);
+  useEffect(() => { formDataRef.current = formData; }, [formData]);
 
   const user = auth().currentUser;
   const effectiveTransporterId = routeTransporterId || user?.uid;
 
-  // ========== TIME OVERLAP DETECTION FUNCTION ==========
-  const checkTimeOverlap = useCallback((
-    existingDeparture: string,
-    existingArrival: string,
-    newDeparture: string,
-    newArrival: string
-  ): boolean => {
-    if (!existingDeparture || !existingArrival || !newDeparture || !newArrival) {
-      return false;
-    }
-
-    const parseTimeToMinutes = (time: string): number => {
-      const [hours, minutes] = time.split(':').map(Number);
-      return hours * 60 + minutes;
-    };
-
-    const existingDep = parseTimeToMinutes(existingDeparture);
-    const existingArr = parseTimeToMinutes(existingArrival);
-    const newDep = parseTimeToMinutes(newDeparture);
-    let newArr = parseTimeToMinutes(newArrival);
-
-    // Handle overnight trips
-    if (newArr < newDep) {
-      newArr += 24 * 60;
-    }
-
-    // Check for overlap: newDeparture < existingArrival AND newArrival > existingDeparture
-    return newDep < existingArr && newArr > existingDep;
+  const updateField = useCallback((key: string, value: any) => {
+    setFormData(prev => ({ ...prev, [key]: value }));
   }, []);
 
-  // ========== VALIDATION FUNCTIONS ==========
+  const filteredBuses = useMemo(() => {
+    const av = buses.filter(b => b.status === BUS_STATUS.AVAILABLE);
+    if (!busSearchQuery) return av;
+    return av.filter(b => b.busNumber.toLowerCase().includes(busSearchQuery.toLowerCase()));
+  }, [buses, busSearchQuery]);
 
-  const validateFare = useCallback((fare: string): { valid: boolean; message?: string } => {
-    const fareNum = Number(fare);
-    if (isNaN(fareNum) || fareNum < MIN_FARE) {
-      return { valid: false, message: `Fare must be at least PKR ${MIN_FARE}` };
-    }
-    if (fareNum > MAX_FARE) {
-      return { valid: false, message: `Fare cannot exceed PKR ${MAX_FARE}` };
-    }
-    return { valid: true };
-  }, []);
+  const filteredDrivers = useMemo(() => {
+    let av = drivers.filter(d => d.status === DRIVER_STATUS.AVAILABLE);
+    if (driverSearchQuery)
+      av = av.filter(d => d.fullName.toLowerCase().includes(driverSearchQuery.toLowerCase()));
+    return av;
+  }, [drivers, driverSearchQuery]);
 
-  const validateSeats = useCallback((seats: string, busId: string): { valid: boolean; message?: string } => {
-    const seatsNum = Number(seats);
-    // ✅ FIX: Proper validation for zero and NaN
-    if (isNaN(seatsNum) || seatsNum <= 0) {
-      return { valid: false, message: 'Please enter a valid number of seats (greater than 0)' };
-    }
-
-    const selectedBus = buses.find(b => b.id === busId);
-    if (selectedBus && seatsNum > selectedBus.capacity) {
-      return {
-        valid: false,
-        message: `Seats (${seatsNum}) cannot exceed bus capacity (${selectedBus.capacity})`
-      };
-    }
-    return { valid: true };
-  }, [buses]);
-
-  const validateStartDate = useCallback((dateStr: string): { valid: boolean; message?: string } => {
-    if (!dateStr) return { valid: true };
-
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    const startDate = new Date(dateStr);
-    startDate.setHours(0, 0, 0, 0);
-
-    if (startDate < today) {
-      return { valid: false, message: 'Start date cannot be in the past' };
-    }
-    return { valid: true };
-  }, []);
-
-  const validateDuration = useCallback((departure: string, arrival: string): { valid: boolean; message?: string } => {
-    if (!departure || !arrival) return { valid: true };
-
-    const [depHours, depMins] = departure.split(':').map(Number);
-    const [arrHours, arrMins] = arrival.split(':').map(Number);
-
-    const depTotal = depHours * 60 + depMins;
-    let arrTotal = arrHours * 60 + arrMins;
-
-    if (arrTotal < depTotal) {
-      arrTotal += 24 * 60;
-    }
-
-    const durationMinutes = arrTotal - depTotal;
-    const maxDurationMinutes = MAX_TRIP_DURATION_HOURS * 60;
-
-    if (durationMinutes > maxDurationMinutes) {
-      return {
-        valid: false,
-        message: `Trip duration cannot exceed ${MAX_TRIP_DURATION_HOURS} hours`
-      };
-    }
-
-    return { valid: true };
-  }, []);
-
-  const checkBusTurnaround = useCallback((
-    existingTrip: any,
-    newDeparture: string,
-    newDays: string[],
-    newStartDate: string
-  ): boolean => {
-    const existingArrival = existingTrip.arrivalTime;
-    const [existArrHours, existArrMins] = existingArrival.split(':').map(Number);
-    const [newDepHours, newDepMins] = newDeparture.split(':').map(Number);
-
-    const existArrTotal = existArrHours * 60 + existArrMins;
-    const newDepTotal = newDepHours * 60 + newDepMins;
-
-    const minNextDeparture = existArrTotal + BUS_TURNAROUND_MINUTES;
-
-    if (minNextDeparture >= 24 * 60) {
-      const nextDay = minNextDeparture - (24 * 60);
-      return newDepTotal >= nextDay;
-    }
-
-    return newDepTotal >= minNextDeparture;
-  }, []);
-
-  const checkDriverRest = useCallback((
-    existingTrip: any,
-    newDeparture: string,
-    newDays: string[],
-    newStartDate: string
-  ): boolean => {
-    const existingArrival = existingTrip.arrivalTime;
-    const [existArrHours, existArrMins] = existingArrival.split(':').map(Number);
-    const [newDepHours, newDepMins] = newDeparture.split(':').map(Number);
-
-    const existArrTotal = existArrHours * 60 + existArrMins;
-    const newDepTotal = newDepHours * 60 + newDepMins;
-
-    const minNextDeparture = existArrTotal + DRIVER_REST_MINUTES;
-
-    if (minNextDeparture >= 24 * 60) {
-      const nextDay = minNextDeparture - (24 * 60);
-      return newDepTotal >= nextDay;
-    }
-
-    return newDepTotal >= minNextDeparture;
-  }, []);
-
-  const checkRouteFrequency = useCallback((
-    existingTrip: any,
-    newDeparture: string,
-    newDays: string[],
-    newStartDate: string
-  ): boolean => {
-    const existingDeparture = existingTrip.departureTime;
-    const [existDepHours, existDepMins] = existingDeparture.split(':').map(Number);
-    const [newDepHours, newDepMins] = newDeparture.split(':').map(Number);
-
-    const existDepTotal = existDepHours * 60 + existDepMins;
-    const newDepTotal = newDepHours * 60 + newDepMins;
-
-    const timeDifference = Math.abs(newDepTotal - existDepTotal);
-
-    return timeDifference >= MIN_ROUTE_GAP_MINUTES;
-  }, []);
-
-  // ✅ FIX: Comprehensive conflict check with proper time overlap detection
-  const checkAllConflicts = useCallback(async () => {
-    if (!effectiveTransporterId || !formData.departureTime || !formData.arrivalTime ||
-        !formData.busId || !formData.driverId || !formData.routeId) {
-      return;
-    }
-
-    try {
-      let tripsToCheck = existingTrips;
-      if (tripsToCheck.length === 0) {
-        // ✅ FIX: Optimize query - don't use 'in' operator for better performance
-        const upcomingSnapshot = await firestore()
-          .collection('trips')
-          .where('transporterId', '==', effectiveTransporterId)
-          .where('status', '==', 'upcoming')
-          .get();
-
-        const activeSnapshot = await firestore()
-          .collection('trips')
-          .where('transporterId', '==', effectiveTransporterId)
-          .where('status', '==', 'active')
-          .get();
-
-        tripsToCheck = [
-          ...upcomingSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })),
-          ...activeSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
-        ];
-        setExistingTrips(tripsToCheck);
-      }
-
-      const newValidation: ValidationState = {
-        busAvailable: true,
-        driverAvailable: true,
-        routeFrequencyValid: true,
-        fareValid: true,
-        seatsValid: true,
-        dateValid: true,
-        durationValid: true,
-      };
-
-      const fareValidation = validateFare(formData.fare);
-      newValidation.fareValid = fareValidation.valid;
-      newValidation.fareMessage = fareValidation.message;
-
-      const seatsValidation = validateSeats(formData.totalSeats, formData.busId);
-      newValidation.seatsValid = seatsValidation.valid;
-      newValidation.seatsMessage = seatsValidation.message;
-
-      const dateValidation = validateStartDate(formData.startDate);
-      newValidation.dateValid = dateValidation.valid;
-      newValidation.dateMessage = dateValidation.message;
-
-      if (formData.arrivalTime) {
-        const durationValidation = validateDuration(formData.departureTime, formData.arrivalTime);
-        newValidation.durationValid = durationValidation.valid;
-        newValidation.durationMessage = durationValidation.message;
-      }
-
-      const newDepTime = formData.departureTime;
-      const newArrTime = formData.arrivalTime;
-
-      // ✅ FIX: Optimize conflict checking by filtering first
-      const relevantTrips = tripsToCheck.filter(existingTrip => {
-        if (mode === 'edit' && trip?.id && existingTrip.id === trip.id) return false;
-
-        const dayOverlap = existingTrip.days?.some((day: string) =>
-          formData.selectedDays.includes(day)
-        );
-        if (!dayOverlap) return false;
-
-        if (formData.startDate && existingTrip.startDate) {
-          const newStart = new Date(formData.startDate);
-          const newEnd = formData.endDate ? new Date(formData.endDate) : newStart;
-          const existStart = new Date(existingTrip.startDate);
-          const existEnd = existingTrip.endDate ? new Date(existingTrip.endDate) : existStart;
-
-          return (newStart <= existEnd && newEnd >= existStart);
-        }
-        return true;
-      });
-
-      // Check each filtered trip for conflicts
-      for (const existingTrip of relevantTrips) {
-        const existingDep = existingTrip.departureTime;
-        const existingArr = existingTrip.arrivalTime;
-
-        if (existingTrip.busId === formData.busId) {
-          const hasOverlap = checkTimeOverlap(
-            existingDep,
-            existingArr,
-            newDepTime,
-            newArrTime
-          );
-
-          if (hasOverlap) {
-            newValidation.busAvailable = false;
-            newValidation.busMessage = `Bus ${formData.busNumber} has overlapping trip at ${existingDep} - ${existingArr}`;
-          } else {
-            const turnaroundValid = checkBusTurnaround(
-              existingTrip,
-              newDepTime,
-              formData.selectedDays,
-              formData.startDate
-            );
-
-            if (!turnaroundValid) {
-              newValidation.busAvailable = false;
-              newValidation.busMessage = `Bus ${formData.busNumber} needs ${BUS_TURNAROUND_MINUTES} minutes turnaround time after trip at ${existingArr}`;
-            }
-          }
-        }
-
-        if (existingTrip.driverId === formData.driverId) {
-          const hasOverlap = checkTimeOverlap(
-            existingDep,
-            existingArr,
-            newDepTime,
-            newArrTime
-          );
-
-          if (hasOverlap) {
-            newValidation.driverAvailable = false;
-            newValidation.driverMessage = `Driver ${formData.driverName} has overlapping trip at ${existingDep} - ${existingArr}`;
-          } else {
-            const restValid = checkDriverRest(
-              existingTrip,
-              newDepTime,
-              formData.selectedDays,
-              formData.startDate
-            );
-
-            if (!restValid) {
-              newValidation.driverAvailable = false;
-              newValidation.driverMessage = `Driver ${formData.driverName} needs ${DRIVER_REST_MINUTES} minutes rest after trip ending at ${existingArr}`;
-            }
-          }
-        }
-
-        if (existingTrip.routeId === formData.routeId) {
-          const frequencyValid = checkRouteFrequency(
-            existingTrip,
-            newDepTime,
-            formData.selectedDays,
-            formData.startDate
-          );
-
-          if (!frequencyValid) {
-            newValidation.routeFrequencyValid = false;
-            newValidation.routeFrequencyMessage = `Trips on same route must be at least ${MIN_ROUTE_GAP_MINUTES} minutes apart`;
-          }
-        }
-      }
-
-      setValidation(newValidation);
-    } catch (error) {
-      console.error('Error checking conflicts:', error);
-    }
-  }, [
-    effectiveTransporterId,
-    formData,
-    existingTrips,
-    mode,
-    trip,
-    validateFare,
-    validateSeats,
-    validateStartDate,
-    validateDuration,
-    checkBusTurnaround,
-    checkDriverRest,
-    checkRouteFrequency,
-    checkTimeOverlap
-  ]);
-
-  // ========== EXISTING FUNCTIONS ==========
-
-  const parseDurationToMinutes = (durationStr: string): number => {
-    if (!durationStr) return 0;
-
-    const duration = durationStr.toLowerCase().trim();
-    let totalMinutes = 0;
-
-    const hoursMatch = duration.match(/(\d+(?:\.\d+)?)\s*h(?:ours?)?/);
-    if (hoursMatch) {
-      totalMinutes += parseFloat(hoursMatch[1]) * 60;
-    }
-
-    const minutesMatch = duration.match(/(\d+)\s*m(?:in(?:utes?)?)?/);
-    if (minutesMatch) {
-      totalMinutes += parseInt(minutesMatch[1]);
-    }
-
-    if (totalMinutes === 0 && duration.match(/^\d+$/)) {
-      totalMinutes = parseInt(duration);
-    }
-
-    return Math.round(totalMinutes);
+  // ============================================================
+  // Helpers
+  // ============================================================
+  const parseTimeToMinutes = (time: string): number => {
+    if (!time) return 0;
+    const [h, m] = time.split(':').map(Number);
+    return h * 60 + m;
   };
 
-  const calculateArrivalTime = useCallback((departureTime: string, durationStr: string): string => {
-    if (!departureTime || !durationStr) {
-      return '';
-    }
+  const parseDurationToMinutes = (s: string): number => {
+    if (!s) return 0;
+    const str = s.toLowerCase().trim();
+    let total = 0;
+    const hm = str.match(/(\d+(?:\.\d+)?)\s*h(?:ours?)?/);
+    if (hm) total += parseFloat(hm[1]) * 60;
+    const mm = str.match(/(\d+)\s*m(?:in(?:utes?)?)?/);
+    if (mm) total += parseInt(mm[1]);
+    if (total === 0 && str.match(/^\d+$/)) total = parseInt(str);
+    return Math.round(total);
+  };
 
-    const durationMinutes = parseDurationToMinutes(durationStr);
-    if (durationMinutes === 0 || durationMinutes > 24 * 60) {
-      return '';
-    }
-
-    const [hours, minutes] = departureTime.split(':').map(Number);
-    const departureDate = new Date();
-    departureDate.setHours(hours, minutes, 0, 0);
-    departureDate.setMinutes(departureDate.getMinutes() + durationMinutes);
-
-    return `${departureDate.getHours().toString().padStart(2, '0')}:${departureDate.getMinutes().toString().padStart(2, '0')}`;
+  const calculateArrivalTime = useCallback((dep: string, dur: string): string => {
+    if (!dep || !dur) return '';
+    const mins = parseDurationToMinutes(dur);
+    if (!mins || mins > 24 * 60) return '';
+    const [h, m] = dep.split(':').map(Number);
+    const d = new Date(); d.setHours(h, m, 0, 0);
+    d.setMinutes(d.getMinutes() + mins);
+    return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
   }, []);
 
-  useEffect(() => {
-    if (formData.routeId && formData.departureTime && formData.duration) {
-      const calculatedArrival = calculateArrivalTime(formData.departureTime, formData.duration);
-      if (calculatedArrival) {
-        updateField('arrivalTime', calculatedArrival);
+  const validateFare = useCallback((fare: string) => {
+    const n = Number(fare);
+    if (isNaN(n) || n < MIN_FARE) return { valid: false, message: `Fare must be at least PKR ${MIN_FARE}` };
+    if (n > MAX_FARE) return { valid: false, message: `Fare cannot exceed PKR ${MAX_FARE}` };
+    return { valid: true };
+  }, []);
+
+  const validateSeats = useCallback((seats: string, busId: string) => {
+    const n = Number(seats);
+    if (isNaN(n) || n <= 0) return { valid: false, message: 'Please enter a valid number of seats' };
+    const bus = busesRef.current.find(b => b.id === busId);
+    if (bus && n > bus.capacity)
+      return { valid: false, message: `Seats (${n}) cannot exceed bus capacity (${bus.capacity})` };
+    return { valid: true };
+  }, []);
+
+  const validateStartDate = useCallback((dateStr: string) => {
+    if (!dateStr) return { valid: true };
+    // ✅ TIMEZONE FIX: string comparison only
+    const todayStr = toLocalDateString(new Date());
+    if (dateStr < todayStr) return { valid: false, message: 'Start date cannot be in the past' };
+    const maxDate = new Date();
+    maxDate.setDate(maxDate.getDate() + MAX_FUTURE_DAYS);
+    if (dateStr > toLocalDateString(maxDate))
+      return { valid: false, message: `Cannot schedule trips more than ${MAX_FUTURE_DAYS} days in advance` };
+    return { valid: true };
+  }, []);
+
+  const validateDuration = useCallback((dep: string, arr: string) => {
+    if (!dep || !arr) return { valid: true };
+    let depM = parseTimeToMinutes(dep), arrM = parseTimeToMinutes(arr);
+    if (arrM < depM) arrM += 1440;
+    if ((arrM - depM) > MAX_TRIP_DURATION_HOURS * 60)
+      return { valid: false, message: `Trip duration cannot exceed ${MAX_TRIP_DURATION_HOURS} hours` };
+    return { valid: true };
+  }, []);
+
+  const validateAdvanceBooking = (dateStr: string, timeStr: string) => {
+    if (!dateStr || !timeStr) return { valid: true };
+    // ✅ TIMEZONE FIX: parse date parts manually
+    const [yr, mo, dy] = dateStr.split('-').map(Number);
+    const [h, m] = timeStr.split(':').map(Number);
+    const tripDT = new Date(yr, mo - 1, dy, h, m, 0);
+    const hoursDiff = (tripDT.getTime() - Date.now()) / 3600000;
+    if (hoursDiff < MIN_ADVANCE_BOOKING_HOURS)
+      return { valid: false, message: `Trips must be scheduled at least ${MIN_ADVANCE_BOOKING_HOURS} hours in advance` };
+    return { valid: true };
+  };
+
+  // ============================================================
+  // ✅ FULLY FIXED checkAllConflicts
+  // KEY FIXES:
+  // 1. tripsData param — no stale state dependency
+  // 2. formDataRef — always latest formData in callback
+  // 3. normDateStr — timezone-safe, string-only date comparison
+  // 4. SINGLE-DAY FIX: direct time overlap per-trip (not prev/next logic)
+  //    Old: find "previous" and "next" trip, then compare
+  //    New: loop every relevant trip, check overlap + gap directly
+  //    This catches single-day trips correctly
+  // 5. days[] array AND single dayOfWeek string both handled
+  // ============================================================
+  const checkAllConflicts = useCallback(async (tripsData?: any[]) => {
+    const fd = formDataRef.current;
+    if (!effectiveTransporterId || !fd.departureTime || !fd.arrivalTime ||
+        !fd.busId || !fd.driverId || !fd.routeId || !fd.startDate) return;
+
+    try {
+      let trips: any[] = [];
+      if (tripsData && tripsData.length > 0) {
+        trips = tripsData;
+      } else if (existingTripsRef.current.length > 0) {
+        trips = existingTripsRef.current;
+      } else {
+        const snap = await firestore().collection('trips')
+          .where('transporterId', '==', effectiveTransporterId)
+          .where('status', 'in', [TRIP_STATUS.SCHEDULED, TRIP_STATUS.IN_PROGRESS])
+          .get();
+        trips = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setExistingTrips(trips);
+        existingTripsRef.current = trips;
       }
+
+      const v: ValidationState = {
+        busAvailable: true, driverAvailable: true, routeFrequencyValid: true,
+        fareValid: true, seatsValid: true, dateValid: true, durationValid: true,
+        busLocationMatch: true, driverLocationMatch: true,
+      };
+
+      // Basic validations
+      const fv = validateFare(fd.fare); v.fareValid = fv.valid; v.fareMessage = fv.message;
+      const sv = validateSeats(fd.totalSeats, fd.busId); v.seatsValid = sv.valid; v.seatsMessage = sv.message;
+      const dv = validateStartDate(fd.startDate); v.dateValid = dv.valid; v.dateMessage = dv.message;
+      const av = validateAdvanceBooking(fd.startDate, fd.departureTime);
+      if (!av.valid) { v.dateValid = false; v.dateMessage = av.message; setValidation(v); return; }
+      if (fd.arrivalTime) {
+        const durv = validateDuration(fd.departureTime, fd.arrivalTime);
+        v.durationValid = durv.valid; v.durationMessage = durv.message;
+      }
+
+      // ✅ TIMEZONE FIX: plain string comparison — never new Date() for date compare
+      const newStartStr = fd.startDate;
+      const newEndStr = fd.endDate || fd.startDate;
+
+      const newDepMins = parseTimeToMinutes(fd.departureTime);
+      const newArrMins = parseTimeToMinutes(fd.arrivalTime);
+      // Absolute minutes (overnight: arrival wraps to next day)
+      const newArrMinsAbs = newArrMins < newDepMins ? newArrMins + 1440 : newArrMins;
+
+      // ✅ FIXED: Filter relevant trips
+      const relevant = trips.filter(t => {
+        if (mode === 'edit' && trip?.id && t.id === trip.id) return false;
+
+        // ✅ TIMEZONE FIX: normDateStr — handles string, Timestamp, Date
+        const tStart = normDateStr(t.startDate) || normDateStr(t.date);
+        const tEnd = normDateStr(t.endDate) || normDateStr(t.date) || tStart;
+        if (!tStart) return false;
+
+        // ✅ String comparison — timezone-safe for YYYY-MM-DD
+        if (newStartStr > tEnd || newEndStr < tStart) return false;
+
+        // ✅ FIXED: days array OR single dayOfWeek string
+        const tDays: string[] = Array.isArray(t.days) && t.days.length > 0
+          ? t.days
+          : t.dayOfWeek ? [t.dayOfWeek] : [];
+
+        if (tDays.length === 0) return true; // unknown days — include for safety
+        return tDays.some((d: string) => fd.selectedDays.includes(d));
+      });
+
+      console.log(`🔍 Relevant: ${relevant.length} / ${trips.length} trips`);
+
+      // ============================================================
+      // ✅ SINGLE-DAY FIX: Check each relevant trip directly
+      //
+      // Old approach (BROKEN for single-day):
+      //   1. Sort all trips
+      //   2. Find "previous" and "next" trip relative to new trip
+      //   3. Check gaps
+      //   Problem: If existing trip has same date but found as neither
+      //   "previous" nor "next" (e.g. same departure time), it was missed.
+      //
+      // New approach (FIXED):
+      //   For every trip on the same date, check:
+      //   (a) Direct time overlap
+      //   (b) Gap before (existing ends before new starts)
+      //   (c) Gap after (new ends before existing starts)
+      //   This works for ALL cases: single-day, same-time, multi-day.
+      // ============================================================
+      for (const t of relevant) {
+        const tDateStr = normDateStr(t.startDate) || normDateStr(t.date);
+
+        // Only check trips that share a date with new trip
+        // For multi-day schedules, startDate is the anchor for time conflicts
+        if (tDateStr !== newStartStr) continue;
+
+        const tDepMins = parseTimeToMinutes(t.departureTime);
+        const tArrMins = parseTimeToMinutes(t.arrivalTime);
+        const tArrMinsAbs = tArrMins < tDepMins ? tArrMins + 1440 : tArrMins;
+
+        // ── BUS ──────────────────────────────────────────────────
+        if (t.busId === fd.busId) {
+          // (a) Direct overlap
+          const overlaps = newDepMins < tArrMinsAbs && newArrMinsAbs > tDepMins;
+          if (overlaps) {
+            v.busAvailable = false;
+            v.busMessage = `❌ Bus ${fd.busNumber} already has a trip ${t.departureTime}–${t.arrivalTime}`;
+          } else {
+            // (b) Existing ends, then new starts — check turnaround gap
+            if (tArrMinsAbs <= newDepMins && v.busAvailable) {
+              const gap = newDepMins - tArrMinsAbs;
+              if (gap < BUS_TURNAROUND_MINUTES) {
+                v.busAvailable = false;
+                v.busMessage = `⚠️ Bus needs ${BUS_TURNAROUND_MINUTES} min turnaround (only ${gap} min gap after trip ending ${t.arrivalTime})`;
+              } else if (t.to && fd.from && t.to !== fd.from) {
+                v.busAvailable = false;
+                v.busLocationMatch = false;
+                v.busMessage = `❌ Bus arrives at ${t.to} but new trip departs from ${fd.from}`;
+              }
+            }
+            // (c) New ends, then existing starts — check turnaround gap
+            if (newArrMinsAbs <= tDepMins && v.busAvailable) {
+              const gap = tDepMins - newArrMinsAbs;
+              if (gap < BUS_TURNAROUND_MINUTES) {
+                v.busAvailable = false;
+                v.busMessage = `⚠️ Bus needs ${BUS_TURNAROUND_MINUTES} min turnaround before trip at ${t.departureTime} (only ${gap} min gap)`;
+              } else if (fd.to && t.from && fd.to !== t.from) {
+                v.busAvailable = false;
+                v.busLocationMatch = false;
+                v.busMessage = `❌ Bus arrives at ${fd.to} but next trip departs from ${t.from}`;
+              }
+            }
+          }
+        }
+
+        // ── DRIVER ───────────────────────────────────────────────
+        if (t.driverId === fd.driverId) {
+          const overlaps = newDepMins < tArrMinsAbs && newArrMinsAbs > tDepMins;
+          if (overlaps) {
+            v.driverAvailable = false;
+            v.driverMessage = `❌ Driver ${fd.driverName} already has a trip ${t.departureTime}–${t.arrivalTime}`;
+          } else {
+            if (tArrMinsAbs <= newDepMins && v.driverAvailable) {
+              const gap = newDepMins - tArrMinsAbs;
+              if (gap < DRIVER_REST_MINUTES) {
+                v.driverAvailable = false;
+                v.driverMessage = `⚠️ Driver needs ${DRIVER_REST_MINUTES} min rest (only ${gap} min gap after trip ending ${t.arrivalTime})`;
+              } else if (t.to && fd.from && t.to !== fd.from) {
+                v.driverAvailable = false;
+                v.driverLocationMatch = false;
+                v.driverMessage = `❌ Driver arrives at ${t.to} but new trip departs from ${fd.from}`;
+              }
+            }
+            if (newArrMinsAbs <= tDepMins && v.driverAvailable) {
+              const gap = tDepMins - newArrMinsAbs;
+              if (gap < DRIVER_REST_MINUTES) {
+                v.driverAvailable = false;
+                v.driverMessage = `⚠️ Driver needs ${DRIVER_REST_MINUTES} min rest before trip at ${t.departureTime} (only ${gap} min gap)`;
+              } else if (fd.to && t.from && fd.to !== t.from) {
+                v.driverAvailable = false;
+                v.driverLocationMatch = false;
+                v.driverMessage = `❌ Driver arrives at ${fd.to} but next trip departs from ${t.from}`;
+              }
+            }
+          }
+        }
+
+        // ── ROUTE FREQUENCY ──────────────────────────────────────
+        if (t.routeId === fd.routeId && v.routeFrequencyValid) {
+          const diff = Math.abs(newDepMins - tDepMins);
+          if (diff < MIN_ROUTE_GAP_MINUTES) {
+            v.routeFrequencyValid = false;
+            v.routeFrequencyMessage = `⚠️ Same route trips must be ${MIN_ROUTE_GAP_MINUTES} min apart (existing at ${t.departureTime})`;
+          }
+        }
+      }
+
+      // ── OVERNIGHT: check next day ─────────────────────────────
+      const isOvernight = newArrMins < newDepMins;
+      if (isOvernight) {
+        // ✅ TIMEZONE FIX: use parseLocalDate, then toLocalDateString
+        const nextDayDate = parseLocalDate(newStartStr);
+        nextDayDate.setDate(nextDayDate.getDate() + 1);
+        const nextDayStr = toLocalDateString(nextDayDate);
+
+        for (const t of relevant) {
+          const tDateStr = normDateStr(t.startDate) || normDateStr(t.date);
+          if (tDateStr !== nextDayStr) continue;
+          const tDepMins = parseTimeToMinutes(t.departureTime);
+          const gap = tDepMins - newArrMins;
+          if (t.busId === fd.busId && gap < BUS_TURNAROUND_MINUTES) {
+            v.busAvailable = false;
+            v.busMessage = `⚠️ Overnight: Bus needs ${BUS_TURNAROUND_MINUTES} min turnaround before ${t.departureTime} next day`;
+          }
+          if (t.driverId === fd.driverId && gap < DRIVER_REST_MINUTES) {
+            v.driverAvailable = false;
+            v.driverMessage = `⚠️ Overnight: Driver needs ${DRIVER_REST_MINUTES} min rest before ${t.departureTime} next day`;
+          }
+        }
+      }
+
+      console.log('✅ Validation result:', JSON.stringify(v, null, 2));
+      setValidation(v);
+    } catch (err) {
+      console.error('checkAllConflicts error:', err);
     }
-  }, [formData.routeId, formData.departureTime, formData.duration, calculateArrivalTime, updateField]);
-
-  useEffect(() => {
-    if (formData.repeatType !== 'custom') {
-      let newDays: string[] = [];
-
-      switch (formData.repeatType) {
-        case 'daily':
-          newDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-          break;
-        case 'weekdays':
-          newDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
-          break;
-        case 'weekends':
-          newDays = ['Sat', 'Sun'];
-          break;
-        case 'weekly':
-          newDays = formData.selectedDays.length > 0 ? [formData.selectedDays[0]] : ['Mon'];
-          break;
-        default:
-          newDays = formData.selectedDays;
-      }
-
-      if (JSON.stringify(newDays) !== JSON.stringify(formData.selectedDays)) {
-        updateField('selectedDays', newDays);
-      }
-    }
-  }, [formData.repeatType, formData.selectedDays, updateField]);
+  }, [effectiveTransporterId, mode, trip, validateFare, validateSeats, validateStartDate, validateDuration]);
 
   const fetchCityCode = useCallback(async (cityName: string): Promise<string> => {
     if (!cityName) return '';
-
-    if (cityCodesCache[cityName]) {
-      return cityCodesCache[cityName];
-    }
-
+    if (cityCodesCache[cityName]) return cityCodesCache[cityName];
     try {
-      const snapshot = await firestore()
-        .collection('cities')
-        .where('name', '==', cityName)
-        .limit(1)
-        .get();
-
-      if (!snapshot.empty) {
-        const cityData = snapshot.docs[0].data();
-        const code = cityData.code || '';
-
-        setCityCodesCache(prev => ({
-          ...prev,
-          [cityName]: code
-        }));
-
+      const snap = await firestore().collection('cities').where('name', '==', cityName).limit(1).get();
+      if (!snap.empty) {
+        const code = snap.docs[0].data().code || '';
+        setCityCodesCache(prev => ({ ...prev, [cityName]: code }));
         return code;
       }
-    } catch (error) {
-      console.error(`Error fetching city code for ${cityName}:`, error);
-    }
-
+    } catch (e) { console.error('fetchCityCode error:', e); }
     return '';
   }, [cityCodesCache]);
-
-  useEffect(() => {
-    const fetchData = async () => {
-      if (!user || !effectiveTransporterId) {
-        setFetchingData(false);
-        return;
-      }
-
-      setFetchingData(true);
-
-      try {
-        const routesSnapshot = await firestore()
-          .collection('routes')
-          .where('transporterId', '==', effectiveTransporterId)
-          .orderBy('createdAt', 'desc')
-          .get();
-
-        const routesList = routesSnapshot.docs.map(doc => {
-          const data = doc.data();
-          return {
-            id: doc.id,
-            code: data.code || '',
-            name: data.name || '',
-            from: data.from || '',
-            to: data.to || '',
-            distance: data.distance || '',
-            duration: data.duration || '',
-            stops: data.stops || 0,
-            fare: data.fare || 0,
-            updatedAt: data.updatedAt,
-          } as Route;
-        });
-        setRoutes(routesList);
-
-        const busesSnapshot = await firestore()
-          .collection('buses')
-          .where('transporterId', '==', effectiveTransporterId)
-          .where('status', '==', 'active')
-          .where('isDeleted', '==', false)
-          .get();
-
-        const busesList = busesSnapshot.docs.map(doc => ({
-          id: doc.id,
-          busNumber: doc.data().busNumber || '',
-          capacity: doc.data().capacity || 40,
-          status: doc.data().status || 'active',
-        })) as FirebaseBus[];
-        setBuses(busesList);
-
-        const driversSnapshot = await firestore()
-          .collection('drivers')
-          .where('transporterId', '==', effectiveTransporterId)
-          .where('status', 'in', ['online', 'active'])
-          .where('isDeleted', '==', false)
-          .get();
-
-        const driversList = driversSnapshot.docs.map(doc => ({
-          id: doc.id,
-          fullName: doc.data().fullName || '',
-          status: doc.data().status || 'online',
-          contactNumber: doc.data().contactNumber,
-        })) as FirebaseDriver[];
-        setDrivers(driversList);
-
-        // ✅ FIX: Split queries to avoid 'in' operator limitation
-        const upcomingSnapshot = await firestore()
-          .collection('trips')
-          .where('transporterId', '==', effectiveTransporterId)
-          .where('status', '==', 'upcoming')
-          .get();
-
-        const activeSnapshot = await firestore()
-          .collection('trips')
-          .where('transporterId', '==', effectiveTransporterId)
-          .where('status', '==', 'active')
-          .get();
-
-        const tripsList = [
-          ...upcomingSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })),
-          ...activeSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
-        ];
-        setExistingTrips(tripsList);
-
-        if (mode === 'edit' && trip) {
-          updateField('routeId', trip.routeId || '');
-          updateField('routeCode', trip.routeCode || '');
-          updateField('routeName', trip.routeName || '');
-          updateField('from', trip.from || '');
-          updateField('to', trip.to || '');
-          updateField('fromCode', (trip as any).fromCode || '');
-          updateField('toCode', (trip as any).toCode || '');
-          updateField('busId', trip.busId || '');
-          updateField('busNumber', trip.busNumber || '');
-          updateField('driverId', trip.driverId || '');
-          updateField('driverName', trip.driverName || '');
-          updateField('departureTime', trip.departureTime || '08:00');
-          updateField('arrivalTime', trip.arrivalTime || '');
-          updateField('selectedDays', trip.days || ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']);
-          updateField('startDate', trip.startDate || '');
-          updateField('endDate', trip.endDate || '');
-          updateField('repeatType', (trip.repeatType as any) || 'weekdays');
-          updateField('fare', trip.fare?.toString() || '50');
-          updateField('totalSeats', trip.totalSeats?.toString() || '40');
-          updateField('distance', trip.distance?.toString() || '');
-          updateField('duration', trip.duration || '');
-        }
-
-        if (preSelectedRoute && routesList.length > 0) {
-          const selectedRoute = routesList.find(r => r.code === preSelectedRoute);
-          if (selectedRoute) {
-            const fetchPreSelectedCodes = async () => {
-              const [fromCode, toCode] = await Promise.all([
-                fetchCityCode(selectedRoute.from || ''),
-                fetchCityCode(selectedRoute.to || '')
-              ]);
-
-              updateField('routeId', selectedRoute.id);
-              updateField('routeCode', selectedRoute.code);
-              updateField('routeName', selectedRoute.name);
-              updateField('from', selectedRoute.from || '');
-              updateField('to', selectedRoute.to || '');
-              updateField('fromCode', fromCode);
-              updateField('toCode', toCode);
-              updateField('fare', selectedRoute.fare?.toString() || '50');
-              updateField('distance', selectedRoute.distance || '');
-              updateField('duration', selectedRoute.duration || '');
-            };
-
-            fetchPreSelectedCodes();
-          }
-        }
-      } catch (error) {
-        console.error('Error fetching data:', error);
-        Alert.alert('Error', 'Failed to load data. Please try again.');
-      } finally {
-        setFetchingData(false);
-      }
-    };
-
-    fetchData();
-  }, [user, effectiveTransporterId, mode, trip, preSelectedRoute, fetchCityCode, updateField]);
-
-  // ========== DATE PICKER FUNCTIONS ==========
-  const handleDatePress = (field: string) => {
-    setCurrentDateField(field);
-    const dateValue = formData[field as keyof typeof formData];
-    if (dateValue && typeof dateValue === 'string' && dateValue) {
-      setSelectedDate(new Date(dateValue));
-    } else {
-      setSelectedDate(new Date());
-    }
-    setShowDatePicker(true);
-  };
-
-  const handleDateChange = (event: any, date: Date | undefined) => {
-    if (Platform.OS === 'android') {
-      setShowDatePicker(false);
-    }
-
-    if (date) {
-      setSelectedDate(date);
-      const formattedDate = date.toISOString().split('T')[0];
-      updateField(currentDateField, formattedDate);
-    }
-  };
-
-  const handleAndroidDateConfirm = () => {
-    const formattedDate = selectedDate.toISOString().split('T')[0];
-    updateField(currentDateField, formattedDate);
-    setShowDatePicker(false);
-  };
-
-  // ========== TIME PICKER FUNCTIONS ==========
-  const handleTimePress = (field: string) => {
-    setCurrentTimeField(field);
-
-    const timeValue = formData[field as keyof typeof formData];
-    if (timeValue && typeof timeValue === 'string' && timeValue) {
-      const [hours, minutes] = timeValue.split(':').map(Number);
-      const date = new Date();
-      date.setHours(hours, minutes, 0, 0);
-      setSelectedDate(date);
-    } else {
-      setSelectedDate(new Date());
-    }
-
-    setShowTimePicker(true);
-  };
-
-  const handleTimeChange = (event: any, date: Date | undefined) => {
-    if (Platform.OS === 'android') {
-      setShowTimePicker(false);
-    }
-
-    if (date) {
-      setSelectedDate(date);
-      const formattedTime = `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
-
-      if (currentTimeField === 'departureTime') {
-        updateField('departureTime', formattedTime);
-
-        if (formData.duration) {
-          const arrivalTime = calculateArrivalTime(formattedTime, formData.duration);
-          if (arrivalTime) {
-            updateField('arrivalTime', arrivalTime);
-          }
-        }
-      } else if (currentTimeField === 'arrivalTime') {
-        updateField('arrivalTime', formattedTime);
-      }
-    }
-  };
-
-  const handleAndroidTimeConfirm = () => {
-    const formattedTime = `${selectedDate.getHours().toString().padStart(2, '0')}:${selectedDate.getMinutes().toString().padStart(2, '0')}`;
-
-    if (currentTimeField === 'departureTime') {
-      updateField('departureTime', formattedTime);
-
-      if (formData.duration) {
-        const arrivalTime = calculateArrivalTime(formattedTime, formData.duration);
-        if (arrivalTime) {
-          updateField('arrivalTime', arrivalTime);
-        }
-      }
-    } else if (currentTimeField === 'arrivalTime') {
-      updateField('arrivalTime', formattedTime);
-    }
-
-    setShowTimePicker(false);
-  };
-
-  // ========== VALIDATION FUNCTIONS ==========
-  const validateTimes = (): boolean => {
-    if (!formData.departureTime) {
-      Alert.alert('Error', 'Please select departure time');
-      return false;
-    }
-
-    if (!formData.arrivalTime) {
-      Alert.alert('Error', 'Arrival time is required. Please select a route with duration or set arrival time manually.');
-      return false;
-    }
-
-    const [depHours, depMinutes] = formData.departureTime.split(':').map(Number);
-    const [arrHours, arrMinutes] = formData.arrivalTime.split(':').map(Number);
-
-    const depTotal = depHours * 60 + depMinutes;
-    let arrTotal = arrHours * 60 + arrMinutes;
-
-    if (arrTotal < depTotal) {
-      arrTotal += 24 * 60;
-    }
-
-    if (arrTotal <= depTotal) {
-      Alert.alert('Error', 'Arrival time must be after departure time');
-      return false;
-    }
-
-    return true;
-  };
-
-  const validateDates = (): boolean => {
-    if (formData.startDate) {
-      const dateValidation = validateStartDate(formData.startDate);
-      if (!dateValidation.valid) {
-        Alert.alert('Error', dateValidation.message);
-        return false;
-      }
-    }
-
-    if (formData.startDate && formData.endDate) {
-      const start = new Date(formData.startDate);
-      const end = new Date(formData.endDate);
-
-      if (end < start) {
-        Alert.alert('Error', 'End date must be after start date');
-        return false;
-      }
-    }
-
-    return true;
-  };
-
-  const validateDays = (): boolean => {
-    if (formData.selectedDays.length === 0) {
-      Alert.alert('Error', 'Please select at least one day for the trip');
-      return false;
-    }
-    return true;
-  };
 
   const generateTripSeats = async (tripId: string, totalSeats: number, fare: number) => {
     try {
       const db = firestore();
       const batch = db.batch();
       const seatsRef = db.collection('trips').doc(tripId).collection('seats');
-
       const rows = Math.ceil(totalSeats / 5);
-      const columns = 5;
-
-      console.log(`🪑 Generating ${totalSeats} seats for trip ${tripId}...`);
-
       for (let row = 1; row <= rows; row++) {
-        for (let col = 1; col <= columns; col++) {
+        for (let col = 1; col <= 5; col++) {
           const seatNumber = `${row}${String.fromCharCode(64 + col)}`;
-          const seatRef = seatsRef.doc(seatNumber);
-
-          const isPremium = row <= 2;
           const isWindow = col === 1 || col === 5;
           const isAisle = col === 3;
-          const isMiddle = col === 2 || col === 4;
-          const hasExtraLegroom = row === 1;
-          const isWheelchairAccessible = row === rows && (col === 1 || col === 2);
-
-          batch.set(seatRef, {
-            seatNumber,
-            row,
-            column: col,
-            isBooked: false,
-            status: 'available',
-            price: isPremium ? Math.round(fare * 1.25) : fare,
+          batch.set(seatsRef.doc(seatNumber), {
+            seatNumber, row, column: col, isBooked: false, status: 'available',
+            price: row <= 2 ? Math.round(fare * 1.25) : fare,
             type: isWindow ? 'window' : isAisle ? 'aisle' : 'middle',
-            isWindow,
-            isAisle,
-            isMiddle,
-            hasExtraLegroom,
-            isWheelchairAccessible,
-            reservedBy: null,
-            reservedUntil: null,
-            bookingId: null,
+            isWindow, isAisle, isMiddle: !isWindow && !isAisle,
+            hasExtraLegroom: row === 1,
+            isWheelchairAccessible: row === rows && (col === 1 || col === 2),
+            reservedBy: null, reservedUntil: null, bookingId: null,
             createdAt: firestore.FieldValue.serverTimestamp(),
-            updatedAt: firestore.FieldValue.serverTimestamp()
+            updatedAt: firestore.FieldValue.serverTimestamp(),
           });
         }
       }
-
       await batch.commit();
-      console.log(`✅ Successfully generated ${totalSeats} seats for trip ${tripId}`);
       return true;
-    } catch (error) {
-      console.error('❌ Error generating seats:', error);
-      return false;
-    }
+    } catch (e) { console.error('generateTripSeats error:', e); return false; }
   };
 
-  // ✅ FIX: Enhanced submit with proper transaction re-check
-  const handleSubmit = async () => {
-    // ✅ FIX: Loading lock
-    if (loading) return;
+  // ✅ TIMEZONE FIX: Use parseLocalDate, toLocalDateString throughout
+  const generateTripsFromSchedule = useCallback((): any[] => {
+    const trips: any[] = [];
+    if (!formData.startDate) return trips;
 
-    if (!user || !effectiveTransporterId) {
-      Alert.alert('Error', 'You must be logged in');
-      return;
-    }
+    const current = parseLocalDate(formData.startDate);
+    const end = formData.endDate ? parseLocalDate(formData.endDate) : parseLocalDate(formData.startDate);
 
-    if (!formData.arrivalTime) {
-      Alert.alert('Error', 'Arrival time is required. Please select a route with duration or set arrival time manually.');
-      return;
-    }
-
-    if (!validateTimes() || !validateDates() || !validateDays()) {
-      return;
-    }
-
-    if (!validation.fareValid) {
-      Alert.alert('Invalid Fare', validation.fareMessage);
-      return;
-    }
-
-    if (!validation.seatsValid) {
-      Alert.alert('Invalid Seats', validation.seatsMessage);
-      return;
-    }
-
-    if (!validation.durationValid) {
-      Alert.alert('Invalid Duration', validation.durationMessage);
-      return;
-    }
-
-    if (!validation.routeFrequencyValid) {
-      Alert.alert('Route Conflict', validation.routeFrequencyMessage);
-      return;
-    }
-
-    if (!validation.busAvailable) {
-      Alert.alert('Bus Unavailable', validation.busMessage);
-      return;
-    }
-
-    if (!validation.driverAvailable) {
-      Alert.alert('Driver Unavailable', validation.driverMessage);
-      return;
-    }
-
-    setLoading(true);
-
-    try {
-      const db = firestore();
-      const tripsRef = db.collection('trips');
-
-      // ✅ FIX: Re-check conflicts INSIDE transaction to prevent race conditions
-      await db.runTransaction(async (transaction) => {
-        // Get fresh snapshot inside transaction
-        const upcomingSnapshot = await transaction.get(
-          tripsRef.where('transporterId', '==', effectiveTransporterId).where('status', '==', 'upcoming')
-        );
-
-        const activeSnapshot = await transaction.get(
-          tripsRef.where('transporterId', '==', effectiveTransporterId).where('status', '==', 'active')
-        );
-
-        const freshTrips = [
-          ...upcomingSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })),
-          ...activeSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
-        ];
-
-        const newDepTime = formData.departureTime;
-        const newArrTime = formData.arrivalTime;
-
-        // Critical re-check inside transaction
-        for (const existingTrip of freshTrips) {
-          if (mode === 'edit' && trip?.id && existingTrip.id === trip.id) continue;
-
-          const dayOverlap = existingTrip.days?.some((day: string) =>
-            formData.selectedDays.includes(day)
-          );
-          if (!dayOverlap) continue;
-
-          if (formData.startDate && existingTrip.startDate) {
-            const newStart = new Date(formData.startDate);
-            const newEnd = formData.endDate ? new Date(formData.endDate) : newStart;
-            const existStart = new Date(existingTrip.startDate);
-            const existEnd = existingTrip.endDate ? new Date(existingTrip.endDate) : existStart;
-
-            const dateOverlap = (newStart <= existEnd && newEnd >= existStart);
-            if (!dateOverlap) continue;
-          }
-
-          if (existingTrip.busId === formData.busId) {
-            const hasOverlap = checkTimeOverlap(
-              existingTrip.departureTime,
-              existingTrip.arrivalTime,
-              newDepTime,
-              newArrTime
-            );
-
-            if (hasOverlap) {
-              throw new Error(`Bus ${formData.busNumber} is already scheduled for another trip at this time`);
-            }
-
-            const turnaroundValid = checkBusTurnaround(
-              existingTrip,
-              newDepTime,
-              formData.selectedDays,
-              formData.startDate
-            );
-
-            if (!turnaroundValid) {
-              throw new Error(`Bus ${formData.busNumber} needs ${BUS_TURNAROUND_MINUTES} minutes turnaround time`);
-            }
-          }
-
-          if (existingTrip.driverId === formData.driverId) {
-            const hasOverlap = checkTimeOverlap(
-              existingTrip.departureTime,
-              existingTrip.arrivalTime,
-              newDepTime,
-              newArrTime
-            );
-
-            if (hasOverlap) {
-              throw new Error(`Driver ${formData.driverName} is already assigned to another trip at this time`);
-            }
-
-            const restValid = checkDriverRest(
-              existingTrip,
-              newDepTime,
-              formData.selectedDays,
-              formData.startDate
-            );
-
-            if (!restValid) {
-              throw new Error(`Driver ${formData.driverName} needs ${DRIVER_REST_MINUTES} minutes rest`);
-            }
-          }
-
-          if (existingTrip.routeId === formData.routeId) {
-            const frequencyValid = checkRouteFrequency(
-              existingTrip,
-              newDepTime,
-              formData.selectedDays,
-              formData.startDate
-            );
-
-            if (!frequencyValid) {
-              throw new Error(`Trips on same route must be at least ${MIN_ROUTE_GAP_MINUTES} minutes apart`);
-            }
-          }
-        }
-
-        // Prepare trip data
-        let selectedRoute = routes.find(r => r.id === formData.routeId);
-        if (!selectedRoute && formData.routeId) {
-          const routeDoc = await transaction.get(db.collection('routes').doc(formData.routeId));
-          if (routeDoc.exists) {
-            const data = routeDoc.data();
-            selectedRoute = {
-              id: routeDoc.id,
-              code: data?.code || formData.routeCode,
-              name: data?.name || formData.routeName,
-              from: data?.from || formData.from,
-              to: data?.to || formData.to,
-              distance: data?.distance || formData.distance,
-              duration: data?.duration || formData.duration,
-              stops: data?.stops || 0,
-              fare: data?.fare || Number(formData.fare) || 0,
-              transporterId: data?.transporterId || '',
-              createdAt: data?.createdAt,
-              updatedAt: data?.updatedAt,
-            } as Route;
-          }
-        }
-
-        const selectedBus = buses.find(b => b.id === formData.busId);
-        const selectedDriver = drivers.find(d => d.id === formData.driverId);
-
+    while (current <= end) {
+      const dayName = current.toLocaleDateString('en-US', { weekday: 'short' });
+      if (formData.selectedDays.includes(dayName)) {
         const totalSeatsNum = Number(formData.totalSeats);
-        // ✅ FIX: Proper validation for seat count
-        if (isNaN(totalSeatsNum) || totalSeatsNum <= 0) {
-          throw new Error('Invalid seat count');
-        }
-
-        const existingTrip = trip as any;
-        const availableSeats = mode === 'edit' && existingTrip?.availableSeats
-          ? existingTrip.availableSeats
-          : totalSeatsNum;
-
-        let fromCode = formData.fromCode;
-        let toCode = formData.toCode;
-
-        if (!fromCode && selectedRoute?.from) {
-          fromCode = await fetchCityCode(selectedRoute.from);
-        }
-        if (!toCode && selectedRoute?.to) {
-          toCode = await fetchCityCode(selectedRoute.to);
-        }
-
-        const fareNum = Number(formData.fare);
-        if (isNaN(fareNum) || fareNum < MIN_FARE) {
-          throw new Error(`Fare must be at least PKR ${MIN_FARE}`);
-        }
-
-        // ✅ FIX: Store dates as Firestore Timestamps to avoid timezone issues
-        const startDateTimestamp = formData.startDate ? firestore.Timestamp.fromDate(new Date(formData.startDate)) : null;
-        const endDateTimestamp = formData.endDate ? firestore.Timestamp.fromDate(new Date(formData.endDate)) : null;
-
-        const tripData = {
-          routeId: formData.routeId,
-          routeCode: selectedRoute?.code || formData.routeCode,
-          routeName: selectedRoute?.name || formData.routeName,
-          from: selectedRoute?.from || formData.from,
-          to: selectedRoute?.to || formData.to,
-          fromCode: fromCode,
-          toCode: toCode,
-          distance: selectedRoute?.distance || formData.distance,
-          duration: selectedRoute?.duration || formData.duration,
-          busId: formData.busId,
-          busNumber: selectedBus?.busNumber || formData.busNumber,
-          driverId: formData.driverId,
-          driverName: selectedDriver?.fullName || formData.driverName,
-          departureTime: formData.departureTime,
-          arrivalTime: formData.arrivalTime,
-          days: formData.selectedDays,
-          startDate: startDateTimestamp,
-          endDate: endDateTimestamp,
-          repeatType: formData.repeatType,
-          fare: fareNum,
-          totalSeats: totalSeatsNum,
-          availableSeats: availableSeats,
-          status: 'upcoming',
+        trips.push({
+          scheduleId: null, scheduleTemplateId: null,
+          // ✅ TIMEZONE FIX: toLocalDateString — not toISOString().split('T')[0]
+          date: toLocalDateString(current),
+          dayOfWeek: dayName,
+          routeId: formData.routeId, routeCode: formData.routeCode,
+          routeName: formData.routeName, from: formData.from, to: formData.to,
+          fromCode: formData.fromCode, toCode: formData.toCode,
+          distance: formData.distance, duration: formData.duration,
+          busId: formData.busId, busNumber: formData.busNumber,
+          driverId: formData.driverId, driverName: formData.driverName,
+          departureTime: formData.departureTime, arrivalTime: formData.arrivalTime,
+          fare: Number(formData.fare), totalSeats: totalSeatsNum,
+          availableSeats: totalSeatsNum, heldSeats: 0,
+          status: TRIP_STATUS.SCHEDULED,
           transporterId: effectiveTransporterId,
           estimatedRevenue: 0,
+          createdAt: firestore.FieldValue.serverTimestamp(),
           updatedAt: firestore.FieldValue.serverTimestamp(),
-        };
-
-        if (mode === 'add') {
-          const newTripRef = tripsRef.doc();
-          transaction.set(newTripRef, {
-            ...tripData,
-            createdAt: firestore.FieldValue.serverTimestamp(),
-          });
-
-          // ✅ FIX: Use Promise.resolve with error handling instead of setTimeout
-          Promise.resolve().then(async () => {
-            try {
-              await generateTripSeats(newTripRef.id, totalSeatsNum, fareNum);
-            } catch (seatError) {
-              console.error('Error generating seats after transaction:', seatError);
-              // Log to monitoring service if available
-            }
-          });
-
-          return { type: 'add', id: newTripRef.id };
-        } else if (mode === 'edit' && trip?.id) {
-          const tripRef = tripsRef.doc(trip.id);
-          transaction.update(tripRef, tripData);
-          return { type: 'edit', id: trip.id };
-        }
-      });
-
-      Alert.alert(
-        'Success',
-        mode === 'add' ? 'Trip scheduled successfully!' : 'Trip updated successfully!',
-        [{ text: 'OK', onPress: () => navigation.goBack() }]
-      );
-    } catch (error: any) {
-      console.error('Error scheduling trip:', error);
-      // ✅ FIX: Type-safe error handling
-      const message = error instanceof Error ? error.message : 'Failed to schedule trip. Please try again.';
-      Alert.alert('Error', message);
-    } finally {
-      setLoading(false);
+        });
+      }
+      current.setDate(current.getDate() + 1);
     }
-  };
+    return trips;
+  }, [formData, effectiveTransporterId]);
 
-  // Trigger validation when relevant fields change (with debounce)
+  const saveScheduleTemplate = useCallback(async (): Promise<string | null> => {
+    try {
+      const data = {
+        routeId: formData.routeId, routeCode: formData.routeCode,
+        routeName: formData.routeName, from: formData.from, to: formData.to,
+        fromCode: formData.fromCode, toCode: formData.toCode,
+        distance: formData.distance, duration: formData.duration,
+        busId: formData.busId, busNumber: formData.busNumber,
+        driverId: formData.driverId, driverName: formData.driverName,
+        departureTime: formData.departureTime, arrivalTime: formData.arrivalTime,
+        selectedDays: formData.selectedDays,
+        // ✅ TIMEZONE FIX: noon time avoids DST/TZ boundary issues
+        startDate: firestore.Timestamp.fromDate(parseLocalDate(formData.startDate)),
+        endDate: formData.endDate ? firestore.Timestamp.fromDate(parseLocalDate(formData.endDate)) : null,
+        repeatType: formData.repeatType,
+        fare: Number(formData.fare), totalSeats: Number(formData.totalSeats),
+        transporterId: effectiveTransporterId,
+        status: SCHEDULE_STATUS.PUBLISHED,
+        createdAt: firestore.FieldValue.serverTimestamp(),
+        updatedAt: firestore.FieldValue.serverTimestamp(),
+      };
+      const ref = await firestore().collection('tripSchedules').add(data);
+      return ref.id;
+    } catch (e) { console.error('saveScheduleTemplate error:', e); return null; }
+  }, [formData, effectiveTransporterId]);
+
+  const saveGeneratedTrips = useCallback(async (
+    trips: any[], scheduleId: string
+  ): Promise<{ success: boolean; saved: number; failed: number }> => {
+    let saved = 0, failed = 0;
+    for (let i = 0; i < trips.length; i++) {
+      try {
+        const t = { ...trips[i], scheduleId, scheduleTemplateId: scheduleId };
+        const ref = firestore().collection('trips').doc();
+        await ref.set({ ...t, createdAt: firestore.FieldValue.serverTimestamp(), updatedAt: firestore.FieldValue.serverTimestamp() });
+        await generateTripSeats(ref.id, t.totalSeats, t.fare);
+        saved++;
+        setGeneratedTripsCount(saved);
+      } catch (e) { failed++; console.error(`Error saving trip ${i + 1}:`, e); }
+    }
+    return { success: failed === 0, saved, failed };
+  }, []);
+
+  // ✅ FIXED: fetchData — pass trips directly to checkAllConflicts after fetch
   useEffect(() => {
-    const timeoutId = setTimeout(() => {
+    const fetchData = async () => {
+      if (!user || !effectiveTransporterId) { setFetchingData(false); return; }
+      setFetchingData(true);
+      try {
+        const routesSnap = await firestore().collection('routes')
+          .where('transporterId', '==', effectiveTransporterId).get();
+        const routesList = routesSnap.docs.map(doc => {
+          const d = doc.data();
+          return { id: doc.id, code: d.code || '', name: d.name || '', from: d.from || '', to: d.to || '', distance: d.distance || '', duration: d.duration || '', stops: d.stops || 0, fare: d.fare || 0, updatedAt: d.updatedAt } as Route;
+        });
+        setRoutes(routesList);
+
+        const busesSnap = await firestore().collection('buses')
+          .where('transporterId', '==', effectiveTransporterId)
+          .where('status', '==', BUS_STATUS.AVAILABLE).get();
+        const busesList = busesSnap.docs.map(doc => ({
+          id: doc.id, busNumber: doc.data().busNumber || '',
+          capacity: doc.data().capacity || 40, status: doc.data().status || BUS_STATUS.AVAILABLE,
+        })) as FirebaseBus[];
+        setBuses(busesList);
+        busesRef.current = busesList;
+
+        const driversSnap = await firestore().collection('drivers')
+          .where('transporterId', '==', effectiveTransporterId)
+          .where('status', '==', DRIVER_STATUS.AVAILABLE).get();
+        const driversList = driversSnap.docs.map(doc => ({
+          id: doc.id, fullName: doc.data().fullName || '',
+          status: doc.data().status || DRIVER_STATUS.AVAILABLE,
+          contactNumber: doc.data().contactNumber,
+        })) as FirebaseDriver[];
+        setDrivers(driversList);
+
+        const tripsSnap = await firestore().collection('trips')
+          .where('transporterId', '==', effectiveTransporterId)
+          .where('status', 'in', [TRIP_STATUS.SCHEDULED, TRIP_STATUS.IN_PROGRESS]).get();
+        const tripsList = tripsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setExistingTrips(tripsList);
+        existingTripsRef.current = tripsList;
+        console.log(`✅ Loaded ${tripsList.length} existing trips`);
+
+        if (mode === 'edit' && trip) {
+          const fields: [string, any][] = [
+            ['routeId', trip.routeId], ['routeCode', trip.routeCode],
+            ['routeName', trip.routeName], ['from', trip.from], ['to', trip.to],
+            ['fromCode', (trip as any).fromCode || ''], ['toCode', (trip as any).toCode || ''],
+            ['busId', trip.busId], ['busNumber', trip.busNumber],
+            ['driverId', trip.driverId], ['driverName', trip.driverName],
+            ['departureTime', trip.departureTime || '08:00'], ['arrivalTime', trip.arrivalTime || ''],
+            ['selectedDays', trip.days || ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']],
+            ['startDate', trip.startDate || ''], ['endDate', trip.endDate || ''],
+            ['repeatType', (trip.repeatType as any) || 'weekdays'],
+            ['fare', trip.fare?.toString() || '50'],
+            ['totalSeats', trip.totalSeats?.toString() || '40'],
+            ['distance', trip.distance?.toString() || ''], ['duration', trip.duration || ''],
+          ];
+          fields.forEach(([k, v]) => { if (v !== undefined && v !== null) updateField(k, v); });
+        }
+
+        if (preSelectedRoute && routesList.length > 0) {
+          const sel = routesList.find(r => r.code === preSelectedRoute);
+          if (sel) {
+            const [fromCode, toCode] = await Promise.all([
+              fetchCityCode(sel.from || ''), fetchCityCode(sel.to || ''),
+            ]);
+            setFormData(prev => ({
+              ...prev,
+              routeId: sel.id, routeCode: sel.code, routeName: sel.name,
+              from: sel.from || '', to: sel.to || '', fromCode, toCode,
+              fare: sel.fare?.toString() || '50',
+              distance: sel.distance || '', duration: sel.duration || '',
+            }));
+          }
+        }
+
+        // ✅ After fetch: run conflict check with fresh trips directly
+        setTimeout(() => {
+          const fd = formDataRef.current;
+          if (fd.departureTime && fd.arrivalTime && fd.busId && fd.driverId) {
+            checkAllConflicts(tripsList);
+          }
+        }, 150);
+
+      } catch (e) {
+        console.error('fetchData error:', e);
+        Alert.alert('Error', 'Failed to load data. Please try again.');
+      } finally {
+        setFetchingData(false);
+      }
+    };
+    fetchData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, effectiveTransporterId]);
+
+  useEffect(() => {
+    if (formData.routeId && formData.departureTime && formData.duration) {
+      const arr = calculateArrivalTime(formData.departureTime, formData.duration);
+      if (arr && arr !== formData.arrivalTime) updateField('arrivalTime', arr);
+    }
+  }, [formData.routeId, formData.departureTime, formData.duration]);
+
+  useEffect(() => {
+    if (formData.repeatType === 'custom') return;
+    const map: Record<string, string[]> = {
+      daily: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+      weekdays: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'],
+      weekends: ['Sat', 'Sun'],
+      weekly: formData.selectedDays.length > 0 ? [formData.selectedDays[0]] : ['Mon'],
+    };
+    const nd = map[formData.repeatType] || formData.selectedDays;
+    if (JSON.stringify(nd) !== JSON.stringify(formData.selectedDays)) updateField('selectedDays', nd);
+  }, [formData.repeatType]);
+
+  // ✅ FIXED: Debounced conflict check — ref gives latest trips, no stale state
+  useEffect(() => {
+    const id = setTimeout(() => {
       if (formData.departureTime && formData.arrivalTime) {
-        checkAllConflicts();
+        checkAllConflicts(existingTripsRef.current.length > 0 ? existingTripsRef.current : undefined);
       }
     }, 500);
-
-    return () => clearTimeout(timeoutId);
+    return () => clearTimeout(id);
   }, [
-    formData.busId,
-    formData.driverId,
-    formData.routeId,
-    formData.departureTime,
-    formData.arrivalTime,
-    formData.selectedDays,
-    formData.startDate,
-    formData.endDate,
-    formData.fare,
-    formData.totalSeats,
-    checkAllConflicts
+    formData.busId, formData.driverId, formData.routeId,
+    formData.departureTime, formData.arrivalTime, formData.selectedDays,
+    formData.startDate, formData.endDate, formData.fare, formData.totalSeats,
+    checkAllConflicts,
   ]);
 
-  const getAvailableBuses = useCallback((): FirebaseBus[] => {
-    if (!validation.busAvailable && formData.busId) {
-      return buses.map(bus => ({
-        ...bus,
-        _disabled: bus.id === formData.busId && !validation.busAvailable
-      })) as any;
-    }
-    return buses;
-  }, [buses, validation.busAvailable, formData.busId]);
-
-  const getAvailableDrivers = useCallback((): FirebaseDriver[] => {
-    if (!validation.driverAvailable && formData.driverId) {
-      return drivers.map(driver => ({
-        ...driver,
-        _disabled: driver.id === formData.driverId && !validation.driverAvailable
-      })) as any;
-    }
-    return drivers;
-  }, [drivers, validation.driverAvailable, formData.driverId]);
-
-  const handleNextStep = async () => {
-    if (step === 1 && !formData.routeId) {
-      Alert.alert('Error', 'Please select a route');
-      return;
-    }
-
-    if (step === 2) {
-      if (!validateTimes() || !validateDates() || !validateDays()) {
-        return;
-      }
-
-      if (!validation.fareValid) {
-        Alert.alert('Warning', validation.fareMessage);
-        return;
-      }
-
-      if (!validation.durationValid && formData.arrivalTime) {
-        Alert.alert('Warning', validation.durationMessage);
-        return;
-      }
-    }
-
-    if (step === 3 && (!formData.busId || !formData.driverId)) {
-      Alert.alert('Error', 'Please select both bus and driver');
-      return;
-    }
-
-    if (step === 3) {
-      if (!validation.busAvailable) {
-        Alert.alert('Bus Unavailable', validation.busMessage);
-        return;
-      }
-      if (!validation.driverAvailable) {
-        Alert.alert('Driver Unavailable', validation.driverMessage);
-        return;
-      }
-      if (!validation.routeFrequencyValid) {
-        Alert.alert('Route Conflict', validation.routeFrequencyMessage);
-        return;
-      }
-    }
-
-    if (step < 4) {
-      setStep(step + 1);
+  // Date/Time picker handlers
+  const handleDatePress = (field: string) => {
+    setCurrentDateField(field);
+    const val = formData[field as keyof typeof formData];
+    // ✅ TIMEZONE FIX: parse date parts manually
+    if (val && typeof val === 'string' && val.length === 10) {
+      setSelectedDate(parseLocalDate(val));
     } else {
-      handleSubmit();
+      setSelectedDate(new Date());
+    }
+    setShowDatePicker(true);
+  };
+
+  const handleDateChange = (_: any, date?: Date) => {
+    if (Platform.OS === 'android') setShowDatePicker(false);
+    if (date) {
+      setSelectedDate(date);
+      // ✅ TIMEZONE FIX
+      updateField(currentDateField, toLocalDateString(date));
     }
   };
 
-  const handlePrevStep = () => {
-    if (step > 1) {
-      setStep(step - 1);
-    } else {
-      navigation.goBack();
+  const handleAndroidDateConfirm = () => {
+    updateField(currentDateField, toLocalDateString(selectedDate));
+    setShowDatePicker(false);
+  };
+
+  const handleTimePress = (field: string) => {
+    setCurrentTimeField(field);
+    const val = formData[field as keyof typeof formData];
+    if (val && typeof val === 'string' && val.includes(':')) {
+      const [h, m] = val.split(':').map(Number);
+      const d = new Date(); d.setHours(h, m, 0, 0); setSelectedDate(d);
+    } else setSelectedDate(new Date());
+    setShowTimePicker(true);
+  };
+
+  const fmtTime = (d: Date) =>
+    `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+
+  const handleTimeChange = (_: any, date?: Date) => {
+    if (Platform.OS === 'android') setShowTimePicker(false);
+    if (date) {
+      setSelectedDate(date);
+      const t = fmtTime(date);
+      if (currentTimeField === 'departureTime') {
+        updateField('departureTime', t);
+        if (formData.duration) { const a = calculateArrivalTime(t, formData.duration); if (a) updateField('arrivalTime', a); }
+      } else updateField('arrivalTime', t);
     }
   };
 
-  const toggleDaySelection = (day: string) => {
-    updateField('selectedDays',
-      formData.selectedDays.includes(day)
-        ? formData.selectedDays.filter(d => d !== day)
-        : [...formData.selectedDays, day]
+  const handleAndroidTimeConfirm = () => {
+    const t = fmtTime(selectedDate);
+    if (currentTimeField === 'departureTime') {
+      updateField('departureTime', t);
+      if (formData.duration) { const a = calculateArrivalTime(t, formData.duration); if (a) updateField('arrivalTime', a); }
+    } else updateField('arrivalTime', t);
+    setShowTimePicker(false);
+  };
+
+  const handleBusSelect = (bus: FirebaseBus) => {
+    updateField('busId', bus.id);
+    updateField('busNumber', bus.busNumber);
+    updateField('totalSeats', Math.min(bus.capacity, 40).toString());
+    setShowBusModal(false);
+  };
+
+  const handleDriverSelect = (driver: FirebaseDriver) => {
+    updateField('driverId', driver.id);
+    updateField('driverName', driver.fullName);
+    setShowDriverModal(false);
+  };
+
+  const validateTimes = (): boolean => {
+    if (!formData.departureTime) { Alert.alert('Error', 'Please select departure time'); return false; }
+    if (!formData.arrivalTime) { Alert.alert('Error', 'Arrival time is required'); return false; }
+    let dep = parseTimeToMinutes(formData.departureTime), arr = parseTimeToMinutes(formData.arrivalTime);
+    if (arr < dep) arr += 1440;
+    if (arr <= dep) { Alert.alert('Error', 'Arrival time must be after departure time'); return false; }
+    return true;
+  };
+
+  const validateDates = (): boolean => {
+    if (formData.startDate) {
+      const r = validateStartDate(formData.startDate);
+      if (!r.valid) { Alert.alert('Error', r.message); return false; }
+    }
+    if (formData.startDate && formData.endDate && formData.endDate < formData.startDate) {
+      Alert.alert('Error', 'End date must be after start date'); return false;
+    }
+    return true;
+  };
+
+  const validateDays = (): boolean => {
+    if (!formData.selectedDays.length) { Alert.alert('Error', 'Please select at least one day'); return false; }
+    return true;
+  };
+
+  const executeTripGeneration = useCallback(async (trips: any[]) => {
+    setIsGeneratingTrips(true); setGeneratedTrips(trips); setGeneratedTripsCount(0); setLoading(true);
+    try {
+      const scheduleId = await saveScheduleTemplate();
+      if (!scheduleId) throw new Error('Failed to save schedule template');
+      const result = await saveGeneratedTrips(trips, scheduleId);
+      if (result.success) {
+        Alert.alert('Success', `✅ Schedule created!\n\n📋 ID: ${scheduleId}\n🚌 ${result.saved} trips scheduled`,
+          [{ text: 'OK', onPress: () => navigation.goBack() }]);
+      } else {
+        Alert.alert('Partial Success', `⚠️ Some trips failed.\n✅ Saved: ${result.saved}\n❌ Failed: ${result.failed}`,
+          [{ text: 'OK', onPress: () => navigation.goBack() }]);
+      }
+    } catch (e: any) {
+      Alert.alert('Error', `Failed to create schedule: ${e.message || 'Unknown error'}`);
+    } finally {
+      setIsGeneratingTrips(false); setLoading(false); setGeneratedTripsCount(0);
+    }
+  }, [saveScheduleTemplate, saveGeneratedTrips, navigation]);
+
+  const handleSubmit = async () => {
+    if (loading || isGeneratingTrips) return;
+    if (!user || !effectiveTransporterId) { Alert.alert('Error', 'You must be logged in'); return; }
+    if (!formData.arrivalTime) { Alert.alert('Error', 'Arrival time is required'); return; }
+    if (!validateTimes() || !validateDates() || !validateDays()) return;
+    if (!validation.fareValid) { Alert.alert('Invalid Fare', validation.fareMessage); return; }
+    if (!validation.seatsValid) { Alert.alert('Invalid Seats', validation.seatsMessage); return; }
+    if (!validation.durationValid) { Alert.alert('Invalid Duration', validation.durationMessage); return; }
+    if (!validation.routeFrequencyValid) { Alert.alert('Route Conflict', validation.routeFrequencyMessage); return; }
+    if (!validation.busLocationMatch) { Alert.alert('Bus Location Conflict', validation.busMessage); return; }
+    if (!validation.driverLocationMatch) { Alert.alert('Driver Location Conflict', validation.driverMessage); return; }
+    if (!validation.busAvailable) { Alert.alert('Bus Unavailable', validation.busMessage); return; }
+    if (!validation.driverAvailable) { Alert.alert('Driver Unavailable', validation.driverMessage); return; }
+
+    const trips = generateTripsFromSchedule();
+    if (!trips.length) { Alert.alert('Error', 'No trips to schedule. Check your date range and selected days.'); return; }
+
+    Alert.alert('Confirm Schedule',
+      `📅 This will create ${trips.length} trip${trips.length > 1 ? 's' : ''}.\n\n` +
+      `🗓️ Date: ${formData.endDate ? `${formData.startDate} to ${formData.endDate}` : formData.startDate}\n` +
+      `📆 Days: ${formData.selectedDays.join(', ')}\n⏰ Departure: ${formData.departureTime}\n` +
+      `🚌 Bus: ${formData.busNumber}\n👤 Driver: ${formData.driverName}\n\n` +
+      `💰 Fare: PKR ${formData.fare}\n💺 Seats: ${formData.totalSeats}\n\nContinue?`,
+      [{ text: 'Cancel', style: 'cancel' }, { text: 'Confirm', onPress: () => executeTripGeneration(trips) }]
     );
   };
 
-  const handleRouteSelect = useCallback(async (route: Route) => {
-    console.log('Selected route:', route);
+  const estimatedRevenue = useMemo(
+    () => Math.floor(Number(formData.totalSeats) * 0.8) * Number(formData.fare),
+    [formData.fare, formData.totalSeats]
+  );
+  const tripsToGenerate = useMemo(() => generateTripsFromSchedule(), [generateTripsFromSchedule]);
 
-    const [fromCode, toCode] = await Promise.all([
-      fetchCityCode(route.from || ''),
-      fetchCityCode(route.to || '')
-    ]);
-
-    updateField('routeId', route.id);
-    updateField('routeCode', route.code || '');
-    updateField('routeName', route.name || '');
-    updateField('from', route.from || '');
-    updateField('to', route.to || '');
-    updateField('fromCode', fromCode);
-    updateField('toCode', toCode);
-    updateField('fare', route.fare?.toString() || '50');
-    updateField('distance', route.distance || '');
-    updateField('duration', route.duration || '');
-
-    if (formData.departureTime && route.duration) {
-      const arrivalTime = calculateArrivalTime(formData.departureTime, route.duration);
-      if (arrivalTime) {
-        updateField('arrivalTime', arrivalTime);
-      }
+  const handleNextStep = async () => {
+    if (step === 1 && !formData.routeId) { Alert.alert('Error', 'Please select a route'); return; }
+    if (step === 2) {
+      if (!validateTimes() || !validateDates() || !validateDays()) return;
+      if (!validation.fareValid) { Alert.alert('Warning', validation.fareMessage); return; }
+      if (!validation.durationValid && formData.arrivalTime) { Alert.alert('Warning', validation.durationMessage); return; }
     }
-  }, [calculateArrivalTime, fetchCityCode, formData.departureTime, updateField]);
+    if (step === 3) {
+      if (!formData.busId || !formData.driverId) { Alert.alert('Error', 'Please select both bus and driver'); return; }
+      if (!validation.busAvailable) { Alert.alert('Bus Unavailable', validation.busMessage); return; }
+      if (!validation.driverAvailable) { Alert.alert('Driver Unavailable', validation.driverMessage); return; }
+      if (!validation.busLocationMatch) { Alert.alert('Bus Location Conflict', validation.busMessage); return; }
+      if (!validation.driverLocationMatch) { Alert.alert('Driver Location Conflict', validation.driverMessage); return; }
+      if (!validation.routeFrequencyValid) { Alert.alert('Route Conflict', validation.routeFrequencyMessage); return; }
+    }
+    if (step < 4) setStep(step + 1);
+    else handleSubmit();
+  };
 
-  const estimatedRevenue = useMemo(() => {
-    const farePerPassenger = Number(formData.fare) || 0;
-    const totalSeats = Number(formData.totalSeats) || 40;
-    const estimatedPassengers = Math.floor(totalSeats * 0.8);
-    return estimatedPassengers * farePerPassenger;
-  }, [formData.fare, formData.totalSeats]);
+  const handlePrevStep = () => {
+    if (step > 1) setStep(step - 1); else navigation.goBack();
+  };
 
-  // ========== RENDER FUNCTIONS ==========
-  // (Keep all existing render functions - they are unchanged)
+  // ============================================================
+  // Render Steps
+  // ============================================================
   const renderRouteItem = useCallback(({ item }: { item: Route }) => (
     <TouchableOpacity
-      style={[
-        styles.routeCard,
-        SHADOWS.small,
-        formData.routeId === item.id && styles.selectedCard
-      ]}
-      onPress={() => handleRouteSelect(item)}
+      style={[styles.routeCard, formData.routeId === item.id && styles.selectedCard]}
+      onPress={() => {
+        updateField('routeId', item.id); updateField('routeCode', item.code || '');
+        updateField('routeName', item.name || ''); updateField('from', item.from || '');
+        updateField('to', item.to || ''); updateField('fare', item.fare?.toString() || '50');
+        updateField('distance', item.distance || ''); updateField('duration', item.duration || '');
+        fetchCityCode(item.from || '').then(c => updateField('fromCode', c));
+        fetchCityCode(item.to || '').then(c => updateField('toCode', c));
+      }}
     >
       <View style={styles.routeHeader}>
         <Text style={styles.routeCode}>{item.code}</Text>
         <Text style={styles.routeFare}>PKR {item.fare}</Text>
       </View>
       <Text style={styles.routeName}>{item.name}</Text>
-      {item.from && item.to && (
-        <Text style={styles.routePath}>{item.from} → {item.to}</Text>
-      )}
+      {item.from && item.to && <Text style={styles.routePath}>{item.from} → {item.to}</Text>}
       <View style={styles.routeDetails}>
         <Text style={styles.routeDetail}>📏 {item.distance}</Text>
         <Text style={styles.routeDetail}>⏱️ {item.duration}</Text>
       </View>
     </TouchableOpacity>
-  ), [formData.routeId, handleRouteSelect]);
-
-  const renderBusItem = useCallback(({ item }: { item: FirebaseBus & { _disabled?: boolean } }) => {
-    const isDisabled = item._disabled || !validation.busAvailable;
-
-    return (
-      <TouchableOpacity
-        style={[
-          styles.resourceCard,
-          SHADOWS.small,
-          formData.busId === item.id && styles.selectedResourceCard,
-          isDisabled && styles.disabledResourceCard
-        ]}
-        onPress={() => {
-          if (!isDisabled) {
-            updateField('busId', item.id);
-            updateField('busNumber', item.busNumber);
-            updateField('totalSeats', item.capacity?.toString() || formData.totalSeats);
-          }
-        }}
-        disabled={isDisabled}
-      >
-        <Text style={styles.resourceIcon}>🚌</Text>
-        <Text style={[styles.resourceName, isDisabled && styles.disabledText]}>
-          {item.busNumber}
-        </Text>
-        <Text style={[styles.resourceDetail, isDisabled && styles.disabledText]}>
-          {item.capacity} seats
-        </Text>
-        {isDisabled && (
-          <Text style={styles.unavailableBadge}>Unavailable</Text>
-        )}
-      </TouchableOpacity>
-    );
-  }, [formData.busId, formData.totalSeats, validation.busAvailable, updateField]);
-
-  const renderDriverItem = useCallback(({ item }: { item: FirebaseDriver & { _disabled?: boolean } }) => {
-    const isDisabled = item._disabled || !validation.driverAvailable;
-
-    return (
-      <TouchableOpacity
-        style={[
-          styles.resourceCard,
-          SHADOWS.small,
-          formData.driverId === item.id && styles.selectedResourceCard,
-          isDisabled && styles.disabledResourceCard
-        ]}
-        onPress={() => {
-          if (!isDisabled) {
-            updateField('driverId', item.id);
-            updateField('driverName', item.fullName);
-          }
-        }}
-        disabled={isDisabled}
-      >
-        <Text style={styles.resourceIcon}>👤</Text>
-        <Text style={[styles.resourceName, isDisabled && styles.disabledText]}>
-          {item.fullName}
-        </Text>
-        <Text style={[
-          styles.resourceStatus,
-          item.status === 'online' ? styles.onlineStatus :
-          item.status === 'on_trip' ? styles.onTripStatus :
-          styles.offlineStatus,
-          isDisabled && styles.disabledText
-        ]}>
-          {item.status === 'online' ? 'Online' :
-           item.status === 'on_trip' ? 'On Trip' :
-           item.status === 'offline' ? 'Offline' : item.status}
-        </Text>
-        {isDisabled && (
-          <Text style={styles.unavailableBadge}>Unavailable</Text>
-        )}
-      </TouchableOpacity>
-    );
-  }, [formData.driverId, validation.driverAvailable, updateField]);
-
-  const renderValidationWarnings = () => {
-    if (step !== 2 && step !== 3) return null;
-
-    const warnings: JSX.Element[] = [];
-
-    if (step === 2) {
-      if (!validation.fareValid && validation.fareMessage) {
-        warnings.push(
-          <View key="fare" style={styles.warningBadge}>
-            <Text style={styles.warningIcon}>⚠️</Text>
-            <Text style={styles.warningText}>{validation.fareMessage}</Text>
-          </View>
-        );
-      }
-
-      if (!validation.seatsValid && validation.seatsMessage) {
-        warnings.push(
-          <View key="seats" style={styles.warningBadge}>
-            <Text style={styles.warningIcon}>⚠️</Text>
-            <Text style={styles.warningText}>{validation.seatsMessage}</Text>
-          </View>
-        );
-      }
-
-      if (!validation.dateValid && validation.dateMessage) {
-        warnings.push(
-          <View key="date" style={styles.warningBadge}>
-            <Text style={styles.warningIcon}>⚠️</Text>
-            <Text style={styles.warningText}>{validation.dateMessage}</Text>
-          </View>
-        );
-      }
-
-      if (!validation.durationValid && validation.durationMessage) {
-        warnings.push(
-          <View key="duration" style={styles.warningBadge}>
-            <Text style={styles.warningIcon}>⚠️</Text>
-            <Text style={styles.warningText}>{validation.durationMessage}</Text>
-          </View>
-        );
-      }
-    }
-
-    if (step === 3) {
-      if (!validation.busAvailable && validation.busMessage) {
-        warnings.push(
-          <View key="bus" style={styles.warningBadge}>
-            <Text style={styles.warningIcon}>🚌</Text>
-            <Text style={styles.warningText}>{validation.busMessage}</Text>
-          </View>
-        );
-      }
-
-      if (!validation.driverAvailable && validation.driverMessage) {
-        warnings.push(
-          <View key="driver" style={styles.warningBadge}>
-            <Text style={styles.warningIcon}>👤</Text>
-            <Text style={styles.warningText}>{validation.driverMessage}</Text>
-          </View>
-        );
-      }
-
-      if (!validation.routeFrequencyValid && validation.routeFrequencyMessage) {
-        warnings.push(
-          <View key="route" style={styles.warningBadge}>
-            <Text style={styles.warningIcon}>🛣️</Text>
-            <Text style={styles.warningText}>{validation.routeFrequencyMessage}</Text>
-          </View>
-        );
-      }
-    }
-
-    if (warnings.length > 0) {
-      return (
-        <View style={styles.warningsContainer}>
-          {warnings}
-        </View>
-      );
-    }
-
-    return null;
-  };
+  ), [formData.routeId, updateField, fetchCityCode]);
 
   const renderStep1 = () => (
-    <View>
+    <View style={{ flex: 1 }}>
       <Text style={styles.stepTitle}>Select Route</Text>
       {routes.length === 0 ? (
         <View style={styles.emptyState}>
           <Text style={styles.emptyStateIcon}>🛣️</Text>
           <Text style={styles.emptyStateText}>No routes available</Text>
-          <TouchableOpacity
-            style={styles.emptyStateButton}
-            onPress={() => navigation.navigate('OperationsMain', { openCreateRoute: true })}
-          >
+          <TouchableOpacity style={styles.emptyStateButton}
+            onPress={() => navigation.navigate('OperationsMain' as never, { openCreateRoute: true } as never)}>
             <Text style={styles.emptyStateButtonText}>Create Route</Text>
           </TouchableOpacity>
         </View>
       ) : (
-        <FlatList
-          data={routes}
-          keyExtractor={(item) => item.id}
-          renderItem={renderRouteItem}
-          showsVerticalScrollIndicator={false}
-        />
+        <FlatList data={routes} keyExtractor={i => i.id} renderItem={renderRouteItem} showsVerticalScrollIndicator={false} />
       )}
     </View>
   );
@@ -1574,14 +990,9 @@ const ScheduleTripScreen = () => {
     <ScrollView showsVerticalScrollIndicator={false}>
       <Text style={styles.stepTitle}>Schedule Details</Text>
 
-      {renderValidationWarnings()}
-
       <View style={styles.inputGroup}>
         <Text style={styles.label}>Departure Time *</Text>
-        <TouchableOpacity
-          style={styles.dateInput}
-          onPress={() => handleTimePress('departureTime')}
-        >
+        <TouchableOpacity style={styles.dateInput} onPress={() => handleTimePress('departureTime')}>
           <Text style={formData.departureTime ? styles.dateSelectedText : styles.datePlaceholderText}>
             {formData.departureTime || 'Select time'}
           </Text>
@@ -1591,44 +1002,28 @@ const ScheduleTripScreen = () => {
 
       <View style={styles.inputGroup}>
         <Text style={styles.label}>Arrival Time *</Text>
-        <TouchableOpacity
-          style={[styles.dateInput, !formData.arrivalTime && styles.requiredField]}
-          onPress={() => handleTimePress('arrivalTime')}
-        >
+        <TouchableOpacity style={[styles.dateInput, !formData.arrivalTime && styles.requiredField]}
+          onPress={() => handleTimePress('arrivalTime')}>
           <Text style={formData.arrivalTime ? styles.dateSelectedText : styles.datePlaceholderText}>
-            {formData.arrivalTime || 'Required - select or auto-calculated'}
+            {formData.arrivalTime || 'Auto-calculated from route duration'}
           </Text>
           <Text style={styles.calendarIcon}>⏰</Text>
         </TouchableOpacity>
-        {formData.duration && formData.departureTime && !formData.arrivalTime && (
-          <Text style={styles.helperText}>
-            Will be auto-calculated based on duration ({formData.duration})
-          </Text>
+        {!validation.durationValid && validation.durationMessage && (
+          <Text style={styles.errorText}>{validation.durationMessage}</Text>
         )}
       </View>
 
       <View style={styles.inputGroup}>
         <Text style={styles.label}>Repeat Pattern</Text>
         <View style={styles.repeatOptions}>
-          {[
-            { id: 'daily', label: 'Daily' },
-            { id: 'weekdays', label: 'Weekdays' },
-            { id: 'weekends', label: 'Weekends' },
-            { id: 'weekly', label: 'Weekly' },
-            { id: 'custom', label: 'Custom' }
-          ].map((type) => (
-            <TouchableOpacity
-              key={type.id}
-              style={[
-                styles.repeatButton,
-                formData.repeatType === type.id && styles.repeatButtonSelected
-              ]}
-              onPress={() => updateField('repeatType', type.id)}
-            >
-              <Text style={[
-                styles.repeatText,
-                formData.repeatType === type.id && styles.repeatTextSelected
-              ]}>
+          {[{ id: 'daily', label: 'Daily' }, { id: 'weekdays', label: 'Weekdays' },
+            { id: 'weekends', label: 'Weekends' }, { id: 'weekly', label: 'Weekly' },
+            { id: 'custom', label: 'Custom' }].map(type => (
+            <TouchableOpacity key={type.id}
+              style={[styles.repeatButton, formData.repeatType === type.id && styles.repeatButtonSelected]}
+              onPress={() => updateField('repeatType', type.id)}>
+              <Text style={[styles.repeatText, formData.repeatType === type.id && styles.repeatTextSelected]}>
                 {type.label}
               </Text>
             </TouchableOpacity>
@@ -1640,37 +1035,29 @@ const ScheduleTripScreen = () => {
         <View style={styles.inputGroup}>
           <Text style={styles.label}>Select Days *</Text>
           <View style={styles.daysContainer}>
-            {daysOfWeek.map((day) => (
-              <TouchableOpacity
-                key={day}
-                style={[
-                  styles.dayButton,
-                  formData.selectedDays.includes(day) && styles.dayButtonSelected
-                ]}
-                onPress={() => toggleDaySelection(day)}
-              >
-                <Text style={[
-                  styles.dayButtonText,
-                  formData.selectedDays.includes(day) && styles.dayButtonTextSelected
-                ]}>
+            {daysOfWeek.map(day => (
+              <TouchableOpacity key={day}
+                style={[styles.dayButton, formData.selectedDays.includes(day) && styles.dayButtonSelected]}
+                onPress={() => {
+                  if (formData.selectedDays.includes(day))
+                    updateField('selectedDays', formData.selectedDays.filter(d => d !== day));
+                  else updateField('selectedDays', [...formData.selectedDays, day]);
+                }}>
+                <Text style={[styles.dayButtonText, formData.selectedDays.includes(day) && styles.dayButtonTextSelected]}>
                   {day}
                 </Text>
               </TouchableOpacity>
             ))}
           </View>
-          {formData.selectedDays.length === 0 && (
-            <Text style={styles.errorText}>Please select at least one day</Text>
-          )}
+          {formData.selectedDays.length === 0 && <Text style={styles.errorText}>Please select at least one day</Text>}
         </View>
       )}
 
       <View style={styles.row}>
         <View style={[styles.inputGroup, { flex: 1, marginRight: 8 }]}>
-          <Text style={styles.label}>Start Date</Text>
-          <TouchableOpacity
-            style={[styles.dateInput, !validation.dateValid && styles.invalidInput]}
-            onPress={() => handleDatePress('startDate')}
-          >
+          <Text style={styles.label}>Start Date *</Text>
+          <TouchableOpacity style={[styles.dateInput, !validation.dateValid && styles.invalidInput]}
+            onPress={() => handleDatePress('startDate')}>
             <Text style={formData.startDate ? styles.dateSelectedText : styles.datePlaceholderText}>
               {formData.startDate || 'Select date'}
             </Text>
@@ -1682,12 +1069,9 @@ const ScheduleTripScreen = () => {
         </View>
         <View style={[styles.inputGroup, { flex: 1, marginLeft: 8 }]}>
           <Text style={styles.label}>End Date</Text>
-          <TouchableOpacity
-            style={styles.dateInput}
-            onPress={() => handleDatePress('endDate')}
-          >
+          <TouchableOpacity style={styles.dateInput} onPress={() => handleDatePress('endDate')}>
             <Text style={formData.endDate ? styles.dateSelectedText : styles.datePlaceholderText}>
-              {formData.endDate || 'Select date (optional)'}
+              {formData.endDate || 'Optional'}
             </Text>
             <Text style={styles.calendarIcon}>📅</Text>
           </TouchableOpacity>
@@ -1696,30 +1080,18 @@ const ScheduleTripScreen = () => {
 
       <View style={styles.inputGroup}>
         <Text style={styles.label}>Fare per Passenger (PKR) *</Text>
-        <TextInput
-          style={[styles.input, !validation.fareValid && styles.invalidInput]}
-          placeholder="50"
-          value={formData.fare}
-          onChangeText={(text) => updateField('fare', text)}
-          keyboardType="numeric"
-        />
-        {!validation.fareValid && validation.fareMessage && (
-          <Text style={styles.errorText}>{validation.fareMessage}</Text>
-        )}
+        <TextInput style={[styles.input, !validation.fareValid && styles.invalidInput]}
+          placeholder="50" value={formData.fare}
+          onChangeText={t => updateField('fare', t)} keyboardType="numeric" />
+        {!validation.fareValid && validation.fareMessage && <Text style={styles.errorText}>{validation.fareMessage}</Text>}
       </View>
 
       <View style={styles.inputGroup}>
         <Text style={styles.label}>Total Seats *</Text>
-        <TextInput
-          style={[styles.input, !validation.seatsValid && styles.invalidInput]}
-          placeholder="40"
-          value={formData.totalSeats}
-          onChangeText={(text) => updateField('totalSeats', text)}
-          keyboardType="numeric"
-        />
-        {!validation.seatsValid && validation.seatsMessage && (
-          <Text style={styles.errorText}>{validation.seatsMessage}</Text>
-        )}
+        <TextInput style={[styles.input, !validation.seatsValid && styles.invalidInput]}
+          placeholder="40" value={formData.totalSeats}
+          onChangeText={t => updateField('totalSeats', t)} keyboardType="numeric" />
+        {!validation.seatsValid && validation.seatsMessage && <Text style={styles.errorText}>{validation.seatsMessage}</Text>}
       </View>
     </ScrollView>
   );
@@ -1728,209 +1100,82 @@ const ScheduleTripScreen = () => {
     <ScrollView showsVerticalScrollIndicator={false}>
       <Text style={styles.stepTitle}>Assign Resources</Text>
 
-      {renderValidationWarnings()}
-
       <View style={styles.inputGroup}>
         <Text style={styles.label}>Select Bus *</Text>
-        {buses.length === 0 ? (
-          <View style={styles.emptyResource}>
-            <Text style={styles.emptyResourceText}>No available buses</Text>
-            <TouchableOpacity
-              onPress={() => navigation.navigate('AddBusScreen', { mode: 'add' })}
-            >
-              <Text style={styles.addResourceText}>Add Bus</Text>
-            </TouchableOpacity>
+        <TouchableOpacity style={styles.selectionCard} onPress={() => setShowBusModal(true)}>
+          <View style={styles.selectionCardContent}>
+            <Text style={styles.selectionIcon}>🚌</Text>
+            <View style={styles.selectionInfo}>
+              <Text style={styles.selectionLabel}>Tap to select bus</Text>
+              {formData.busId
+                ? <Text style={styles.selectionValue}>{formData.busNumber} ({formData.totalSeats} seats)</Text>
+                : <Text style={styles.selectionPlaceholder}>No bus selected</Text>}
+            </View>
+            <Text style={styles.chevron}>›</Text>
           </View>
-        ) : (
-          <FlatList
-            data={getAvailableBuses()}
-            keyExtractor={(item) => item.id}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            renderItem={renderBusItem}
-          />
+        </TouchableOpacity>
+        {!validation.busAvailable && validation.busMessage && (
+          <View style={styles.warningBox}><Text style={styles.warningText}>{validation.busMessage}</Text></View>
         )}
       </View>
 
       <View style={styles.inputGroup}>
         <Text style={styles.label}>Select Driver *</Text>
-        {drivers.length === 0 ? (
-          <View style={styles.emptyResource}>
-            <Text style={styles.emptyResourceText}>No online drivers available</Text>
-            <TouchableOpacity
-              onPress={() => navigation.navigate('AddDriverScreen', { mode: 'add' })}
-            >
-              <Text style={styles.addResourceText}>Add Driver</Text>
-            </TouchableOpacity>
+        <TouchableOpacity style={styles.selectionCard} onPress={() => setShowDriverModal(true)}>
+          <View style={styles.selectionCardContent}>
+            <Text style={styles.selectionIcon}>👤</Text>
+            <View style={styles.selectionInfo}>
+              <Text style={styles.selectionLabel}>Tap to select driver</Text>
+              {formData.driverId
+                ? <Text style={styles.selectionValue}>{formData.driverName}</Text>
+                : <Text style={styles.selectionPlaceholder}>No driver selected</Text>}
+            </View>
+            <Text style={styles.chevron}>›</Text>
           </View>
-        ) : (
-          <FlatList
-            data={getAvailableDrivers()}
-            keyExtractor={(item) => item.id}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            renderItem={renderDriverItem}
-          />
+        </TouchableOpacity>
+        {!validation.driverAvailable && validation.driverMessage && (
+          <View style={styles.warningBox}><Text style={styles.warningText}>{validation.driverMessage}</Text></View>
         )}
       </View>
 
-      <View style={styles.previewCard}>
-        <Text style={styles.previewTitle}>Schedule Preview</Text>
-        <View style={styles.previewRow}>
-          <Text style={styles.previewLabel}>Route:</Text>
-          <Text style={styles.previewValue}>
-            {formData.routeName || 'Not selected'}
-          </Text>
-        </View>
-        {formData.from && formData.to && (
-          <View style={styles.previewRow}>
-            <Text style={styles.previewLabel}>Path:</Text>
-            <Text style={styles.previewValue}>{formData.from} → {formData.to}</Text>
-          </View>
-        )}
-        <View style={styles.previewRow}>
-          <Text style={styles.previewLabel}>Time:</Text>
-          <Text style={styles.previewValue}>
-            {formData.departureTime} → {formData.arrivalTime || 'Not set'}
-          </Text>
-        </View>
-        <View style={styles.previewRow}>
-          <Text style={styles.previewLabel}>Days:</Text>
-          <Text style={styles.previewValue}>{formData.selectedDays.join(', ')}</Text>
-        </View>
-        <View style={styles.previewRow}>
-          <Text style={styles.previewLabel}>Fare:</Text>
-          <Text style={styles.previewValue}>PKR {formData.fare}</Text>
-        </View>
-        <View style={styles.previewRow}>
-          <Text style={styles.previewLabel}>Bus:</Text>
-          <Text style={styles.previewValue}>
-            {formData.busNumber || 'Not selected'}
-          </Text>
-        </View>
-        <View style={styles.previewRow}>
-          <Text style={styles.previewLabel}>Driver:</Text>
-          <Text style={styles.previewValue}>
-            {formData.driverName || 'Not selected'}
-          </Text>
-        </View>
-        {formData.startDate && (
-          <View style={styles.previewRow}>
-            <Text style={styles.previewLabel}>Start Date:</Text>
-            <Text style={styles.previewValue}>{formData.startDate}</Text>
-          </View>
-        )}
-      </View>
+      {!validation.routeFrequencyValid && validation.routeFrequencyMessage && (
+        <View style={styles.warningBox}><Text style={styles.warningText}>{validation.routeFrequencyMessage}</Text></View>
+      )}
     </ScrollView>
   );
 
   const renderStep4 = () => (
     <ScrollView showsVerticalScrollIndicator={false}>
       <Text style={styles.stepTitle}>Confirmation</Text>
-
       <View style={styles.confirmationCard}>
         <Text style={styles.confirmationTitle}>Trip Details</Text>
-
-        <View style={styles.confirmationDetail}>
-          <Text style={styles.confirmationLabel}>Route:</Text>
-          <Text style={styles.confirmationValue}>{formData.routeName}</Text>
-        </View>
-
-        {formData.from && formData.to && (
-          <View style={styles.confirmationDetail}>
-            <Text style={styles.confirmationLabel}>From/To:</Text>
-            <Text style={styles.confirmationValue}>{formData.from} → {formData.to}</Text>
+        {[
+          { label: 'Route:', value: formData.routeName },
+          formData.from && formData.to ? { label: 'From/To:', value: `${formData.from} → ${formData.to}` } : null,
+          { label: 'Bus:', value: formData.busNumber },
+          { label: 'Driver:', value: formData.driverName },
+          { label: 'Departure:', value: formData.departureTime },
+          { label: 'Arrival:', value: formData.arrivalTime || 'Not set' },
+          { label: 'Days:', value: formData.selectedDays.join(', ') },
+          { label: 'Start Date:', value: formData.startDate || 'Not set' },
+          { label: 'End Date:', value: formData.endDate || 'Not set' },
+          { label: 'Fare:', value: `PKR ${formData.fare}` },
+          { label: 'Total Seats:', value: formData.totalSeats },
+        ].filter(Boolean).map((item: any, i) => (
+          <View key={i} style={styles.confirmationDetail}>
+            <Text style={styles.confirmationLabel}>{item.label}</Text>
+            <Text style={styles.confirmationValue}>{item.value}</Text>
           </View>
-        )}
-
-        <View style={styles.confirmationDetail}>
-          <Text style={styles.confirmationLabel}>Bus:</Text>
-          <Text style={styles.confirmationValue}>{formData.busNumber}</Text>
-        </View>
-
-        <View style={styles.confirmationDetail}>
-          <Text style={styles.confirmationLabel}>Driver:</Text>
-          <Text style={styles.confirmationValue}>{formData.driverName}</Text>
-        </View>
-
-        <View style={styles.confirmationDetail}>
-          <Text style={styles.confirmationLabel}>Departure:</Text>
-          <Text style={styles.confirmationValue}>{formData.departureTime}</Text>
-        </View>
-
-        <View style={styles.confirmationDetail}>
-          <Text style={styles.confirmationLabel}>Arrival:</Text>
-          <Text style={styles.confirmationValue}>{formData.arrivalTime || 'Not set'}</Text>
-        </View>
-
-        <View style={styles.confirmationDetail}>
-          <Text style={styles.confirmationLabel}>Days:</Text>
-          <Text style={styles.confirmationValue}>{formData.selectedDays.join(', ')}</Text>
-        </View>
-
-        <View style={styles.confirmationDetail}>
-          <Text style={styles.confirmationLabel}>Start Date:</Text>
-          <Text style={styles.confirmationValue}>{formData.startDate || 'Not set'}</Text>
-        </View>
-
-        <View style={styles.confirmationDetail}>
-          <Text style={styles.confirmationLabel}>End Date:</Text>
-          <Text style={styles.confirmationValue}>{formData.endDate || 'Not set'}</Text>
-        </View>
-
-        <View style={styles.confirmationDetail}>
-          <Text style={styles.confirmationLabel}>Fare:</Text>
-          <Text style={styles.confirmationValue}>PKR {formData.fare}</Text>
-        </View>
-
-        <View style={styles.confirmationDetail}>
-          <Text style={styles.confirmationLabel}>Total Seats:</Text>
-          <Text style={styles.confirmationValue}>{formData.totalSeats}</Text>
-        </View>
-
-        <View style={styles.confirmationDetail}>
-          <Text style={styles.confirmationLabel}>Schedule Type:</Text>
-          <Text style={styles.confirmationValue}>
-            {formData.repeatType.charAt(0).toUpperCase() + formData.repeatType.slice(1)}
+        ))}
+        <View style={styles.tripCountCard}>
+          <Text style={styles.tripCountTitle}>📅 Schedule Summary</Text>
+          <Text style={styles.tripCountValue}>
+            {tripsToGenerate.length} trip{tripsToGenerate.length !== 1 ? 's' : ''} will be created
           </Text>
         </View>
-
         <View style={styles.revenueEstimate}>
           <Text style={styles.revenueTitle}>Estimated Daily Revenue</Text>
           <Text style={styles.revenueValue}>PKR {estimatedRevenue.toLocaleString()}</Text>
-          <Text style={styles.revenueSubtext}>
-            Based on 80% occupancy at PKR {formData.fare} per passenger
-          </Text>
-        </View>
-
-        <View style={[
-          styles.conflictSummary,
-          (!validation.busAvailable || !validation.driverAvailable || !validation.routeFrequencyValid) &&
-          styles.conflictSummaryWarning
-        ]}>
-          <Text style={styles.conflictSummaryTitle}>
-            {validation.busAvailable && validation.driverAvailable && validation.routeFrequencyValid
-              ? '✓ All Checks Passed'
-              : '⚠️ Some Conflicts Detected'}
-          </Text>
-
-          {validation.busAvailable ? (
-            <Text style={styles.conflictSummaryText}>✓ Bus available with proper turnaround</Text>
-          ) : (
-            <Text style={styles.conflictSummaryWarningText}>✗ {validation.busMessage}</Text>
-          )}
-
-          {validation.driverAvailable ? (
-            <Text style={styles.conflictSummaryText}>✓ Driver available with proper rest</Text>
-          ) : (
-            <Text style={styles.conflictSummaryWarningText}>✗ {validation.driverMessage}</Text>
-          )}
-
-          {validation.routeFrequencyValid ? (
-            <Text style={styles.conflictSummaryText}>✓ Route frequency respected</Text>
-          ) : (
-            <Text style={styles.conflictSummaryWarningText}>✗ {validation.routeFrequencyMessage}</Text>
-          )}
         </View>
       </View>
     </ScrollView>
@@ -1939,7 +1184,7 @@ const ScheduleTripScreen = () => {
   if (fetchingData) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={COLORS.primary} />
+        <ActivityIndicator size="large" color={COLORS.secondary} />
         <Text style={styles.loadingText}>Loading data...</Text>
       </View>
     );
@@ -1947,7 +1192,6 @@ const ScheduleTripScreen = () => {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={handlePrevStep}>
           <Text style={styles.backButton}>{step === 1 ? '←' : '← Back'}</Text>
@@ -1960,31 +1204,20 @@ const ScheduleTripScreen = () => {
         </View>
       </View>
 
-      {/* Progress Bar */}
       <View style={styles.progressBar}>
         <View style={[styles.progressFill, { width: `${(step / 4) * 100}%` }]} />
       </View>
 
-      {/* Content */}
-      <KeyboardAvoidingView
-        style={styles.contentContainer}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={100}
-      >
+      <KeyboardAvoidingView style={styles.contentContainer}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={100}>
         {step === 1 && renderStep1()}
         {step === 2 && renderStep2()}
         {step === 3 && renderStep3()}
         {step === 4 && renderStep4()}
       </KeyboardAvoidingView>
 
-      {/* Date Picker Modal */}
       {showDatePicker && (
-        <Modal
-          transparent={true}
-          animationType="slide"
-          visible={showDatePicker}
-          onRequestClose={() => setShowDatePicker(false)}
-        >
+        <Modal transparent animationType="slide" visible onRequestClose={() => setShowDatePicker(false)}>
           <View style={styles.modalOverlay}>
             <View style={styles.modalContainer}>
               <View style={styles.modalHeader}>
@@ -1993,24 +1226,15 @@ const ScheduleTripScreen = () => {
                   <Text style={styles.modalClose}>Done</Text>
                 </TouchableOpacity>
               </View>
-              <DateTimePicker
-                value={selectedDate}
-                mode="date"
+              <DateTimePicker value={selectedDate} mode="date"
                 display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                onChange={handleDateChange}
-              />
+                onChange={handleDateChange} />
               {Platform.OS === 'android' && (
                 <View style={styles.androidButtons}>
-                  <TouchableOpacity
-                    style={styles.androidButtonCancel}
-                    onPress={() => setShowDatePicker(false)}
-                  >
+                  <TouchableOpacity style={styles.androidButtonCancel} onPress={() => setShowDatePicker(false)}>
                     <Text style={styles.androidButtonText}>Cancel</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.androidButtonConfirm}
-                    onPress={handleAndroidDateConfirm}
-                  >
+                  <TouchableOpacity style={styles.androidButtonConfirm} onPress={handleAndroidDateConfirm}>
                     <Text style={[styles.androidButtonText, styles.confirmButtonText]}>OK</Text>
                   </TouchableOpacity>
                 </View>
@@ -2020,14 +1244,8 @@ const ScheduleTripScreen = () => {
         </Modal>
       )}
 
-      {/* Time Picker Modal */}
       {showTimePicker && (
-        <Modal
-          transparent={true}
-          animationType="slide"
-          visible={showTimePicker}
-          onRequestClose={() => setShowTimePicker(false)}
-        >
+        <Modal transparent animationType="slide" visible onRequestClose={() => setShowTimePicker(false)}>
           <View style={styles.modalOverlay}>
             <View style={styles.modalContainer}>
               <View style={styles.modalHeader}>
@@ -2036,24 +1254,15 @@ const ScheduleTripScreen = () => {
                   <Text style={styles.modalClose}>Done</Text>
                 </TouchableOpacity>
               </View>
-              <DateTimePicker
-                value={selectedDate}
-                mode="time"
+              <DateTimePicker value={selectedDate} mode="time"
                 display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                onChange={handleTimeChange}
-              />
+                onChange={handleTimeChange} />
               {Platform.OS === 'android' && (
                 <View style={styles.androidButtons}>
-                  <TouchableOpacity
-                    style={styles.androidButtonCancel}
-                    onPress={() => setShowTimePicker(false)}
-                  >
+                  <TouchableOpacity style={styles.androidButtonCancel} onPress={() => setShowTimePicker(false)}>
                     <Text style={styles.androidButtonText}>Cancel</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.androidButtonConfirm}
-                    onPress={handleAndroidTimeConfirm}
-                  >
+                  <TouchableOpacity style={styles.androidButtonConfirm} onPress={handleAndroidTimeConfirm}>
                     <Text style={[styles.androidButtonText, styles.confirmButtonText]}>OK</Text>
                   </TouchableOpacity>
                 </View>
@@ -2063,25 +1272,102 @@ const ScheduleTripScreen = () => {
         </Modal>
       )}
 
-      {/* Action Buttons */}
+      {showBusModal && (
+        <Modal visible animationType="slide" transparent onRequestClose={() => setShowBusModal(false)}>
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContentFull}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Select Bus</Text>
+                <TouchableOpacity onPress={() => setShowBusModal(false)}>
+                  <Text style={styles.modalClose}>✕</Text>
+                </TouchableOpacity>
+              </View>
+              <View style={styles.modalSearch}>
+                <TextInput style={styles.modalSearchInput} placeholder="🔍 Search bus..."
+                  placeholderTextColor={COLORS.textLighter} value={busSearchQuery} onChangeText={setBusSearchQuery} />
+              </View>
+              <FlatList data={filteredBuses} keyExtractor={i => i.id}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={[styles.modalItem, formData.busId === item.id && styles.modalItemSelected]}
+                    onPress={() => handleBusSelect(item)}>
+                    <View style={styles.modalItemContent}>
+                      <Text style={styles.modalItemIcon}>🚌</Text>
+                      <View style={styles.modalItemInfo}>
+                        <Text style={styles.modalItemTitle}>{item.busNumber}</Text>
+                        <Text style={styles.modalItemSubtitle}>Capacity: {item.capacity} seats</Text>
+                      </View>
+                      {formData.busId === item.id && <Text style={styles.modalItemCheck}>✓</Text>}
+                    </View>
+                  </TouchableOpacity>
+                )}
+                ListEmptyComponent={<View style={styles.modalEmpty}><Text style={styles.modalEmptyIcon}>🚌</Text><Text style={styles.modalEmptyText}>No available buses</Text></View>}
+              />
+            </View>
+          </View>
+        </Modal>
+      )}
+
+      {showDriverModal && (
+        <Modal visible animationType="slide" transparent onRequestClose={() => setShowDriverModal(false)}>
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContentFull}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Select Driver</Text>
+                <TouchableOpacity onPress={() => setShowDriverModal(false)}>
+                  <Text style={styles.modalClose}>✕</Text>
+                </TouchableOpacity>
+              </View>
+              <View style={styles.modalSearch}>
+                <TextInput style={styles.modalSearchInput} placeholder="🔍 Search driver..."
+                  placeholderTextColor={COLORS.textLighter} value={driverSearchQuery} onChangeText={setDriverSearchQuery} />
+              </View>
+              <FlatList data={filteredDrivers} keyExtractor={i => i.id}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={[styles.modalItem, formData.driverId === item.id && styles.modalItemSelected]}
+                    onPress={() => handleDriverSelect(item)}>
+                    <View style={styles.modalItemContent}>
+                      <Text style={styles.modalItemIcon}>👤</Text>
+                      <View style={styles.modalItemInfo}>
+                        <Text style={styles.modalItemTitle}>{item.fullName}</Text>
+                        <Text style={styles.modalItemSubtitle}>Available</Text>
+                      </View>
+                      {formData.driverId === item.id && <Text style={styles.modalItemCheck}>✓</Text>}
+                    </View>
+                  </TouchableOpacity>
+                )}
+                ListEmptyComponent={<View style={styles.modalEmpty}><Text style={styles.modalEmptyIcon}>👤</Text><Text style={styles.modalEmptyText}>No available drivers</Text></View>}
+              />
+            </View>
+          </View>
+        </Modal>
+      )}
+
+      {isGeneratingTrips && (
+        <Modal transparent animationType="fade" visible onRequestClose={() => {}}>
+          <View style={styles.progressModalOverlay}>
+            <View style={styles.progressModalContainer}>
+              <ActivityIndicator size="large" color={COLORS.secondary} />
+              <Text style={styles.progressModalTitle}>Creating Trips...</Text>
+              <Text style={styles.progressModalText}>Generating {generatedTrips.length} trip{generatedTrips.length !== 1 ? 's' : ''}</Text>
+              <View style={styles.progressBarContainer}>
+                <View style={[styles.progressBarFill, {
+                  width: `${generatedTrips.length > 0 ? (generatedTripsCount / generatedTrips.length) * 100 : 0}%`
+                }]} />
+              </View>
+              <Text style={styles.progressModalCount}>{generatedTripsCount} / {generatedTrips.length} completed</Text>
+            </View>
+          </View>
+        </Modal>
+      )}
+
       {mode !== 'view' && (
         <View style={styles.actionButtons}>
-          <TouchableOpacity
-            style={[
-              styles.actionButton,
-              styles.nextButton,
-              (step === 3 && (!validation.busAvailable || !validation.driverAvailable)) && styles.disabledButton
-            ]}
-            onPress={handleNextStep}
-            disabled={loading || (step === 3 && (!validation.busAvailable || !validation.driverAvailable))}
-          >
-            {loading ? (
-              <ActivityIndicator color={COLORS.white} />
-            ) : (
-              <Text style={styles.nextButtonText}>
-                {step === 4 ? 'Confirm Schedule' : 'Next'}
-              </Text>
-            )}
+          <TouchableOpacity style={[styles.actionButton, styles.nextButton]} onPress={handleNextStep} disabled={loading}>
+            {loading
+              ? <ActivityIndicator color={COLORS.white} />
+              : <Text style={styles.nextButtonText}>{step === 4 ? 'Confirm Schedule' : 'Next'}</Text>}
           </TouchableOpacity>
         </View>
       )}
@@ -2089,543 +1375,110 @@ const ScheduleTripScreen = () => {
   );
 };
 
-// ========== STYLES ==========
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: COLORS.background,
-  },
-  loadingText: {
-    marginTop: SIZES.sm,
-    fontSize: 16,
-    color: COLORS.primary,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: SIZES.md,
-    paddingVertical: SIZES.lg,
-    backgroundColor: COLORS.primary,
-  },
-  backButton: {
-    fontSize: 18,
-    color: COLORS.white,
-    fontWeight: '700',
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: COLORS.white,
-  },
-  stepIndicator: {
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    paddingHorizontal: SIZES.sm,
-    paddingVertical: 4,
-    borderRadius: 20,
-  },
-  stepText: {
-    fontSize: 12,
-    color: COLORS.white,
-    fontWeight: '600',
-  },
-  progressBar: {
-    height: 4,
-    backgroundColor: COLORS.border,
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: COLORS.success,
-  },
-  contentContainer: {
-    flex: 1,
-    padding: SIZES.md,
-  },
-  stepTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: COLORS.primary,
-    marginBottom: SIZES.lg,
-  },
-  emptyState: {
-    alignItems: 'center',
-    padding: SIZES.xxxl,
-  },
-  emptyStateIcon: {
-    fontSize: 48,
-    marginBottom: SIZES.md,
-  },
-  emptyStateText: {
-    fontSize: 16,
-    color: COLORS.textLight,
-    marginBottom: SIZES.lg,
-  },
-  emptyStateButton: {
-    backgroundColor: COLORS.secondary,
-    paddingHorizontal: SIZES.xl,
-    paddingVertical: SIZES.sm,
-    borderRadius: SIZES.xs,
-  },
-  emptyStateButtonText: {
-    color: COLORS.white,
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  routeCard: {
-    backgroundColor: COLORS.white,
-    borderRadius: SIZES.md,
-    padding: SIZES.md,
-    marginBottom: SIZES.sm,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  selectedCard: {
-    backgroundColor: COLORS.infoLight,
-    borderColor: COLORS.secondary,
-  },
-  routeHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: SIZES.xs,
-  },
-  routeCode: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: COLORS.primary,
-  },
-  routeFare: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: COLORS.success,
-  },
-  routeName: {
-    fontSize: 16,
-    color: COLORS.text,
-    marginBottom: 4,
-  },
-  routePath: {
-    fontSize: 14,
-    color: COLORS.textLight,
-    marginBottom: SIZES.sm,
-  },
-  routeDetails: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  routeDetail: {
-    fontSize: 12,
-    color: COLORS.textLight,
-  },
-  inputGroup: {
-    marginBottom: SIZES.lg,
-  },
-  label: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: COLORS.text,
-    marginBottom: SIZES.xs,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: SIZES.xs,
-    padding: SIZES.sm,
-    fontSize: 16,
-    backgroundColor: COLORS.white,
-    color: COLORS.text,
-  },
-  dateInput: {
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: SIZES.xs,
-    padding: SIZES.sm,
-    backgroundColor: COLORS.white,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  requiredField: {
-    borderColor: COLORS.secondary,
-    borderWidth: 2,
-  },
-  dateSelectedText: {
-    fontSize: 16,
-    color: COLORS.text,
-  },
-  datePlaceholderText: {
-    fontSize: 16,
-    color: COLORS.textLighter,
-  },
-  calendarIcon: {
-    fontSize: 20,
-    color: COLORS.secondary,
-  },
-  helperText: {
-    fontSize: 12,
-    color: COLORS.textLight,
-    marginTop: 4,
-    fontStyle: 'italic',
-  },
-  errorText: {
-    fontSize: 12,
-    color: COLORS.danger,
-    marginTop: 4,
-  },
-  repeatOptions: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginHorizontal: -4,
-  },
-  repeatButton: {
-    paddingHorizontal: SIZES.md,
-    paddingVertical: SIZES.xs,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: SIZES.xs,
-    margin: 4,
-    backgroundColor: COLORS.white,
-  },
-  repeatButtonSelected: {
-    backgroundColor: COLORS.secondary,
-    borderColor: COLORS.secondary,
-  },
-  repeatText: {
-    fontSize: 14,
-    color: COLORS.text,
-  },
-  repeatTextSelected: {
-    color: COLORS.white,
-    fontWeight: '600',
-  },
-  daysContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-  },
-  dayButton: {
-    width: '14%',
-    aspectRatio: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: SIZES.xs,
-    marginBottom: SIZES.xs,
-    backgroundColor: COLORS.white,
-  },
-  dayButtonSelected: {
-    backgroundColor: COLORS.secondary,
-    borderColor: COLORS.secondary,
-  },
-  dayButtonText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: COLORS.textLight,
-  },
-  dayButtonTextSelected: {
-    color: COLORS.white,
-  },
-  row: {
-    flexDirection: 'row',
-  },
-  emptyResource: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: SIZES.md,
-    backgroundColor: COLORS.white,
-    borderRadius: SIZES.xs,
-  },
-  emptyResourceText: {
-    fontSize: 14,
-    color: COLORS.textLight,
-  },
-  addResourceText: {
-    fontSize: 14,
-    color: COLORS.secondary,
-    fontWeight: '600',
-  },
-  resourceCard: {
-    width: 140,
-    backgroundColor: COLORS.white,
-    borderRadius: SIZES.md,
-    padding: SIZES.md,
-    marginRight: SIZES.sm,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  selectedResourceCard: {
-    backgroundColor: COLORS.infoLight,
-    borderColor: COLORS.secondary,
-  },
-  disabledResourceCard: {
-    opacity: 0.5,
-    backgroundColor: COLORS.border,
-  },
-  resourceIcon: {
-    fontSize: 32,
-    marginBottom: SIZES.xs,
-  },
-  resourceName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: COLORS.primary,
-    marginBottom: 4,
-    textAlign: 'center',
-  },
-  resourceDetail: {
-    fontSize: 12,
-    color: COLORS.textLight,
-    marginBottom: 4,
-  },
-  resourceStatus: {
-    fontSize: 10,
-    paddingHorizontal: SIZES.xs,
-    paddingVertical: 2,
-    borderRadius: 10,
-    marginTop: 4,
-  },
-  onlineStatus: {
-    backgroundColor: '#E8F5E8',
-    color: COLORS.success,
-  },
-  onTripStatus: {
-    backgroundColor: '#FFF3E0',
-    color: COLORS.warning,
-  },
-  offlineStatus: {
-    backgroundColor: '#FFEBEE',
-    color: COLORS.danger,
-  },
-  previewCard: {
-    backgroundColor: COLORS.white,
-    borderRadius: SIZES.md,
-    padding: SIZES.md,
-    marginTop: SIZES.lg,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  previewTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: COLORS.primary,
-    marginBottom: SIZES.sm,
-  },
-  previewRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: SIZES.xs,
-  },
-  previewLabel: {
-    fontSize: 14,
-    color: COLORS.textLight,
-  },
-  previewValue: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.text,
-  },
-  confirmationCard: {
-    backgroundColor: COLORS.white,
-    borderRadius: SIZES.md,
-    padding: SIZES.lg,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  confirmationTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: COLORS.primary,
-    marginBottom: SIZES.lg,
-    textAlign: 'center',
-  },
-  confirmationDetail: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: SIZES.sm,
-    paddingBottom: SIZES.xs,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-  },
-  confirmationLabel: {
-    fontSize: 16,
-    color: COLORS.textLight,
-  },
-  confirmationValue: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: COLORS.text,
-  },
-  revenueEstimate: {
-    backgroundColor: '#E8F5E8',
-    borderRadius: SIZES.md,
-    padding: SIZES.md,
-    marginTop: SIZES.lg,
-    alignItems: 'center',
-  },
-  revenueTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: COLORS.primary,
-    marginBottom: SIZES.xs,
-  },
-  revenueValue: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: COLORS.success,
-    marginBottom: 4,
-  },
-  revenueSubtext: {
-    fontSize: 12,
-    color: COLORS.textLight,
-    textAlign: 'center',
-  },
-  conflictSummary: {
-    backgroundColor: '#E3F2FD',
-    borderRadius: SIZES.md,
-    padding: SIZES.md,
-    marginTop: SIZES.md,
-    alignItems: 'flex-start',
-  },
-  conflictSummaryWarning: {
-    backgroundColor: '#FFF3E0',
-  },
-  conflictSummaryTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: COLORS.primary,
-    marginBottom: 8,
-  },
-  conflictSummaryText: {
-    fontSize: 12,
-    color: COLORS.text,
-    marginBottom: 4,
-  },
-  conflictSummaryWarningText: {
-    fontSize: 12,
-    color: COLORS.warning,
-    marginBottom: 4,
-  },
-  actionButtons: {
-    paddingHorizontal: SIZES.md,
-    paddingVertical: SIZES.lg,
-    backgroundColor: COLORS.white,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
-  },
-  actionButton: {
-    paddingVertical: SIZES.md,
-    borderRadius: SIZES.xs,
-    alignItems: 'center',
-  },
-  nextButton: {
-    backgroundColor: COLORS.secondary,
-  },
-  nextButtonText: {
-    color: COLORS.white,
-    fontWeight: '700',
-    fontSize: 16,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
-  },
-  modalContainer: {
-    backgroundColor: COLORS.white,
-    borderTopLeftRadius: SIZES.lg,
-    borderTopRightRadius: SIZES.lg,
-    paddingBottom: SIZES.lg,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: SIZES.md,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: COLORS.text,
-  },
-  modalClose: {
-    fontSize: 16,
-    color: COLORS.secondary,
-    fontWeight: '600',
-  },
-  androidButtons: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    paddingHorizontal: SIZES.md,
-    paddingTop: SIZES.sm,
-  },
-  androidButtonCancel: {
-    paddingHorizontal: SIZES.lg,
-    paddingVertical: SIZES.sm,
-    marginRight: SIZES.sm,
-  },
-  androidButtonConfirm: {
-    paddingHorizontal: SIZES.lg,
-    paddingVertical: SIZES.sm,
-    backgroundColor: COLORS.secondary,
-    borderRadius: SIZES.xs,
-  },
-  androidButtonText: {
-    fontSize: 16,
-    color: COLORS.text,
-  },
-  confirmButtonText: {
-    color: COLORS.white,
-    fontWeight: '600',
-  },
-  invalidInput: {
-    borderColor: COLORS.danger,
-    borderWidth: 2,
-  },
-  disabledButton: {
-    opacity: 0.5,
-  },
-  disabledText: {
-    color: COLORS.textLight,
-  },
-  unavailableBadge: {
-    fontSize: 10,
-    color: COLORS.danger,
-    fontWeight: '600',
-    marginTop: 4,
-  },
-  warningsContainer: {
-    marginBottom: SIZES.lg,
-  },
-  warningBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFF3E0',
-    borderRadius: SIZES.xs,
-    padding: SIZES.sm,
-    marginBottom: SIZES.xs,
-    borderLeftWidth: 4,
-    borderLeftColor: COLORS.warning,
-  },
-  warningIcon: {
-    fontSize: 16,
-    marginRight: SIZES.xs,
-  },
-  warningText: {
-    flex: 1,
-    fontSize: 12,
-    color: COLORS.warningDark,
-  },
+  container: { flex: 1, backgroundColor: COLORS.background },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: COLORS.background },
+  loadingText: { marginTop: SIZES.sm, fontSize: 16, color: COLORS.secondary },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: SIZES.md, paddingVertical: SIZES.lg, backgroundColor: COLORS.primary },
+  backButton: { fontSize: 18, color: COLORS.white, fontWeight: '700' },
+  title: { fontSize: 20, fontWeight: '700', color: COLORS.white },
+  stepIndicator: { backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: SIZES.sm, paddingVertical: 4, borderRadius: 20 },
+  stepText: { fontSize: 12, color: COLORS.white, fontWeight: '600' },
+  progressBar: { height: 4, backgroundColor: COLORS.border },
+  progressFill: { height: '100%', backgroundColor: COLORS.success },
+  contentContainer: { flex: 1, padding: SIZES.md },
+  stepTitle: { fontSize: 20, fontWeight: '700', color: COLORS.primary, marginBottom: SIZES.lg },
+  emptyState: { alignItems: 'center', padding: SIZES.xxxl },
+  emptyStateIcon: { fontSize: 48, marginBottom: SIZES.md },
+  emptyStateText: { fontSize: 16, color: COLORS.textLight, marginBottom: SIZES.lg },
+  emptyStateButton: { backgroundColor: COLORS.secondary, paddingHorizontal: SIZES.xl, paddingVertical: SIZES.sm, borderRadius: SIZES.xs },
+  emptyStateButtonText: { color: COLORS.white, fontWeight: '600', fontSize: 14 },
+  routeCard: { backgroundColor: COLORS.white, borderRadius: SIZES.md, padding: SIZES.md, marginBottom: SIZES.sm, borderWidth: 1, borderColor: COLORS.border },
+  selectedCard: { backgroundColor: COLORS.infoLight, borderColor: COLORS.secondary },
+  routeHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SIZES.xs },
+  routeCode: { fontSize: 16, fontWeight: '700', color: COLORS.primary },
+  routeFare: { fontSize: 16, fontWeight: '700', color: COLORS.success },
+  routeName: { fontSize: 16, color: COLORS.text, marginBottom: 4 },
+  routePath: { fontSize: 14, color: COLORS.textLight, marginBottom: SIZES.sm },
+  routeDetails: { flexDirection: 'row', justifyContent: 'space-between' },
+  routeDetail: { fontSize: 12, color: COLORS.textLight },
+  inputGroup: { marginBottom: SIZES.lg },
+  label: { fontSize: 16, fontWeight: '600', color: COLORS.text, marginBottom: SIZES.xs },
+  input: { borderWidth: 1, borderColor: COLORS.border, borderRadius: SIZES.xs, padding: SIZES.sm, fontSize: 16, backgroundColor: COLORS.white, color: COLORS.text },
+  invalidInput: { borderColor: COLORS.danger, borderWidth: 2 },
+  errorText: { fontSize: 12, color: COLORS.danger, marginTop: 4 },
+  dateInput: { borderWidth: 1, borderColor: COLORS.border, borderRadius: SIZES.xs, padding: SIZES.sm, backgroundColor: COLORS.white, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  requiredField: { borderColor: COLORS.secondary, borderWidth: 2 },
+  dateSelectedText: { fontSize: 16, color: COLORS.text },
+  datePlaceholderText: { fontSize: 16, color: COLORS.textLighter },
+  calendarIcon: { fontSize: 20, color: COLORS.secondary },
+  repeatOptions: { flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -4 },
+  repeatButton: { paddingHorizontal: SIZES.md, paddingVertical: SIZES.xs, borderWidth: 1, borderColor: COLORS.border, borderRadius: SIZES.xs, margin: 4, backgroundColor: COLORS.white },
+  repeatButtonSelected: { backgroundColor: COLORS.secondary, borderColor: COLORS.secondary },
+  repeatText: { fontSize: 14, color: COLORS.text },
+  repeatTextSelected: { color: COLORS.white, fontWeight: '600' },
+  daysContainer: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
+  dayButton: { width: '14%', aspectRatio: 1, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: COLORS.border, borderRadius: SIZES.xs, marginBottom: SIZES.xs, backgroundColor: COLORS.white },
+  dayButtonSelected: { backgroundColor: COLORS.secondary, borderColor: COLORS.secondary },
+  dayButtonText: { fontSize: 12, fontWeight: '600', color: COLORS.textLight },
+  dayButtonTextSelected: { color: COLORS.white },
+  row: { flexDirection: 'row' },
+  selectionCard: { backgroundColor: COLORS.white, borderRadius: SIZES.md, borderWidth: 1, borderColor: COLORS.border, padding: SIZES.md },
+  selectionCardContent: { flexDirection: 'row', alignItems: 'center' },
+  selectionIcon: { fontSize: 32, marginRight: SIZES.md },
+  selectionInfo: { flex: 1 },
+  selectionLabel: { fontSize: 12, color: COLORS.textLight, marginBottom: 4 },
+  selectionValue: { fontSize: 16, fontWeight: '600', color: COLORS.primary },
+  selectionPlaceholder: { fontSize: 14, color: COLORS.textLighter, fontStyle: 'italic' },
+  chevron: { fontSize: 28, color: COLORS.textLight, fontWeight: '300' },
+  warningBox: { marginTop: SIZES.sm, backgroundColor: '#FFF3E0', borderRadius: SIZES.xs, padding: SIZES.sm, borderLeftWidth: 3, borderLeftColor: COLORS.warning },
+  warningText: { fontSize: 13, color: COLORS.warningDark },
+  confirmationCard: { backgroundColor: COLORS.white, borderRadius: SIZES.md, padding: SIZES.lg, borderWidth: 1, borderColor: COLORS.border },
+  confirmationTitle: { fontSize: 20, fontWeight: '700', color: COLORS.primary, marginBottom: SIZES.lg, textAlign: 'center' },
+  confirmationDetail: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: SIZES.sm, paddingBottom: SIZES.xs, borderBottomWidth: 1, borderBottomColor: COLORS.border },
+  confirmationLabel: { fontSize: 16, color: COLORS.textLight },
+  confirmationValue: { fontSize: 16, fontWeight: '600', color: COLORS.text },
+  tripCountCard: { backgroundColor: '#E8F0FE', borderRadius: SIZES.md, padding: SIZES.md, marginTop: SIZES.md, alignItems: 'center' },
+  tripCountTitle: { fontSize: 14, fontWeight: '600', color: COLORS.primary, marginBottom: SIZES.xs },
+  tripCountValue: { fontSize: 28, fontWeight: '700', color: COLORS.secondary, marginBottom: 4 },
+  revenueEstimate: { backgroundColor: '#E8F5E8', borderRadius: SIZES.md, padding: SIZES.md, marginTop: SIZES.lg, alignItems: 'center' },
+  revenueTitle: { fontSize: 16, fontWeight: '700', color: COLORS.primary, marginBottom: SIZES.xs },
+  revenueValue: { fontSize: 24, fontWeight: '700', color: COLORS.success, marginBottom: 4 },
+  actionButtons: { paddingHorizontal: SIZES.md, paddingVertical: SIZES.lg, backgroundColor: COLORS.white, borderTopWidth: 1, borderTopColor: COLORS.border },
+  actionButton: { paddingVertical: SIZES.md, borderRadius: SIZES.xs, alignItems: 'center' },
+  nextButton: { backgroundColor: COLORS.secondary },
+  nextButtonText: { color: COLORS.white, fontWeight: '700', fontSize: 16 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  modalContainer: { backgroundColor: COLORS.white, borderTopLeftRadius: SIZES.lg, borderTopRightRadius: SIZES.lg, paddingBottom: SIZES.lg },
+  modalContentFull: { flex: 1, backgroundColor: COLORS.white, marginTop: 60, borderTopLeftRadius: SIZES.lg, borderTopRightRadius: SIZES.lg },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: SIZES.md, borderBottomWidth: 1, borderBottomColor: COLORS.border },
+  modalTitle: { fontSize: 18, fontWeight: '600', color: COLORS.text },
+  modalClose: { fontSize: 24, color: COLORS.textLight, padding: 4 },
+  modalSearch: { padding: SIZES.md, borderBottomWidth: 1, borderBottomColor: COLORS.border },
+  modalSearchInput: { backgroundColor: COLORS.background, borderRadius: SIZES.xs, padding: SIZES.sm, fontSize: 16, color: COLORS.text },
+  modalItem: { paddingVertical: SIZES.md, paddingHorizontal: SIZES.md, borderBottomWidth: 1, borderBottomColor: COLORS.border },
+  modalItemSelected: { backgroundColor: COLORS.infoLight },
+  modalItemContent: { flexDirection: 'row', alignItems: 'center' },
+  modalItemIcon: { fontSize: 28, marginRight: SIZES.md },
+  modalItemInfo: { flex: 1 },
+  modalItemTitle: { fontSize: 16, fontWeight: '600', color: COLORS.text, marginBottom: 4 },
+  modalItemSubtitle: { fontSize: 12, color: COLORS.textLight },
+  modalItemCheck: { fontSize: 20, color: COLORS.success, fontWeight: 'bold' },
+  modalEmpty: { alignItems: 'center', padding: SIZES.xxxl },
+  modalEmptyIcon: { fontSize: 48, marginBottom: SIZES.md },
+  modalEmptyText: { fontSize: 16, color: COLORS.textLight },
+  androidButtons: { flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: SIZES.md, paddingTop: SIZES.sm },
+  androidButtonCancel: { paddingHorizontal: SIZES.lg, paddingVertical: SIZES.sm, marginRight: SIZES.sm },
+  androidButtonConfirm: { paddingHorizontal: SIZES.lg, paddingVertical: SIZES.sm, backgroundColor: COLORS.secondary, borderRadius: SIZES.xs },
+  androidButtonText: { fontSize: 16, color: COLORS.text },
+  confirmButtonText: { color: COLORS.white, fontWeight: '600' },
+  progressModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center' },
+  progressModalContainer: { backgroundColor: COLORS.white, borderRadius: SIZES.lg, padding: SIZES.xl, width: '80%', alignItems: 'center' },
+  progressModalTitle: { fontSize: 18, fontWeight: '700', color: COLORS.primary, marginTop: SIZES.md, marginBottom: SIZES.sm },
+  progressModalText: { fontSize: 14, color: COLORS.textLight, marginBottom: SIZES.lg },
+  progressBarContainer: { width: '100%', height: 8, backgroundColor: COLORS.border, borderRadius: 4, overflow: 'hidden', marginBottom: SIZES.md },
+  progressBarFill: { height: '100%', backgroundColor: COLORS.success, borderRadius: 4 },
+  progressModalCount: { fontSize: 12, color: COLORS.textLight },
 });
 
 export default ScheduleTripScreen;

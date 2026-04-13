@@ -1,7 +1,14 @@
 // src/types/fleet.types.ts
 import firestore from '@react-native-firebase/firestore';
 
-export type BusStatus = 'active' | 'maintenance' | 'inactive';
+/**
+ * BUS STATUS DEFINITIONS
+ * - 'available': Bus is ready for assignment (was 'active')
+ * - 'on_trip': Bus is currently on a trip (NEW - critical for preventing double booking)
+ * - 'maintenance': Bus is under repair/service
+ * - 'inactive': Bus is out of service
+ */
+export type BusStatus = 'available' | 'on_trip' | 'maintenance' | 'inactive';
 
 export type BusImages = {
   frontView?: string;
@@ -20,14 +27,19 @@ export type Bus = {
   capacity: number;
   fuelType: 'diesel' | 'petrol' | 'cng' | 'electric';
   color: string;
+  busType?: 'standard' | 'ac' | 'luxury' | 'sleeper' | 'minibus';
   status: BusStatus;
-  driverId?: string;
-  driverName?: string;
+  driverId?: string | null;
+  driverName?: string | null;
+  assignedDriverId?: string | null;  // Alternative field name
   insuranceNumber: string;
   insuranceExpiry: string;
   fitnessExpiry: string;
   images?: BusImages;
   transporterId: string;
+  currentTripId?: string | null;     // Active trip reference
+  isDeleted?: boolean;
+  searchKeywords?: string[];
   createdAt: firestore.Timestamp;
   updatedAt?: firestore.Timestamp;
 };
@@ -44,4 +56,14 @@ export type MaintenanceRecord = {
   nextDueDate?: firestore.Timestamp;
   transporterId: string;
   createdAt: firestore.Timestamp;
+};
+
+// Helper function to check if bus is available for assignment
+export const isBusAvailable = (status: BusStatus): boolean => {
+  return status === 'available';
+};
+
+// Helper function to check if bus can be assigned to trip
+export const canBusTakeTrip = (bus: Bus): boolean => {
+  return bus.status === 'available' && !bus.currentTripId;
 };

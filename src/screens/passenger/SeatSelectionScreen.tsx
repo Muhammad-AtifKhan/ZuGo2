@@ -1,5 +1,5 @@
-// src/screens/passenger/SeatSelectionScreen.tsx
-import React, { useState, useEffect, useCallback } from 'react';
+// src/screens/passenger/SeatSelectionScreen.tsx - WITH REAL-TIME SNAPSHOT LISTENER
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -11,21 +11,12 @@ import {
   Dimensions,
   ActivityIndicator,
 } from 'react-native';
-import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
+import { RouteProp, useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { PassengerStackParamList } from '../../navigation/PassengerNavigator';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import firestore from '@react-native-firebase/firestore';
 import auth from '@react-native-firebase/auth';
-
-// Import seat helpers
-import {
-  getAllSeats,
-  getAvailableSeats,
-  checkSeatsAvailability,
-  holdSeats,
-  releaseSeats,
-} from '../../utils/seatHelpers';
 
 type SeatSelectionScreenNavigationProp = StackNavigationProp<PassengerStackParamList, 'SeatSelection'>;
 type SeatSelectionScreenRouteProp = RouteProp<PassengerStackParamList, 'SeatSelection'>;
@@ -78,82 +69,389 @@ const SeatSelectionScreen = () => {
     nearExit: false,
   });
 
+  const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const holdDeadlineRef = useRef<Date | null>(null);
+  const isMountedRef = useRef(true);
+  const selectedSeatsRef = useRef<string[]>([]);
+  const tripIdRef = useRef(tripId);
+  const userIdRef = useRef<string | undefined>(undefined);
+  const unsubscribeRef = useRef<(() => void) | null>(null);
+
   const user = auth().currentUser;
+  userIdRef.current = user?.uid;
 
-  // ✅ Fetch real seats from Firestore
+  // Keep refs in sync
   useEffect(() => {
-    fetchSeats();
-  }, [tripId]);
+    selectedSeatsRef.current = selectedSeats;
+    tripIdRef.current = tripId;
+  }, [selectedSeats, tripId]);
 
-  const fetchSeats = async () => {
+  // ✅ REAL-TIME SNAPSHOT LISTENER FOR SEATS
+  useEffect(() => {
+    if (!tripId) return;
+
+    console.log('🪑 Setting up REAL-TIME seat listener for trip:', tripId);
     setLoading(true);
+
+    const db = firestore();
+    const seatsRef = db
+      .collection('trips')
+      .doc(tripId)
+      .collection('seats');
+
+    // ✅ onSnapshot for real-time updates
+    const unsubscribe = seatsRef.onSnapshot(
+      (snapshot) => {
+        if (!isMountedRef.current) return;
+
+        console.log(`📡 Real-time update: ${snapshot.docs.length} seats received`);
+
+        const seatsData: Seat[] = [];
+        snapshot.forEach(doc => {
+          const data = doc.data();
+          const isReservedByCurrentUser = data.reservedBy === userIdRef.current;
+          const isReservedExpired = data.reservedUntil && data.reservedUntil.toDate() < new Date();
+
+          // Determine seat availability
+          let isAvailable = false;
+          if (data.status === 'available') {
+            isAvailable = true;
+          } else if (data.status === 'reserved' && isReservedByCurrentUser && !isReservedExpired) {
+            // Current user's own reservation - treat as available for selection
+            isAvailable = true;
+          } else if (data.status === 'reserved' && isReservedExpired) {
+            // Expired reservation - should be available
+            isAvailable = true;
+          } else {
+            isAvailable = false;
+          }
+
+          seatsData.push({
+            id: `seat-${doc.id}`,
+            seatNumber: doc.id,
+            number: doc.id,
+            row: data.row,
+            column: data.column,
+            type: data.type || 'standard',
+            isAvailable,
+            status: data.status,
+            isWheelchairAccessible: data.isWheelchairAccessible || false,
+            hasExtraLegroom: data.hasExtraLegroom || false,
+            isPremium: data.row <= 2,
+            price: data.price || farePerSeat,
+            reservedBy: data.reservedBy,
+            reservedUntil: data.reservedUntil,
+          });
+        });
+
+        // Sort seats by row and column
+        seatsData.sort((a, b) => {
+          if (a.row !== b.row) return a.row - b.row;
+          return a.column - b.column;
+        });
+
+        setSeats(seatsData);
+        setLoading(false);
+
+        // ✅ CRITICAL: Check if current user's selected seats are still available
+        if (selectedSeatsRef.current.length > 0 && userIdRef.current) {
+          const unavailableSeats = selectedSeatsRef.current.filter(seatId => {
+            const seat = seatsData.find(s => s.id === seatId);
+            return !seat?.isAvailable;
+          });
+
+          if (unavailableSeats.length > 0) {
+            console.log('⚠️ Some selected seats are no longer available:', unavailableSeats);
+
+            const unavailableNumbers = unavailableSeats.map(id => {
+              const seat = seatsData.find(s => s.id === id);
+              return seat?.number;
+            }).join(', ');
+
+            Alert.alert(
+              'Seat Status Changed',
+              `Seat(s) ${unavailableNumbers} are no longer available. Another user may have booked them.`,
+              [
+                {
+                  text: 'OK',
+                  onPress: () => {
+                    // Clear only the unavailable seats, keep the available ones
+                    const stillAvailable = selectedSeatsRef.current.filter(
+                      seatId => !unavailableSeats.includes(seatId)
+                    );
+                    setSelectedSeats(stillAvailable);
+
+                    // If no seats left, clear hold
+                    if (stillAvailable.length === 0 && countdown !== null) {
+                      releaseHeldSeats();
+                      setCountdown(null);
+                    }
+                  }
+                }
+              ]
+            );
+          }
+        }
+
+        console.log(`✅ Real-time seats updated: ${seatsData.filter(s => s.isAvailable).length} available`);
+      },
+      (error) => {
+        console.error('❌ Error in real-time seat listener:', error);
+        if (isMountedRef.current) {
+          Alert.alert('Error', 'Failed to get real-time seat updates. Please refresh.');
+          setLoading(false);
+        }
+      }
+    );
+
+    // Store unsubscribe function for cleanup
+    unsubscribeRef.current = unsubscribe;
+
+    // Cleanup on unmount
+    return () => {
+      console.log('🪑 Cleaning up real-time seat listener');
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+        unsubscribeRef.current = null;
+      }
+    };
+  }, [tripId, farePerSeat]);
+
+  // ✅ Release seats function
+  const releaseHeldSeats = useCallback(async () => {
+    const currentSelectedSeats = selectedSeatsRef.current;
+    const currentTripId = tripIdRef.current;
+    const currentUserId = userIdRef.current;
+
+    if (!currentUserId || currentSelectedSeats.length === 0) return;
+
     try {
-      console.log('🪑 Fetching seats for trip:', tripId);
+      const seatNumbers = currentSelectedSeats.map(id => id.replace('seat-', ''));
+      console.log('🔄 Releasing held seats:', seatNumbers);
 
-      // Get all seats from Firestore
-      const seatsData = await getAllSeats(tripId);
+      const db = firestore();
+      const tripRef = db.collection('trips').doc(currentTripId);
 
-      if (seatsData.length === 0) {
-        Alert.alert('Error', 'No seats found for this trip');
-        setSeats([]);
-        return;
+      await db.runTransaction(async (transaction) => {
+        const tripDoc = await transaction.get(tripRef);
+        if (!tripDoc.exists) return;
+
+        for (const seatNumber of seatNumbers) {
+          const seatRef = tripRef.collection('seats').doc(seatNumber);
+          const seatDoc = await transaction.get(seatRef);
+
+          if (seatDoc.exists && seatDoc.data()?.reservedBy === currentUserId) {
+            transaction.update(seatRef, {
+              status: 'available',
+              reservedBy: null,
+              reservedUntil: null,
+              updatedAt: firestore.FieldValue.serverTimestamp(),
+            });
+          }
+        }
+
+        if (tripDoc.data()?.heldSeats) {
+          transaction.update(tripRef, {
+            heldSeats: firestore.FieldValue.increment(-currentSelectedSeats.length),
+            availableSeats: firestore.FieldValue.increment(currentSelectedSeats.length),
+            updatedAt: firestore.FieldValue.serverTimestamp(),
+          });
+        }
+      });
+
+      console.log('✅ Seats released successfully');
+    } catch (error) {
+      console.error('Error releasing seats:', error);
+    }
+  }, []);
+
+  // ✅ Clean up on unmount
+  useEffect(() => {
+    isMountedRef.current = true;
+
+    return () => {
+      isMountedRef.current = false;
+
+      // Clean up interval
+      if (countdownIntervalRef.current) {
+        clearInterval(countdownIntervalRef.current);
+        countdownIntervalRef.current = null;
       }
 
-      // Transform to component format
-      const formattedSeats = seatsData.map(seat => ({
-        ...seat,
-        id: `seat-${seat.seatNumber}`,
-        number: seat.seatNumber,
-        isAvailable: seat.status === 'available',
-        isPremium: seat.row <= 2,
-      }));
+      // Release seats on unmount if any are selected
+      if (selectedSeatsRef.current.length > 0 && userIdRef.current) {
+        releaseHeldSeats();
+      }
 
-      setSeats(formattedSeats);
-      console.log(`✅ Loaded ${formattedSeats.length} seats`);
+      // Snapshot listener cleanup is handled in its own useEffect
+    };
+  }, [releaseHeldSeats]);
 
-    } catch (error) {
-      console.error('Error fetching seats:', error);
-      Alert.alert('Error', 'Failed to load seats. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
+  // ✅ Focus effect
+  useFocusEffect(
+    useCallback(() => {
+      console.log('📱 SeatSelection screen focused');
 
-  // ✅ Countdown timer for held seats
+      return () => {
+        console.log('📱 SeatSelection screen unfocused');
+
+        // Clean up interval
+        if (countdownIntervalRef.current) {
+          clearInterval(countdownIntervalRef.current);
+          countdownIntervalRef.current = null;
+        }
+
+        // Release held seats if any
+        if (selectedSeatsRef.current.length > 0 && userIdRef.current) {
+          releaseHeldSeats();
+        }
+      };
+    }, [releaseHeldSeats])
+  );
+
+  // ✅ Countdown timer
   useEffect(() => {
-    let timer: NodeJS.Timeout;
-
     if (countdown !== null && countdown > 0) {
-      timer = setTimeout(() => {
-        setCountdown(countdown - 1);
-      }, 1000);
-    } else if (countdown === 0) {
-      // Time's up - release seats
-      Alert.alert(
-        'Hold Expired',
-        'Seat hold time has expired. Please select seats again.',
-        [
-          {
-            text: 'OK',
-            onPress: () => {
-              setSelectedSeats([]);
-              setCountdown(null);
-              fetchSeats(); // Refresh seats
+      if (countdownIntervalRef.current) {
+        clearInterval(countdownIntervalRef.current);
+      }
+
+      countdownIntervalRef.current = setInterval(() => {
+        setCountdown(prev => {
+          if (prev === null || prev <= 1) {
+            if (countdownIntervalRef.current) {
+              clearInterval(countdownIntervalRef.current);
+              countdownIntervalRef.current = null;
             }
+            return null;
           }
-        ]
-      );
+          return prev - 1;
+        });
+      }, 1000);
     }
 
     return () => {
-      if (timer) clearTimeout(timer);
+      if (countdownIntervalRef.current) {
+        clearInterval(countdownIntervalRef.current);
+        countdownIntervalRef.current = null;
+      }
     };
   }, [countdown]);
 
-  // ✅ Handle seat selection with hold mechanism
+  // ✅ Auto-release when countdown reaches 0
+  useEffect(() => {
+    if (countdown === 0) {
+      const autoRelease = async () => {
+        console.log('⏰ Countdown expired, auto-releasing seats');
+        await releaseHeldSeats();
+
+        if (isMountedRef.current) {
+          Alert.alert(
+            'Hold Expired',
+            'Seat hold time has expired. Please select seats again.',
+            [
+              {
+                text: 'OK',
+                onPress: () => {
+                  setSelectedSeats([]);
+                  setCountdown(null);
+                }
+              }
+            ]
+          );
+        }
+      };
+
+      autoRelease();
+    }
+  }, [countdown, releaseHeldSeats]);
+
+  // ✅ Hold seats with transaction
+  const holdSelectedSeats = async (seatIds: string[]) => {
+    if (!user) {
+      Alert.alert('Error', 'Please login to continue');
+      return;
+    }
+
+    if (seatIds.length === 0) return;
+
+    setHoldingSeats(true);
+
+    try {
+      const db = firestore();
+      const tripRef = db.collection('trips').doc(tripId);
+      const seatNumbers = seatIds.map(id => id.replace('seat-', ''));
+      const holdDurationMinutes = 15;
+      const reservedUntil = new Date();
+      reservedUntil.setMinutes(reservedUntil.getMinutes() + holdDurationMinutes);
+
+      await db.runTransaction(async (transaction) => {
+        const seatRefs = seatNumbers.map(num => tripRef.collection('seats').doc(num));
+        const seatDocs = await Promise.all(seatRefs.map(ref => transaction.get(ref)));
+
+        for (let i = 0; i < seatDocs.length; i++) {
+          const doc = seatDocs[i];
+          const data = doc.data();
+
+          if (!doc.exists) {
+            throw new Error(`Seat ${seatNumbers[i]} does not exist`);
+          }
+
+          if (data?.status === 'booked') {
+            throw new Error(`Seat ${seatNumbers[i]} is already booked`);
+          }
+
+          if (data?.status === 'reserved' && data?.reservedBy !== user.uid) {
+            throw new Error(`Seat ${seatNumbers[i]} is reserved by another user`);
+          }
+        }
+
+        for (let i = 0; i < seatRefs.length; i++) {
+          transaction.update(seatRefs[i], {
+            status: 'reserved',
+            reservedBy: user.uid,
+            reservedUntil,
+            updatedAt: firestore.FieldValue.serverTimestamp(),
+          });
+        }
+
+        transaction.update(tripRef, {
+          availableSeats: firestore.FieldValue.increment(-seatNumbers.length),
+          heldSeats: firestore.FieldValue.increment(seatNumbers.length),
+          updatedAt: firestore.FieldValue.serverTimestamp(),
+        });
+      });
+
+      const secondsLeft = Math.floor((reservedUntil.getTime() - new Date().getTime()) / 1000);
+      setCountdown(secondsLeft);
+      holdDeadlineRef.current = reservedUntil;
+
+      Alert.alert(
+        'Seats Held',
+        `Your seats are held for ${holdDurationMinutes} minutes. Complete payment within this time.`,
+        [{ text: 'OK' }]
+      );
+
+    } catch (error: any) {
+      console.error('Error holding seats:', error);
+      Alert.alert('Hold Failed', error.message || 'Failed to hold seats. Please try again.');
+      setSelectedSeats([]);
+    } finally {
+      setHoldingSeats(false);
+    }
+  };
+
+  const calculateTotalAmount = useCallback(() => {
+    let total = 0;
+    for (const seatId of selectedSeats) {
+      const seat = seats.find(s => s.id === seatId);
+      total += seat?.price || farePerSeat;
+    }
+    return total;
+  }, [selectedSeats, seats, farePerSeat]);
+
   const handleSeatSelect = async (seatId: string, seatNumber: string) => {
     const seat = seats.find(s => s.id === seatId);
-
     if (!seat) return;
 
     if (!seat.isAvailable) {
@@ -166,19 +464,17 @@ const SeatSelectionScreen = () => {
       const newSelected = selectedSeats.filter(id => id !== seatId);
       setSelectedSeats(newSelected);
 
-      // If no seats selected, clear hold
-      if (newSelected.length === 0) {
+      if (newSelected.length === 0 && countdown !== null) {
+        await releaseHeldSeats();
         setCountdown(null);
       }
 
     } else {
-      // Check if we've reached passenger count limit
       if (selectedSeats.length >= passengerCount) {
         Alert.alert('Limit Reached', `You can only select ${passengerCount} seat(s).`);
         return;
       }
 
-      // Check special needs constraints
       if (specialNeeds.wheelchair && !seat.isWheelchairAccessible) {
         Alert.alert('Invalid Selection', 'Please select a wheelchair accessible seat.');
         return;
@@ -189,152 +485,13 @@ const SeatSelectionScreen = () => {
         return;
       }
 
-      // Select seat
       const newSelected = [...selectedSeats, seatId];
       setSelectedSeats(newSelected);
 
-      // If we've reached passenger count, hold the seats
       if (newSelected.length === passengerCount) {
         await holdSelectedSeats(newSelected);
       }
     }
-  };
-
-  // ✅ Hold seats function
-  const holdSelectedSeats = async (seatIds: string[]) => {
-    if (!user) {
-      Alert.alert('Error', 'Please login to continue');
-      return;
-    }
-
-    setHoldingSeats(true);
-
-    try {
-      const seatNumbers = seatIds.map(id => id.replace('seat-', ''));
-
-      // Check availability first
-      const availabilityCheck = await checkSeatsAvailability(tripId, seatNumbers);
-
-      const unavailableSeats = availabilityCheck.filter(s => !s.available);
-      if (unavailableSeats.length > 0) {
-        Alert.alert(
-          'Seats No Longer Available',
-          `The following seats are no longer available: ${unavailableSeats.map(s => s.seatNumber).join(', ')}`
-        );
-        setSelectedSeats([]);
-        await fetchSeats(); // Refresh seats
-        return;
-      }
-
-      // Hold the seats
-      const result = await holdSeats(tripId, seatNumbers, user.uid);
-
-      if (result.success) {
-        // Calculate countdown in seconds (15 minutes = 900 seconds)
-        const now = new Date();
-        const deadline = result.reservedUntil;
-        const secondsLeft = Math.floor((deadline.getTime() - now.getTime()) / 1000);
-
-        setCountdown(secondsLeft);
-
-        Alert.alert(
-          'Seats Held',
-          `Your seats are held for 15 minutes. Complete payment within this time.`,
-          [{ text: 'OK' }]
-        );
-      }
-
-    } catch (error: any) {
-      Alert.alert('Error', error.message || 'Failed to hold seats');
-      setSelectedSeats([]);
-    } finally {
-      setHoldingSeats(false);
-    }
-  };
-
-  // ✅ Temporary button for generating seats (Option A)
-  const handleGenerateSeats = async () => {
-    Alert.alert(
-      'Generate Seats',
-      'This will generate seats for this trip if they don\'t exist. Continue?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Generate',
-          onPress: async () => {
-            setLoading(true);
-            try {
-              // Check if seats already exist
-              const existingSeats = await getAllSeats(tripId);
-
-              if (existingSeats.length > 0) {
-                Alert.alert('Info', 'Seats already exist for this trip');
-                await fetchSeats();
-                return;
-              }
-
-              // Generate seats using the same logic as ScheduleTripScreen
-              const db = firestore();
-              const batch = db.batch();
-              const seatsRef = db.collection('trips').doc(tripId).collection('seats');
-
-              // Get trip data to know totalSeats and fare
-              const tripDoc = await db.collection('trips').doc(tripId).get();
-              const tripData = tripDoc.data();
-              const totalSeats = tripData?.totalSeats || 40;
-              const fare = tripData?.fare || farePerSeat;
-
-              const rows = Math.ceil(totalSeats / 5);
-              const columns = 5;
-
-              for (let row = 1; row <= rows; row++) {
-                for (let col = 1; col <= columns; col++) {
-                  const seatNumber = `${row}${String.fromCharCode(64 + col)}`;
-                  const seatRef = seatsRef.doc(seatNumber);
-
-                  const isPremium = row <= 2;
-                  const isWindow = col === 1 || col === 5;
-                  const isAisle = col === 3;
-                  const isMiddle = col === 2 || col === 4;
-                  const hasExtraLegroom = row === 1;
-                  const isWheelchairAccessible = row === rows && (col === 1 || col === 2);
-
-                  batch.set(seatRef, {
-                    seatNumber,
-                    row,
-                    column: col,
-                    isBooked: false,
-                    status: 'available',
-                    price: isPremium ? Math.round(fare * 1.25) : fare,
-                    type: isWindow ? 'window' : isAisle ? 'aisle' : 'middle',
-                    isWindow,
-                    isAisle,
-                    isMiddle,
-                    hasExtraLegroom,
-                    isWheelchairAccessible,
-                    reservedBy: null,
-                    reservedUntil: null,
-                    bookingId: null,
-                    createdAt: firestore.FieldValue.serverTimestamp(),
-                    updatedAt: firestore.FieldValue.serverTimestamp()
-                  });
-                }
-              }
-
-              await batch.commit();
-              Alert.alert('Success', 'Seats generated successfully!');
-              await fetchSeats();
-
-            } catch (error) {
-              console.error('Error generating seats:', error);
-              Alert.alert('Error', 'Failed to generate seats');
-            } finally {
-              setLoading(false);
-            }
-          }
-        }
-      ]
-    );
   };
 
   const handleSpecialNeedToggle = (need: keyof typeof specialNeeds) => {
@@ -343,9 +500,11 @@ const SeatSelectionScreen = () => {
       [need]: !prev[need],
     }));
 
-    // Clear selections if special need is toggled
-    setSelectedSeats([]);
-    setCountdown(null);
+    if (selectedSeats.length > 0) {
+      releaseHeldSeats();
+      setSelectedSeats([]);
+      setCountdown(null);
+    }
   };
 
   const handleProceedToPayment = () => {
@@ -363,10 +522,7 @@ const SeatSelectionScreen = () => {
     }
 
     const seatNumbers = selectedSeats.map(id => id.replace('seat-', ''));
-    const totalAmount = selectedSeats.reduce((sum, seatId) => {
-      const seat = seats.find(s => s.id === seatId);
-      return sum + (seat?.price ?? farePerSeat);
-    }, 0);
+    const totalAmount = calculateTotalAmount();
 
     navigation.navigate('Payment', {
       tripId,
@@ -402,7 +558,6 @@ const SeatSelectionScreen = () => {
 
       layout.push(
         <View key={`row-${row}`} style={styles.seatRow}>
-          {/* Left side seats */}
           <View style={styles.seatGroup}>
             {rowSeats.filter(seat => seat.column <= 2).map(seat => (
               <TouchableOpacity
@@ -435,12 +590,10 @@ const SeatSelectionScreen = () => {
             ))}
           </View>
 
-          {/* Aisle */}
           <View style={styles.aisle}>
             <Text style={styles.rowNumber}>{row}</Text>
           </View>
 
-          {/* Right side seats */}
           <View style={styles.seatGroup}>
             {rowSeats.filter(seat => seat.column > 2).map(seat => (
               <TouchableOpacity
@@ -479,7 +632,7 @@ const SeatSelectionScreen = () => {
     return layout;
   };
 
-  if (loading) {
+  if (loading && seats.length === 0) {
     return (
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.loadingContainer}>
@@ -493,7 +646,6 @@ const SeatSelectionScreen = () => {
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView style={styles.container}>
-        {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity
             style={styles.backButton}
@@ -505,19 +657,13 @@ const SeatSelectionScreen = () => {
             <Text style={styles.headerTitle}>SELECT SEATS</Text>
             <Text style={styles.headerSubtitle}>Bus {busNumber}</Text>
           </View>
-
-          {/* ✅ TEMPORARY BUTTON for generating seats (Option A) */}
-          {__DEV__ && (
-            <TouchableOpacity
-              style={styles.generateButton}
-              onPress={handleGenerateSeats}
-            >
-              <Icon name="build" size={24} color="#4A90E2" />
-            </TouchableOpacity>
-          )}
+          {/* Real-time indicator */}
+          <View style={styles.liveBadge}>
+            <View style={styles.liveDot} />
+            <Text style={styles.liveText}>LIVE</Text>
+          </View>
         </View>
 
-        {/* Trip Summary */}
         <View style={styles.tripSummaryCard}>
           <View style={styles.tripInfo}>
             <View style={styles.locationRow}>
@@ -544,12 +690,11 @@ const SeatSelectionScreen = () => {
             </View>
             <View style={styles.detailItem}>
               <Icon name="attach-money" size={16} color="#666" />
-              <Text style={styles.detailText}>PKR {farePerSeat} per seat</Text>
+              <Text style={styles.detailText}>From PKR {farePerSeat}</Text>
             </View>
           </View>
         </View>
 
-        {/* Countdown Timer */}
         {countdown !== null && countdown > 0 && (
           <View style={styles.countdownContainer}>
             <Icon name="timer" size={20} color="#FF9800" />
@@ -559,22 +704,24 @@ const SeatSelectionScreen = () => {
           </View>
         )}
 
-        {/* Seat Layout Container */}
         <View style={styles.seatLayoutContainer}>
           <Text style={styles.sectionTitle}>CHOOSE YOUR SEATS</Text>
 
-          {/* Bus Front */}
+          {/* Real-time update notice */}
+          <View style={styles.realtimeNotice}>
+            <Icon name="update" size={14} color="#4CAF50" />
+            <Text style={styles.realtimeNoticeText}>Seats update in real-time</Text>
+          </View>
+
           <View style={styles.busFront}>
             <Icon name="directions-bus" size={40} color="#4A90E2" />
             <Text style={styles.busFrontText}>Front</Text>
           </View>
 
-          {/* Seat Layout */}
           <View style={styles.layoutContainer}>
             {renderSeatLayout()}
           </View>
 
-          {/* Legend */}
           <View style={styles.legendContainer}>
             <View style={styles.legendRow}>
               <View style={styles.legendItem}>
@@ -605,7 +752,6 @@ const SeatSelectionScreen = () => {
           </View>
         </View>
 
-        {/* Passenger Count */}
         <View style={styles.passengerSection}>
           <Text style={styles.sectionTitle}>PASSENGERS</Text>
           <View style={styles.passengerCountContainer}>
@@ -613,8 +759,11 @@ const SeatSelectionScreen = () => {
               style={styles.countButton}
               onPress={() => {
                 setPassengerCount(prev => Math.max(1, prev - 1));
-                setSelectedSeats([]);
-                setCountdown(null);
+                if (selectedSeats.length > 0) {
+                  releaseHeldSeats();
+                  setSelectedSeats([]);
+                  setCountdown(null);
+                }
               }}
             >
               <Icon name="remove" size={24} color="#4A90E2" />
@@ -629,8 +778,11 @@ const SeatSelectionScreen = () => {
               style={styles.countButton}
               onPress={() => {
                 setPassengerCount(prev => Math.min(10, prev + 1));
-                setSelectedSeats([]);
-                setCountdown(null);
+                if (selectedSeats.length > 0) {
+                  releaseHeldSeats();
+                  setSelectedSeats([]);
+                  setCountdown(null);
+                }
               }}
             >
               <Icon name="add" size={24} color="#4A90E2" />
@@ -642,7 +794,6 @@ const SeatSelectionScreen = () => {
           </Text>
         </View>
 
-        {/* Special Needs */}
         <View style={styles.specialNeedsSection}>
           <Text style={styles.sectionTitle}>SPECIAL NEEDS</Text>
           <View style={styles.needsContainer}>
@@ -708,7 +859,6 @@ const SeatSelectionScreen = () => {
           </View>
         </View>
 
-        {/* Summary & Action */}
         <View style={styles.summaryCard}>
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Selected Seats:</Text>
@@ -721,29 +871,17 @@ const SeatSelectionScreen = () => {
           </View>
 
           <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Fare per seat:</Text>
-            <Text style={styles.summaryValue}>PKR {farePerSeat}</Text>
-          </View>
-
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Service Fee:</Text>
-            <Text style={styles.summaryValue}>PKR 1</Text>
-          </View>
-
-          <View style={[styles.summaryRow, styles.totalRow]}>
-            <Text style={styles.totalLabel}>Total:</Text>
-            <Text style={styles.totalAmount}>
-              PKR {selectedSeats.length * farePerSeat + 1}
-            </Text>
+            <Text style={styles.summaryLabel}>Total Amount:</Text>
+            <Text style={styles.summaryValue}>PKR {calculateTotalAmount()}</Text>
           </View>
 
           <TouchableOpacity
             style={[
               styles.proceedButton,
-              (selectedSeats.length === 0 || holdingSeats) && styles.proceedButtonDisabled,
+              (selectedSeats.length === 0 || holdingSeats || selectedSeats.length !== passengerCount) && styles.proceedButtonDisabled,
             ]}
             onPress={handleProceedToPayment}
-            disabled={selectedSeats.length === 0 || holdingSeats}
+            disabled={selectedSeats.length === 0 || holdingSeats || selectedSeats.length !== passengerCount}
           >
             {holdingSeats ? (
               <ActivityIndicator size="small" color="#FFF" />
@@ -763,403 +901,79 @@ const SeatSelectionScreen = () => {
 };
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#F8F9FA',
-  },
-  container: {
-    flex: 1,
-    padding: 16,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 16,
-    color: '#666',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 20,
-    marginTop: 10,
-  },
-  backButton: {
-    padding: 8,
-    marginRight: 16,
-  },
-  headerContent: {
-    flex: 1,
-  },
-  headerTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#1A237E',
-  },
-  headerSubtitle: {
-    fontSize: 16,
-    color: '#666',
-    marginTop: 4,
-  },
-  generateButton: {
-    padding: 8,
-    backgroundColor: '#F0F0F0',
-    borderRadius: 20,
-  },
-  countdownContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFF3E0',
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 16,
-  },
-  countdownText: {
-    fontSize: 14,
-    color: '#FF9800',
-    fontWeight: '600',
-    marginLeft: 8,
-  },
-  tripSummaryCard: {
-    backgroundColor: '#FFF',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-  tripInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  locationRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  locationDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: '#4A90E2',
-    marginRight: 8,
-  },
-  destinationDot: {
-    backgroundColor: '#4CAF50',
-  },
-  locationText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1A1A1A',
-  },
-  locationCode: {
-    fontSize: 12,
-    color: '#4A90E2',
-    marginLeft: 4,
-  },
-  verticalLine: {
-    width: 40,
-    height: 2,
-    backgroundColor: '#DDD',
-    marginHorizontal: 12,
-  },
-  tripDetails: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-  },
-  detailItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  detailText: {
-    fontSize: 14,
-    color: '#666',
-    marginLeft: 8,
-  },
-  seatLayoutContainer: {
-    backgroundColor: '#FFF',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#1A237E',
-    marginBottom: 16,
-  },
-  busFront: {
-    alignItems: 'center',
-    marginBottom: 20,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
-  },
-  busFrontText: {
-    fontSize: 14,
-    color: '#666',
-    marginTop: 8,
-  },
-  layoutContainer: {
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  seatRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  seatGroup: {
-    flexDirection: 'row',
-  },
-  aisle: {
-    width: AISLE_WIDTH,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  rowNumber: {
-    fontSize: 14,
-    color: '#999',
-    fontWeight: '600',
-  },
-  seat: {
-    width: SEAT_SIZE,
-    height: SEAT_SIZE,
-    borderRadius: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginHorizontal: 2,
-    borderWidth: 1,
-  },
-  windowSeat: {
-    borderColor: '#4A90E2',
-    backgroundColor: '#F0F8FF',
-  },
-  aisleSeat: {
-    borderColor: '#87CEEB',
-    backgroundColor: '#F0FFFF',
-  },
-  seatSelected: {
-    backgroundColor: '#4CAF50',
-    borderColor: '#388E3C',
-  },
-  seatBooked: {
-    backgroundColor: '#FFCDD2',
-    borderColor: '#F44336',
-  },
-  wheelchairSeat: {
-    backgroundColor: '#FF9800',
-    borderColor: '#F57C00',
-  },
-  premiumSeat: {
-    backgroundColor: '#FFF3E0',
-    borderColor: '#FFB74D',
-  },
-  seatText: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  seatTextSelected: {
-    color: '#FFF',
-  },
-  seatTextBooked: {
-    color: '#666',
-    textDecorationLine: 'line-through',
-  },
-  seatIcon: {
-    position: 'absolute',
-    top: 2,
-    right: 2,
-  },
-  legendContainer: {
-    marginTop: 20,
-  },
-  legendRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginBottom: 10,
-  },
-  legendItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  legendBox: {
-    width: 20,
-    height: 20,
-    borderRadius: 4,
-    borderWidth: 1,
-    marginRight: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  seatAvailable: {
-    backgroundColor: '#F0F8FF',
-    borderColor: '#4A90E2',
-  },
-  legendText: {
-    fontSize: 12,
-    color: '#666',
-  },
-  passengerSection: {
-    backgroundColor: '#FFF',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-  passengerCountContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 10,
-  },
-  countButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    borderWidth: 2,
-    borderColor: '#4A90E2',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  countDisplay: {
-    alignItems: 'center',
-    marginHorizontal: 30,
-  },
-  countText: {
-    fontSize: 36,
-    fontWeight: 'bold',
-    color: '#1A237E',
-  },
-  countLabel: {
-    fontSize: 14,
-    color: '#666',
-  },
-  selectionNote: {
-    fontSize: 14,
-    color: '#666',
-    textAlign: 'center',
-    fontStyle: 'italic',
-  },
-  specialNeedsSection: {
-    backgroundColor: '#FFF',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-  needsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  needOption: {
-    alignItems: 'center',
-    padding: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#E3E8EF',
-    width: '30%',
-  },
-  needOptionSelected: {
-    backgroundColor: '#4A90E2',
-    borderColor: '#4A90E2',
-  },
-  needText: {
-    fontSize: 12,
-    color: '#666',
-    marginTop: 8,
-    textAlign: 'center',
-  },
-  needTextSelected: {
-    color: '#FFF',
-    fontWeight: '600',
-  },
-  summaryCard: {
-    backgroundColor: '#FFF',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 30,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-  summaryRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  summaryLabel: {
-    fontSize: 16,
-    color: '#666',
-  },
-  summaryValue: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1A1A1A',
-  },
-  totalRow: {
-    marginTop: 16,
-    paddingTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: '#F0F0F0',
-  },
-  totalLabel: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#1A237E',
-  },
-  totalAmount: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#4CAF50',
-  },
-  proceedButton: {
-    backgroundColor: '#4A90E2',
-    borderRadius: 12,
-    paddingVertical: 18,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 20,
-    shadowColor: '#4A90E2',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  proceedButtonDisabled: {
-    backgroundColor: '#CCC',
-    shadowColor: '#999',
-  },
-  proceedButtonText: {
-    color: '#FFF',
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginRight: 10,
-  },
+  safeArea: { flex: 1, backgroundColor: '#F8F9FA' },
+  container: { flex: 1, padding: 16 },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  loadingText: { marginTop: 12, fontSize: 16, color: '#666' },
+  header: { flexDirection: 'row', alignItems: 'center', marginBottom: 20, marginTop: 10 },
+  backButton: { padding: 8, marginRight: 16 },
+  headerContent: { flex: 1 },
+  headerTitle: { fontSize: 24, fontWeight: 'bold', color: '#1A237E' },
+  headerSubtitle: { fontSize: 16, color: '#666', marginTop: 4 },
+  liveBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#E8F5E9', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
+  liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#4CAF50', marginRight: 4 },
+  liveText: { fontSize: 10, fontWeight: 'bold', color: '#4CAF50' },
+  realtimeNotice: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
+  realtimeNoticeText: { fontSize: 12, color: '#4CAF50', marginLeft: 4 },
+  countdownContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF3E0', padding: 12, borderRadius: 8, marginBottom: 16 },
+  countdownText: { fontSize: 14, color: '#FF9800', fontWeight: '600', marginLeft: 8 },
+  tripSummaryCard: { backgroundColor: '#FFF', borderRadius: 16, padding: 20, marginBottom: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 5 },
+  tripInfo: { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
+  locationRow: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+  locationDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: '#4A90E2', marginRight: 8 },
+  destinationDot: { backgroundColor: '#4CAF50' },
+  locationText: { fontSize: 16, fontWeight: '600', color: '#1A1A1A' },
+  locationCode: { fontSize: 12, color: '#4A90E2', marginLeft: 4 },
+  verticalLine: { width: 40, height: 2, backgroundColor: '#DDD', marginHorizontal: 12 },
+  tripDetails: { flexDirection: 'row', justifyContent: 'space-around' },
+  detailItem: { flexDirection: 'row', alignItems: 'center' },
+  detailText: { fontSize: 14, color: '#666', marginLeft: 8 },
+  seatLayoutContainer: { backgroundColor: '#FFF', borderRadius: 16, padding: 20, marginBottom: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 5 },
+  sectionTitle: { fontSize: 18, fontWeight: '600', color: '#1A237E', marginBottom: 16 },
+  busFront: { alignItems: 'center', marginBottom: 20, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
+  busFrontText: { fontSize: 14, color: '#666', marginTop: 8 },
+  layoutContainer: { alignItems: 'center', marginBottom: 20 },
+  seatRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
+  seatGroup: { flexDirection: 'row' },
+  aisle: { width: AISLE_WIDTH, alignItems: 'center', justifyContent: 'center' },
+  rowNumber: { fontSize: 14, color: '#999', fontWeight: '600' },
+  seat: { width: SEAT_SIZE, height: SEAT_SIZE, borderRadius: 8, justifyContent: 'center', alignItems: 'center', marginHorizontal: 2, borderWidth: 1 },
+  windowSeat: { borderColor: '#4A90E2', backgroundColor: '#F0F8FF' },
+  aisleSeat: { borderColor: '#87CEEB', backgroundColor: '#F0FFFF' },
+  seatSelected: { backgroundColor: '#4CAF50', borderColor: '#388E3C' },
+  seatBooked: { backgroundColor: '#FFCDD2', borderColor: '#F44336' },
+  wheelchairSeat: { backgroundColor: '#FF9800', borderColor: '#F57C00' },
+  premiumSeat: { backgroundColor: '#FFF3E0', borderColor: '#FFB74D' },
+  seatText: { fontSize: 12, fontWeight: '600' },
+  seatTextSelected: { color: '#FFF' },
+  seatTextBooked: { color: '#666', textDecorationLine: 'line-through' },
+  seatIcon: { position: 'absolute', top: 2, right: 2 },
+  legendContainer: { marginTop: 20 },
+  legendRow: { flexDirection: 'row', justifyContent: 'space-around', marginBottom: 10 },
+  legendItem: { flexDirection: 'row', alignItems: 'center' },
+  legendBox: { width: 20, height: 20, borderRadius: 4, borderWidth: 1, marginRight: 8, justifyContent: 'center', alignItems: 'center' },
+  seatAvailable: { backgroundColor: '#F0F8FF', borderColor: '#4A90E2' },
+  legendText: { fontSize: 12, color: '#666' },
+  passengerSection: { backgroundColor: '#FFF', borderRadius: 16, padding: 20, marginBottom: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 5 },
+  passengerCountContainer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 10 },
+  countButton: { width: 40, height: 40, borderRadius: 20, borderWidth: 2, borderColor: '#4A90E2', justifyContent: 'center', alignItems: 'center' },
+  countDisplay: { alignItems: 'center', marginHorizontal: 30 },
+  countText: { fontSize: 36, fontWeight: 'bold', color: '#1A237E' },
+  countLabel: { fontSize: 14, color: '#666' },
+  selectionNote: { fontSize: 14, color: '#666', textAlign: 'center', fontStyle: 'italic' },
+  specialNeedsSection: { backgroundColor: '#FFF', borderRadius: 16, padding: 20, marginBottom: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 5 },
+  needsContainer: { flexDirection: 'row', justifyContent: 'space-between' },
+  needOption: { alignItems: 'center', padding: 12, borderRadius: 12, borderWidth: 1, borderColor: '#E3E8EF', width: '30%' },
+  needOptionSelected: { backgroundColor: '#4A90E2', borderColor: '#4A90E2' },
+  needText: { fontSize: 12, color: '#666', marginTop: 8, textAlign: 'center' },
+  needTextSelected: { color: '#FFF', fontWeight: '600' },
+  summaryCard: { backgroundColor: '#FFF', borderRadius: 16, padding: 20, marginBottom: 30, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 5 },
+  summaryRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  summaryLabel: { fontSize: 16, color: '#666' },
+  summaryValue: { fontSize: 16, fontWeight: '600', color: '#1A1A1A' },
+  proceedButton: { backgroundColor: '#4A90E2', borderRadius: 12, paddingVertical: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 20, shadowColor: '#4A90E2', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
+  proceedButtonDisabled: { backgroundColor: '#CCC', shadowColor: '#999' },
+  proceedButtonText: { color: '#FFF', fontSize: 18, fontWeight: 'bold', marginRight: 10 },
 });
 
 export default SeatSelectionScreen;

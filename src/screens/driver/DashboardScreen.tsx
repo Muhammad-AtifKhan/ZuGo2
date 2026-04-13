@@ -1,4 +1,4 @@
-// src/screens/driver/DashboardScreen.tsx - REFACTORED WITH CORRECTIONS
+// src/screens/driver/DashboardScreen.tsx - STANDARDIZED STATUSES
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
@@ -19,6 +19,19 @@ import auth from '@react-native-firebase/auth';
 // Import notification service
 import { requestPermissionAndSaveToken, listenForTokenRefresh } from '../../services/notificationService';
 
+// ✅ Import standardized status constants
+import {
+  BUS_STATUS,
+  BUS_STATUS_CONFIG,
+  DRIVER_STATUS,
+  DRIVER_STATUS_CONFIG,
+  TRIP_STATUS,
+  TRIP_STATUS_CONFIG,
+  getBusStatusConfig,
+  getDriverStatusConfig,
+  getTripStatusConfig,
+} from '../../constants/status';
+
 type RootDrawerParamList = {
   Main: undefined;
   Schedule: undefined;
@@ -35,6 +48,7 @@ type DashboardScreenProps = {
   navigation: DrawerNavigationProp<RootDrawerParamList, 'Main'>;
 };
 
+// ✅ Updated Duty interface with standardized statuses
 interface Duty {
   id: string;
   busNumber: string;
@@ -42,7 +56,7 @@ interface Duty {
   routeName: string;
   timeSlot: string;
   passengers: string;
-  status: 'UPCOMING' | 'READY' | 'ACTIVE' | 'COMPLETED' | 'VEHICLE_CHECK' | 'BOARDING';
+  status: string; // Now using TRIP_STATUS values
   startTime: string;
   endTime: string;
   busId: string;
@@ -66,9 +80,7 @@ interface Duty {
 
 interface DriverStats {
   totalTrips: number;
-  totalEarnings: number;
   todayTrips: number;
-  todayEarnings: number;
   averageRating: number;
   totalReviews: number;
   onlineHours: number;
@@ -77,9 +89,9 @@ interface DriverStats {
 const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
   const user = auth().currentUser;
 
-  // ✅ FIX 3: Correct driver status types
-  const [driverStatus, setDriverStatus] = useState<'active' | 'inactive' | 'on_leave' | 'suspended'>('inactive');
-  const [driverOnDuty, setDriverOnDuty] = useState(false);
+  // ✅ Updated driver status to use DRIVER_STATUS type
+  const [driverStatus, setDriverStatus] = useState<string>(DRIVER_STATUS.OFFLINE);
+  // ❌ REMOVED: driverOnDuty - use driverStatus === DRIVER_STATUS.ON_TRIP instead
   const [currentTripId, setCurrentTripId] = useState<string | null>(null);
   const [currentTripStatus, setCurrentTripStatus] = useState<string | null>(null);
 
@@ -101,9 +113,7 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
   const [refreshing, setRefreshing] = useState(false);
   const [driverStats, setDriverStats] = useState<DriverStats>({
     totalTrips: 0,
-    totalEarnings: 0,
     todayTrips: 0,
-    todayEarnings: 0,
     averageRating: 0,
     totalReviews: 0,
     onlineHours: 0,
@@ -111,21 +121,28 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
   const [driverName, setDriverName] = useState('');
   const [driverUid, setDriverUid] = useState<string>('');
 
-  // Countdown timer state
   const [timeLeft, setTimeLeft] = useState<{ [key: string]: string }>({});
   const [canStartDuty, setCanStartDuty] = useState<{ [key: string]: boolean }>({});
 
-  const listenersRef = useRef<(() => void)[]>([]);
+  // Use refs for listeners to ensure proper cleanup
+  const driverUnsubscribeRef = useRef<(() => void) | null>(null);
+  const tripsUnsubscribeRef = useRef<(() => void) | null>(null);
+  const isMountedRef = useRef(true);
 
   // Initialize notifications
   useEffect(() => {
     if (!user) return;
+
+    let notificationUnsubscribe: (() => void) | null = null;
+
     requestPermissionAndSaveToken(user.uid);
     const unsubscribe = listenForTokenRefresh(user.uid);
-    listenersRef.current.push(unsubscribe);
+    notificationUnsubscribe = unsubscribe;
+
     return () => {
-      listenersRef.current.forEach(unsub => unsub());
-      listenersRef.current = [];
+      if (notificationUnsubscribe) {
+        notificationUnsubscribe();
+      }
     };
   }, [user]);
 
@@ -171,7 +188,109 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
     }
   }, []);
 
-  // ✅ FIX: Check 15-minute rule per duty
+  // Check if trip is valid for a specific date
+  const isTripValidForDate = (tripData: any, targetDate: string, targetDay: string): boolean => {
+    let startDate = '';
+    let endDate = '';
+
+    if (tripData.startDate) {
+      if (tripData.startDate.toDate) {
+        startDate = tripData.startDate.toDate().toISOString().split('T')[0];
+      } else if (typeof tripData.startDate === 'string') {
+        startDate = tripData.startDate;
+      }
+    } else if (tripData.date) {
+      startDate = tripData.date;
+    } else {
+      startDate = targetDate;
+    }
+
+    if (tripData.endDate) {
+      if (tripData.endDate.toDate) {
+        endDate = tripData.endDate.toDate().toISOString().split('T')[0];
+      } else if (typeof tripData.endDate === 'string') {
+        endDate = tripData.endDate;
+      }
+    } else {
+      endDate = startDate;
+    }
+
+    if (targetDate < startDate || targetDate > endDate) return false;
+
+    if (tripData.repeatType === 'daily') return true;
+    if (tripData.repeatType === 'weekly') {
+      return tripData.days?.includes(targetDay) ?? false;
+    }
+    if (tripData.repeatType === 'weekdays') {
+      return ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].includes(targetDay);
+    }
+    if (tripData.repeatType === 'weekends') {
+      return ['Sat', 'Sun'].includes(targetDay);
+    }
+
+    return startDate === targetDate;
+  };
+
+  // ✅ Updated mapping function using standardized statuses
+  const mapTripToDuty = (doc: any): Duty => {
+    const data = doc.data();
+
+    let tripDate = '';
+    if (data.startDate) {
+      if (data.startDate.toDate) {
+        tripDate = data.startDate.toDate().toISOString().split('T')[0];
+      } else if (typeof data.startDate === 'string') {
+        tripDate = data.startDate;
+      }
+    } else if (data.date) {
+      tripDate = data.date;
+    } else {
+      tripDate = 'Date not set';
+    }
+
+    const dayOfWeek = tripDate !== 'Date not set'
+      ? new Date(tripDate).toLocaleDateString('en-US', { weekday: 'short' })
+      : 'N/A';
+
+    // ✅ Map Firebase status to standardized status
+    let status = data.status;
+    if (status === 'upcoming' || status === 'scheduled') status = TRIP_STATUS.SCHEDULED;
+    if (status === 'active' || status === 'on-time' || status === 'in-progress') status = TRIP_STATUS.IN_PROGRESS;
+    if (status === 'vehicle_check') status = TRIP_STATUS.SCHEDULED; // Vehicle check is pre-trip
+    if (status === 'boarding') status = TRIP_STATUS.SCHEDULED; // Boarding is pre-trip
+
+    return {
+      id: doc.id,
+      busNumber: data.busNumber || 'N/A',
+      busModel: data.busModel || 'Standard Bus',
+      routeName: data.routeName || 'Unknown Route',
+      timeSlot: `${data.departureTime || '00:00'} - ${data.arrivalTime || '00:00'}`,
+      passengers: `${data.bookedSeats || 0}/${data.totalSeats || 0}`,
+      status: status,
+      startTime: data.departureTime || '00:00',
+      endTime: data.arrivalTime || '00:00',
+      busId: data.busId || '',
+      routeId: data.routeId || '',
+      driverId: data.driverId || '',
+      date: `${tripDate} (${dayOfWeek})`,
+      bookedSeats: data.bookedSeats || 0,
+      totalSeats: data.totalSeats || 0,
+      startDate: tripDate,
+      endDate: data.endDate?.toDate?.()
+        ? data.endDate.toDate().toISOString().split('T')[0]
+        : data.endDate,
+      repeatType: data.repeatType,
+      days: data.days,
+      departureTime: data.departureTime,
+      arrivalTime: data.arrivalTime,
+      revenue: data.revenue || data.earnings || 0,
+      from: data.from,
+      to: data.to,
+      distance: data.distance,
+      actualStartPrepTime: data.actualStartPrepTime,
+    };
+  };
+
   const canStartTrip = (departureTime: string): boolean => {
     if (!departureTime) return false;
     const now = new Date();
@@ -183,7 +302,6 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
     return minutesDiff <= 15 && minutesDiff >= -30;
   };
 
-  // ✅ FIX: Calculate time left for a specific duty
   const calculateTimeLeft = (departureTime: string): string => {
     if (!departureTime) return '';
     const now = new Date();
@@ -203,123 +321,17 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
     return `Starts in ${hoursDiff}h ${remainingMinutes}m`;
   };
 
-  // Fetch trips with correct filtering and only next duty
-  const fetchTodayTrips = useCallback(async (driverId: string) => {
-    try {
-      const today = new Date();
-      const todayDate = today.toISOString().split('T')[0];
-      const todayDay = today.toLocaleDateString('en-US', { weekday: 'short' });
-
-      const tripsSnapshot = await firestore()
-        .collection('trips')
-        .where('driverId', '==', driverId)
-        .orderBy('startDate', 'desc')
-        .get();
-
-      const allTripsData: Duty[] = [];
-      tripsSnapshot.forEach(doc => {
-        allTripsData.push(mapTripToDuty(doc));
-      });
-
-      const todayTrips = allTripsData.filter(trip => {
-        const startDate = trip.startDate ?? trip.date ?? todayDate;
-        const endDate = trip.endDate ?? trip.date ?? todayDate;
-        if (startDate > todayDate || endDate < todayDate) return false;
-        if (trip.repeatType === 'daily') return true;
-        if (trip.repeatType === 'weekly') return trip.days?.includes(todayDay) ?? false;
-        if (trip.repeatType === 'weekdays') {
-          const weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
-          return weekdays.includes(todayDay);
-        }
-        if (trip.repeatType === 'weekends') {
-          return ['Sat', 'Sun'].includes(todayDay);
-        }
-        return startDate === todayDate;
-      });
-
-      // Sort by departure time
-      todayTrips.sort((a, b) => a.startTime.localeCompare(b.startTime));
-
-      // Compute per-duty eligibility
-      const timeLeftMap: { [key: string]: string } = {};
-      const canStartMap: { [key: string]: boolean } = {};
-      todayTrips.forEach(trip => {
-        timeLeftMap[trip.id] = calculateTimeLeft(trip.startTime);
-        canStartMap[trip.id] = canStartTrip(trip.startTime);
-      });
-      setTimeLeft(timeLeftMap);
-      setCanStartDuty(canStartMap);
-
-      return { allTrips: allTripsData, todayTrips };
-    } catch (error) {
-      console.error('Error fetching trips:', error);
-      throw error;
-    }
-  }, []);
-
-  const mapTripStatus = (firebaseStatus: string): Duty['status'] => {
-    switch (firebaseStatus) {
-      case 'scheduled':
-      case 'upcoming':
-        return 'UPCOMING';
-      case 'vehicle_check':
-        return 'VEHICLE_CHECK';
-      case 'boarding':
-        return 'BOARDING';
-      case 'in-progress':
-      case 'active':
-        return 'ACTIVE';
-      case 'completed':
-        return 'COMPLETED';
-      default:
-        return 'UPCOMING';
-    }
-  };
-
-  const mapTripToDuty = (doc: any): Duty => {
-    const data = doc.data();
-    return {
-      id: doc.id,
-      busNumber: data.busNumber || 'N/A',
-      busModel: data.busModel || 'Standard Bus',
-      routeName: data.routeName || 'Unknown Route',
-      timeSlot: `${data.departureTime || '00:00'} - ${data.arrivalTime || '00:00'}`,
-      passengers: `${data.bookedSeats || 0}/${data.totalSeats || 0}`,
-      status: mapTripStatus(data.status),
-      startTime: data.departureTime || '00:00',
-      endTime: data.arrivalTime || '00:00',
-      busId: data.busId || '',
-      routeId: data.routeId || '',
-      driverId: data.driverId || '',
-      date: data.startDate || new Date().toISOString().split('T')[0],
-      bookedSeats: data.bookedSeats || 0,
-      totalSeats: data.totalSeats || 0,
-      startDate: data.startDate,
-      endDate: data.endDate,
-      repeatType: data.repeatType,
-      days: data.days,
-      departureTime: data.departureTime,
-      arrivalTime: data.arrivalTime,
-      revenue: data.revenue || data.earnings || 0,
-      from: data.from,
-      to: data.to,
-      distance: data.distance,
-      actualStartPrepTime: data.actualStartPrepTime,
-    };
-  };
-
-  // ✅ FIX 4: hasActiveTrip uses driver doc truth
+  // ✅ Updated: Check if driver has active trip using status
   const hasActiveTrip = useCallback((): boolean => {
-    return driverOnDuty && currentTripId !== null;
-  }, [driverOnDuty, currentTripId]);
+    return driverStatus === DRIVER_STATUS.ON_TRIP && currentTripId !== null;
+  }, [driverStatus, currentTripId]);
 
-  // ✅ FIX 5: Improved bus conflict check (no !=)
   const checkBusAvailability = async (busId: string, tripId: string): Promise<boolean> => {
     try {
       const activeTrips = await firestore()
         .collection('trips')
         .where('busId', '==', busId)
-        .where('status', 'in', ['in-progress', 'vehicle_check', 'boarding'])
+        .where('status', 'in', [TRIP_STATUS.IN_PROGRESS, TRIP_STATUS.SCHEDULED])
         .get();
 
       const conflictingTrip = activeTrips.docs.find(doc => doc.id !== tripId);
@@ -338,12 +350,15 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
     }
   };
 
-  // Toggle driver status (active/inactive)
+  // ✅ Updated: Toggle driver status using standardized values
   const toggleDriverStatus = async () => {
     if (!user || !driverUid) return;
 
-    const newStatus = driverStatus === 'active' ? 'inactive' : 'active';
-    if (newStatus === 'inactive' && hasActiveTrip()) {
+    const newStatus = driverStatus === DRIVER_STATUS.AVAILABLE
+      ? DRIVER_STATUS.OFFLINE
+      : DRIVER_STATUS.AVAILABLE;
+
+    if (newStatus === DRIVER_STATUS.OFFLINE && hasActiveTrip()) {
       Alert.alert(
         'Cannot Go Offline',
         'You have an active trip. Please complete or end the trip before going offline.'
@@ -354,15 +369,19 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
     try {
       await firestore().collection('drivers').doc(driverUid).update({
         status: newStatus,
+        // ❌ REMOVED: onDuty field
         lastStatusUpdate: firestore.FieldValue.serverTimestamp(),
       });
       setDriverStatus(newStatus);
+
+      const statusConfig = getDriverStatusConfig(newStatus);
       Alert.alert(
         'Status Updated',
-        `You are now ${newStatus === 'active' ? 'ONLINE' : 'INACTIVE'}`,
+        `You are now ${statusConfig.label}`,
         [{ text: 'OK' }]
       );
-      if (newStatus === 'active' && driverOnDuty && currentTripId) {
+
+      if (newStatus === DRIVER_STATUS.AVAILABLE && driverStatus === DRIVER_STATUS.ON_TRIP && currentTripId) {
         Alert.alert(
           'Active Duty Found',
           `You have an active duty. Would you like to continue?`,
@@ -383,26 +402,21 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
 
   const navigateBasedOnTripStatus = (tripStatus: string | null) => {
     if (!currentTripId) return;
-    switch (tripStatus) {
-      case 'vehicle_check':
-        navigation.navigate('VehicleCheck', { tripId: currentTripId });
-        break;
-      case 'boarding':
-        navigation.navigate('Boarding', { tripId: currentTripId });
-        break;
-      case 'in-progress':
-        navigation.navigate('Route', { tripId: currentTripId });
-        break;
-      default:
-        navigation.navigate('VehicleCheck', { tripId: currentTripId });
+
+    if (tripStatus === TRIP_STATUS.SCHEDULED) {
+      navigation.navigate('VehicleCheck', { tripId: currentTripId });
+    } else if (tripStatus === TRIP_STATUS.IN_PROGRESS) {
+      navigation.navigate('Route', { tripId: currentTripId });
+    } else {
+      navigation.navigate('VehicleCheck', { tripId: currentTripId });
     }
   };
 
-  // Start duty logic
+  // ✅ Updated: Start duty with standardized statuses
   const handleStartDuty = async (dutyId: string) => {
     if (!user || !driverUid) return;
 
-    if (driverStatus !== 'active') {
+    if (driverStatus !== DRIVER_STATUS.AVAILABLE) {
       Alert.alert('Cannot Start Duty', 'Please go online first before starting a duty.');
       return;
     }
@@ -410,7 +424,7 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
     const duty = allDuties.find(d => d.id === dutyId);
     if (!duty) return;
 
-    if (hasActiveTrip() && duty.status !== 'ACTIVE' && duty.status !== 'VEHICLE_CHECK' && duty.status !== 'BOARDING') {
+    if (hasActiveTrip()) {
       Alert.alert(
         'Cannot Start Duty',
         'You already have an active trip. Please complete or end that trip first.'
@@ -418,13 +432,12 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
       return;
     }
 
-    if (duty.status === 'ACTIVE' || duty.status === 'VEHICLE_CHECK' || duty.status === 'BOARDING') {
+    if (duty.status === TRIP_STATUS.IN_PROGRESS) {
       navigateBasedOnTripStatus(currentTripStatus);
       return;
     }
 
-    // ✅ FIX 2: Use current duty's start time
-    if (duty.status === 'UPCOMING') {
+    if (duty.status === TRIP_STATUS.SCHEDULED) {
       const canStart = canStartTrip(duty.startTime);
       if (!canStart) {
         const timeLeftMsg = calculateTimeLeft(duty.startTime);
@@ -441,15 +454,14 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
     if (!busAvailable) return;
 
     const getButtonText = () => {
-      if (duty.status === 'VEHICLE_CHECK') return 'Continue Vehicle Check';
-      if (duty.status === 'BOARDING') return 'Continue Boarding';
-      if (duty.status === 'ACTIVE') return 'Go to Route';
+      if (duty.status === TRIP_STATUS.SCHEDULED) return 'Start Duty';
+      if (duty.status === TRIP_STATUS.IN_PROGRESS) return 'Go to Route';
       return 'Start Duty';
     };
 
     Alert.alert(
-      duty.status === 'VEHICLE_CHECK' || duty.status === 'BOARDING' || duty.status === 'ACTIVE' ? 'Resume Duty' : 'Start Duty',
-      `${getButtonText()} for ${duty.busNumber} - ${duty.routeName}?\n\nTime: ${duty.timeSlot}\nPassengers: ${duty.passengers}`,
+      duty.status === TRIP_STATUS.IN_PROGRESS ? 'Resume Duty' : 'Start Duty',
+      `${getButtonText()} for ${duty.busNumber} - ${duty.routeName}?\n\nDate: ${duty.date}\nTime: ${duty.timeSlot}\nPassengers: ${duty.passengers}`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -457,58 +469,44 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
           onPress: async () => {
             try {
               const batch = firestore().batch();
-              let newTripStatus = '';
-              let nextScreen: keyof RootDrawerParamList = 'VehicleCheck';
-              if (duty.status === 'UPCOMING') {
-                newTripStatus = 'vehicle_check';
-                nextScreen = 'VehicleCheck';
-              } else if (duty.status === 'VEHICLE_CHECK') {
-                newTripStatus = 'vehicle_check';
-                nextScreen = 'VehicleCheck';
-              } else if (duty.status === 'BOARDING') {
-                newTripStatus = 'boarding';
-                nextScreen = 'Boarding';
-              } else if (duty.status === 'ACTIVE') {
-                newTripStatus = 'in-progress';
-                nextScreen = 'Route';
-              } else {
-                newTripStatus = 'vehicle_check';
-                nextScreen = 'VehicleCheck';
-              }
 
+              // ✅ Trip status: SCHEDULED (vehicle check phase)
               const tripRef = firestore().collection('trips').doc(duty.id);
               batch.update(tripRef, {
-                status: newTripStatus,
-                ...(duty.status === 'UPCOMING' && { actualStartPrepTime: firestore.FieldValue.serverTimestamp() }),
+                status: TRIP_STATUS.SCHEDULED,
+                actualStartPrepTime: firestore.FieldValue.serverTimestamp(),
               });
 
+              // ✅ Bus status: ON_TRIP
               const busRef = firestore().collection('buses').doc(duty.busId);
               batch.update(busRef, {
-                status: 'active',
+                status: BUS_STATUS.ON_TRIP,
                 currentTripId: duty.id,
+                updatedAt: firestore.FieldValue.serverTimestamp(),
               });
 
+              // ✅ Driver status: ON_TRIP (no onDuty field)
               const driverRef = firestore().collection('drivers').doc(driverUid);
               batch.update(driverRef, {
-                onDuty: true,
+                status: DRIVER_STATUS.ON_TRIP,
                 currentTripId: duty.id,
-                status: 'active',
                 lastActiveTime: firestore.FieldValue.serverTimestamp(),
               });
 
               await batch.commit();
 
-              setDriverOnDuty(true);
+              setDriverStatus(DRIVER_STATUS.ON_TRIP);
               setCurrentTripId(duty.id);
-              setCurrentTripStatus(newTripStatus);
+              setCurrentTripStatus(TRIP_STATUS.SCHEDULED);
 
-              navigation.navigate(nextScreen, {
+              navigation.navigate('VehicleCheck', {
                 tripId: duty.id,
                 dutyDetails: {
                   busId: duty.busId,
                   busNumber: duty.busNumber,
                   routeName: duty.routeName,
                   timeSlot: duty.timeSlot,
+                  date: duty.date,
                   from: duty.from,
                   to: duty.to,
                   distance: duty.distance
@@ -524,10 +522,11 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
     );
   };
 
+  // ✅ Updated: End duty with standardized statuses
   const handleEndDuty = async () => {
     if (!user || !driverUid) return;
 
-    if (!driverOnDuty || !currentTripId) {
+    if (driverStatus !== DRIVER_STATUS.ON_TRIP || !currentTripId) {
       Alert.alert('No Active Duty', 'You are not currently on any active duty.');
       return;
     }
@@ -540,66 +539,41 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
 
     Alert.alert(
       'End Duty',
-      `Are you sure you want to end duty for ${activeDuty.routeName}?\n\nThis will:\n• End your current duty\n• Calculate trip summary\n• Return to dashboard`,
+      `Are you sure you want to end duty for ${activeDuty.routeName}?\n\nDate: ${activeDuty.date}\nThis will:\n• End your current duty\n• Calculate trip summary\n• Return to dashboard`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'End Duty',
           onPress: async () => {
             try {
-              const estimatedEarnings = activeDuty.revenue ||
-                Math.round((activeDuty.bookedSeats || 0) * 50);
-              const today = new Date().toISOString().split('T')[0];
-              const dayName = new Date().toLocaleDateString('en-US', { weekday: 'short' });
-
               const batch = firestore().batch();
 
+              // ✅ Trip status: COMPLETED
               const tripRef = firestore().collection('trips').doc(activeDuty.id);
               batch.update(tripRef, {
-                status: 'completed',
+                status: TRIP_STATUS.COMPLETED,
                 actualEndTime: firestore.FieldValue.serverTimestamp(),
-                revenue: estimatedEarnings,
               });
 
+              // ✅ Bus status: AVAILABLE
               const busRef = firestore().collection('buses').doc(activeDuty.busId);
               batch.update(busRef, {
-                status: 'available',
+                status: BUS_STATUS.AVAILABLE,
                 currentTripId: firestore.FieldValue.delete(),
+                updatedAt: firestore.FieldValue.serverTimestamp(),
               });
 
+              // ✅ Driver status: AVAILABLE (no onDuty field)
               const driverRef = firestore().collection('drivers').doc(driverUid);
               batch.update(driverRef, {
-                onDuty: false,
+                status: DRIVER_STATUS.AVAILABLE,
                 currentTripId: firestore.FieldValue.delete(),
-                status: 'active',
                 totalRides: firestore.FieldValue.increment(1),
-                totalEarnings: firestore.FieldValue.increment(estimatedEarnings),
-                tripsToday: firestore.FieldValue.increment(1),
-                earningsToday: firestore.FieldValue.increment(estimatedEarnings),
-              });
-
-              const earningsRef = firestore().collection('driver_earnings').doc();
-              batch.set(earningsRef, {
-                driverId: driverUid,
-                tripId: activeDuty.id,
-                busId: activeDuty.busId,
-                routeId: activeDuty.routeId,
-                date: today,
-                dayOfWeek: dayName,
-                routeName: activeDuty.routeName,
-                busNumber: activeDuty.busNumber,
-                timestamp: firestore.FieldValue.serverTimestamp(),
-                total: estimatedEarnings,
-                baseFare: estimatedEarnings,
-                distanceFare: 0,
-                bonus: 0,
-                distance: activeDuty.distance || 0,
-                duration: 0,
               });
 
               await batch.commit();
 
-              setDriverOnDuty(false);
+              setDriverStatus(DRIVER_STATUS.AVAILABLE);
               setCurrentTripId(null);
               setCurrentTripStatus(null);
 
@@ -607,17 +581,11 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
                 'Duty Completed Successfully!',
                 `🚌 Bus: ${activeDuty.busNumber}\n` +
                 `📍 Route: ${activeDuty.routeName}\n` +
-                `🕒 Duration: ${activeDuty.timeSlot}\n` +
-                `👥 Passengers: ${activeDuty.passengers}\n` +
-                `💰 Earnings: PKR ${estimatedEarnings.toLocaleString()}\n\n` +
+                `📅 Date: ${activeDuty.date}\n` +
+                `🕒 Time: ${activeDuty.timeSlot}\n` +
+                `👥 Passengers: ${activeDuty.passengers}\n\n` +
                 `Trip summary has been saved to your records.`,
-                [
-                  {
-                    text: 'View Earnings',
-                    onPress: () => navigation.navigate('Earnings')
-                  },
-                  { text: 'OK' }
-                ]
+                [{ text: 'OK' }]
               );
             } catch (error) {
               console.error('Error ending duty:', error);
@@ -651,6 +619,16 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
                   timestamp: firestore.FieldValue.serverTimestamp(),
                   status: 'reported',
                 });
+
+                // ✅ Also update trip status to DELAYED
+                if (currentTripId) {
+                  await firestore().collection('trips').doc(currentTripId).update({
+                    status: TRIP_STATUS.DELAYED,
+                    updatedAt: firestore.FieldValue.serverTimestamp(),
+                  });
+                  setCurrentTripStatus(TRIP_STATUS.DELAYED);
+                }
+
                 Alert.alert('Success', 'Delay reported to passengers and dispatcher.');
               } catch (error) {
                 console.error('Error reporting delay:', error);
@@ -675,6 +653,15 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
                   timestamp: firestore.FieldValue.serverTimestamp(),
                   status: 'reported',
                 });
+
+                if (currentTripId) {
+                  await firestore().collection('trips').doc(currentTripId).update({
+                    status: TRIP_STATUS.DELAYED,
+                    updatedAt: firestore.FieldValue.serverTimestamp(),
+                  });
+                  setCurrentTripStatus(TRIP_STATUS.DELAYED);
+                }
+
                 Alert.alert('Success', 'Maintenance team has been notified.');
               } catch (error) {
                 console.error('Error reporting mechanical issue:', error);
@@ -699,6 +686,15 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
                   timestamp: firestore.FieldValue.serverTimestamp(),
                   status: 'reported',
                 });
+
+                if (currentTripId) {
+                  await firestore().collection('trips').doc(currentTripId).update({
+                    status: TRIP_STATUS.DELAYED,
+                    updatedAt: firestore.FieldValue.serverTimestamp(),
+                  });
+                  setCurrentTripStatus(TRIP_STATUS.DELAYED);
+                }
+
                 Alert.alert('Success', 'Weather delay reported to passengers.');
               } catch (error) {
                 console.error('Error reporting weather delay:', error);
@@ -712,74 +708,16 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
     );
   };
 
-  const handleContactDispatcher = () => {
-    Alert.alert(
-      'Contact Dispatcher',
-      'Choose contact method:',
-      [
-        {
-          text: 'Call Dispatcher',
-          onPress: () => Alert.alert('Calling', 'Connecting to dispatcher...')
-        },
-        {
-          text: 'Send Message',
-          onPress: () => {
-            Alert.prompt(
-              'Message Dispatcher',
-              'Enter your message:',
-              [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                  text: 'Send',
-                  onPress: async (message) => {
-                    if (message && user && driverUid) {
-                      try {
-                        await firestore().collection('messages').add({
-                          senderId: driverUid,
-                          senderName: driverName,
-                          senderType: 'driver',
-                          receiverType: 'dispatcher',
-                          message: message,
-                          tripId: currentTripId,
-                          timestamp: firestore.FieldValue.serverTimestamp(),
-                          read: false,
-                        });
-                        Alert.alert('Sent', 'Your message has been sent.');
-                      } catch (error) {
-                        console.error('Error sending message:', error);
-                        Alert.alert('Error', 'Failed to send message');
-                      }
-                    }
-                  }
-                }
-              ]
-            );
-          }
-        },
-        {
-          text: 'Emergency Contact',
-          onPress: () => navigation.navigate('Emergency')
-        },
-        { text: 'Cancel', style: 'cancel' }
-      ]
-    );
-  };
-
-  // ✅ FIX 1: Show only next duty (slice 0,1)
   const quickActions = [
     {
       id: 1,
-      title: driverOnDuty ? 'Resume Duty' : 'Start Duty',
-      emoji: driverOnDuty ? '🔄' : '🚀',
+      title: driverStatus === DRIVER_STATUS.ON_TRIP ? 'Resume Duty' : 'Start Duty',
+      emoji: driverStatus === DRIVER_STATUS.ON_TRIP ? '🔄' : '🚀',
       action: () => {
-        if (driverOnDuty && currentTripId) {
+        if (driverStatus === DRIVER_STATUS.ON_TRIP && currentTripId) {
           navigateBasedOnTripStatus(currentTripStatus);
         } else {
-          const nextDuty = duties.find(d =>
-            d.status === 'UPCOMING' ||
-            d.status === 'VEHICLE_CHECK' ||
-            d.status === 'BOARDING'
-          );
+          const nextDuty = duties.find(d => d.status === TRIP_STATUS.SCHEDULED);
           if (nextDuty) {
             handleStartDuty(nextDuty.id);
           } else {
@@ -812,45 +750,25 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
     },
   ];
 
-  const getStatusColor = (status: Duty['status']) => {
-    switch (status) {
-      case 'ACTIVE': return '#4CAF50';
-      case 'VEHICLE_CHECK': return '#2196F3';
-      case 'BOARDING': return '#FF9800';
-      case 'UPCOMING': return '#2196F3';
-      case 'READY': return '#FF9800';
-      case 'COMPLETED': return '#9E9E9E';
-      default: return '#666666';
-    }
+  // ✅ Updated: Get status display using centralized config
+  const getStatusDisplay = (status: string) => {
+    return getTripStatusConfig(status);
   };
 
-  const getStatusEmoji = (status: Duty['status']) => {
-    switch (status) {
-      case 'ACTIVE': return '🚌';
-      case 'VEHICLE_CHECK': return '🔧';
-      case 'BOARDING': return '👥';
-      case 'UPCOMING': return '⏰';
-      case 'READY': return '✅';
-      case 'COMPLETED': return '🏁';
-      default: return '🔘';
-    }
-  };
-
-  const getButtonText = (status: Duty['status'], duty: Duty): string => {
-    if (driverOnDuty && status === 'ACTIVE') return 'GO TO ROUTE';
-    if (driverOnDuty && status === 'VEHICLE_CHECK') return 'RESUME CHECK';
-    if (driverOnDuty && status === 'BOARDING') return 'RESUME BOARDING';
-    if (status === 'COMPLETED') return 'COMPLETED';
-    if (status === 'UPCOMING') {
+  const getButtonText = (status: string, duty: Duty): string => {
+    if (driverStatus === DRIVER_STATUS.ON_TRIP && status === TRIP_STATUS.IN_PROGRESS) return 'GO TO ROUTE';
+    if (driverStatus === DRIVER_STATUS.ON_TRIP && status === TRIP_STATUS.SCHEDULED) return 'RESUME CHECK';
+    if (status === TRIP_STATUS.COMPLETED) return 'COMPLETED';
+    if (status === TRIP_STATUS.SCHEDULED) {
       const canStart = canStartTrip(duty.startTime);
       return canStart ? 'START DUTY' : 'WAITING';
     }
     return 'START DUTY';
   };
 
-  const isButtonDisabled = (status: Duty['status'], duty: Duty): boolean => {
-    if (status === 'COMPLETED') return true;
-    if (status === 'UPCOMING') {
+  const isButtonDisabled = (status: string, duty: Duty): boolean => {
+    if (status === TRIP_STATUS.COMPLETED) return true;
+    if (status === TRIP_STATUS.SCHEDULED) {
       const canStart = canStartTrip(duty.startTime);
       return !canStart;
     }
@@ -858,12 +776,13 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
   };
 
   const renderDutyCard = (duty: Duty) => {
-    const isActive = duty.status === 'ACTIVE' || duty.status === 'VEHICLE_CHECK' || duty.status === 'BOARDING';
+    const isActive = duty.status === TRIP_STATUS.IN_PROGRESS ||
+                     (driverStatus === DRIVER_STATUS.ON_TRIP && currentTripId === duty.id);
     const buttonText = getButtonText(duty.status, duty);
     const disabled = isButtonDisabled(duty.status, duty);
     const timeLeftText = timeLeft[duty.id] || '';
-    const canStart = canStartDuty[duty.id] || false;
     const isLate = timeLeftText.includes('Late');
+    const statusConfig = getStatusDisplay(duty.status);
 
     return (
       <View key={duty.id} style={[
@@ -876,9 +795,9 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
             <Text style={styles.busNumber}>{duty.busNumber}</Text>
             <Text style={styles.busModel}>{duty.busModel}</Text>
           </View>
-          <View style={[styles.statusBadge, { backgroundColor: getStatusColor(duty.status) + '20' }]}>
-            <Text style={[styles.statusText, { color: getStatusColor(duty.status) }]}>
-              {getStatusEmoji(duty.status)} {duty.status}
+          <View style={[styles.statusBadge, { backgroundColor: statusConfig.color + '20' }]}>
+            <Text style={[styles.statusText, { color: statusConfig.color }]}>
+              {statusConfig.icon} {statusConfig.label}
             </Text>
           </View>
         </View>
@@ -888,8 +807,9 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
           {duty.from && duty.to && (
             <Text style={styles.routeDetails}>🔄 {duty.from} → {duty.to}</Text>
           )}
+          <Text style={styles.dateInfo}>📅 {duty.date}</Text>
           <Text style={styles.timeSlot}>🕒 {duty.timeSlot}</Text>
-          {duty.status === 'UPCOMING' && timeLeftText && (
+          {duty.status === TRIP_STATUS.SCHEDULED && timeLeftText && (
             <Text style={[styles.countdownText, isLate && styles.lateText]}>
               ⏰ {timeLeftText}
             </Text>
@@ -904,14 +824,13 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
           <TouchableOpacity
             style={[
               styles.actionButton,
-              duty.status === 'ACTIVE' ? styles.activeButton :
-              duty.status === 'VEHICLE_CHECK' ? styles.vehicleCheckButton :
-              duty.status === 'BOARDING' ? styles.boardingButton :
+              duty.status === TRIP_STATUS.IN_PROGRESS ? styles.activeButton :
+              duty.status === TRIP_STATUS.SCHEDULED && driverStatus === DRIVER_STATUS.ON_TRIP ? styles.vehicleCheckButton :
               styles.startButton,
               disabled && styles.disabledButton
             ]}
             onPress={() => {
-              if (disabled && duty.status === 'UPCOMING') {
+              if (disabled && duty.status === TRIP_STATUS.SCHEDULED) {
                 Alert.alert(
                   'Cannot Start Yet',
                   `You can start duty 15 minutes before departure.\n\n${timeLeftText}`,
@@ -925,7 +844,8 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
           >
             <Text style={[
               styles.actionButtonText,
-              (duty.status === 'ACTIVE' || duty.status === 'VEHICLE_CHECK' || duty.status === 'BOARDING') && styles.activeButtonText,
+              (duty.status === TRIP_STATUS.IN_PROGRESS ||
+               (duty.status === TRIP_STATUS.SCHEDULED && driverStatus === DRIVER_STATUS.ON_TRIP)) && styles.activeButtonText,
               disabled && styles.disabledButtonText
             ]}>
               {buttonText}
@@ -938,25 +858,13 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
               Alert.alert(
                 'Duty Details',
                 `🚌 Bus: ${duty.busNumber}\n` +
-                `📱 Model: ${duty.busModel}\n` +
                 `📍 Route: ${duty.routeName}\n` +
-                `🔄 From/To: ${duty.from || 'N/A'} → ${duty.to || 'N/A'}\n` +
+                `📅 Date: ${duty.date}\n` +
                 `🕒 Time: ${duty.timeSlot}\n` +
                 `👥 Passengers: ${duty.passengers}\n` +
-                `📊 Status: ${duty.status}\n` +
-                `📏 Distance: ${duty.distance || 'N/A'}\n` +
+                `📊 Status: ${statusConfig.label}\n` +
                 (timeLeftText ? `⏰ ${timeLeftText}\n` : ''),
-                [
-                  { text: 'Close', style: 'cancel' },
-                  {
-                    text: buttonText !== 'COMPLETED' ? (buttonText === 'WAITING' ? 'Wait for Start Time' : buttonText) : 'Close',
-                    onPress: () => {
-                      if (!disabled && buttonText !== 'COMPLETED' && buttonText !== 'WAITING') {
-                        handleStartDuty(duty.id);
-                      }
-                    }
-                  }
-                ]
+                [{ text: 'Close', style: 'cancel' }]
               );
             }}
           >
@@ -969,74 +877,175 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
+    setTimeout(() => setRefreshing(false), 1000);
   }, []);
 
   const displayDuties = showAllDuties ? allDuties : duties;
 
-  // Load driver data and trips
+  // ✅ MAIN: Setup listeners with proper cleanup - UPDATED
   useEffect(() => {
     if (!user) return;
 
-    const fetchDriverData = async () => {
+    isMountedRef.current = true;
+
+    const setupListeners = async () => {
       try {
-        setLoading(true);
         const actualDriverId = await getDriverUid(user.uid);
 
+        if (!isMountedRef.current) return;
+
         const userDoc = await firestore().collection('users').doc(user.uid).get();
-        if (userDoc.exists) {
+        if (userDoc.exists && isMountedRef.current) {
           setDriverName(userDoc.data()?.fullName || 'Driver');
+        }
+
+        if (driverUnsubscribeRef.current) {
+          driverUnsubscribeRef.current();
         }
 
         const driverUnsubscribe = firestore()
           .collection('drivers')
           .doc(actualDriverId)
           .onSnapshot((doc) => {
+            if (!isMountedRef.current) return;
             if (doc.exists) {
               const driverData = doc.data();
-              setDriverStatus(driverData?.status || 'inactive');
-              setDriverOnDuty(driverData?.onDuty || false);
+
+              // ✅ Map old status to new if needed
+              let status = driverData?.status || DRIVER_STATUS.OFFLINE;
+              if (status === 'active' || status === 'online') status = DRIVER_STATUS.AVAILABLE;
+              if (status === 'on-duty') status = DRIVER_STATUS.ON_TRIP;
+              if (status === 'inactive' || status === 'offline') status = DRIVER_STATUS.OFFLINE;
+
+              setDriverStatus(status);
+              // ❌ No longer using onDuty
               setCurrentTripId(driverData?.currentTripId || null);
 
               if (driverData?.currentTripId) {
                 firestore().collection('trips').doc(driverData.currentTripId).get()
                   .then(tripDoc => {
-                    if (tripDoc.exists) setCurrentTripStatus(tripDoc.data()?.status || null);
+                    if (isMountedRef.current && tripDoc.exists) {
+                      const tripStatus = tripDoc.data()?.status || null;
+                      // Map to standardized
+                      if (tripStatus === 'active' || tripStatus === 'on-time') {
+                        setCurrentTripStatus(TRIP_STATUS.IN_PROGRESS);
+                      } else if (tripStatus === 'upcoming' || tripStatus === 'scheduled') {
+                        setCurrentTripStatus(TRIP_STATUS.SCHEDULED);
+                      } else {
+                        setCurrentTripStatus(tripStatus);
+                      }
+                    }
                   })
                   .catch(err => console.error('Error fetching trip status:', err));
-              } else {
+              } else if (isMountedRef.current) {
                 setCurrentTripStatus(null);
               }
 
-              setDriverStats({
+              setDriverStats(prev => ({
+                ...prev,
                 totalTrips: driverData?.totalRides || 0,
-                totalEarnings: driverData?.totalEarnings || 0,
-                todayTrips: driverData?.tripsToday || 0,
-                todayEarnings: driverData?.earningsToday || 0,
                 averageRating: driverData?.rating || 0,
                 totalReviews: driverData?.totalRatings || 0,
                 onlineHours: driverData?.onlineHours || 0,
-              });
+              }));
             }
           });
 
-        listenersRef.current.push(driverUnsubscribe);
+        driverUnsubscribeRef.current = driverUnsubscribe;
 
-        const { allTrips, todayTrips } = await fetchTodayTrips(actualDriverId);
-        // ✅ FIX 1: Only show next duty (first upcoming)
-        setAllDuties(allTrips);
-        setDuties(todayTrips.slice(0, 1));
-        setLoading(false);
-        setRefreshing(false);
+        if (tripsUnsubscribeRef.current) {
+          tripsUnsubscribeRef.current();
+        }
+
+        const tripsUnsubscribe = firestore()
+          .collection('trips')
+          .where('driverId', '==', actualDriverId)
+          .onSnapshot((snapshot) => {
+            if (!isMountedRef.current) return;
+
+            const today = new Date();
+            const todayDate = today.toISOString().split('T')[0];
+            const todayDay = today.toLocaleDateString('en-US', { weekday: 'short' });
+
+            const allTripsData: Duty[] = [];
+            const todayTripsData: Duty[] = [];
+            let completedCount = 0;
+
+            snapshot.forEach(doc => {
+              const data = doc.data();
+              const duty = mapTripToDuty(doc);
+
+              allTripsData.push(duty);
+
+              const isValidToday = isTripValidForDate(data, todayDate, todayDay);
+              if (isValidToday) {
+                todayTripsData.push(duty);
+              }
+
+              if (duty.status === TRIP_STATUS.COMPLETED) {
+                completedCount++;
+              }
+            });
+
+            todayTripsData.sort((a, b) => a.startTime.localeCompare(b.startTime));
+            allTripsData.sort((a, b) => {
+              const aDate = a.startDate || '';
+              const bDate = b.startDate || '';
+              return bDate.localeCompare(aDate);
+            });
+
+            const timeLeftMap: { [key: string]: string } = {};
+            const canStartMap: { [key: string]: boolean } = {};
+            todayTripsData.forEach(trip => {
+              timeLeftMap[trip.id] = calculateTimeLeft(trip.startTime);
+              canStartMap[trip.id] = canStartTrip(trip.startTime);
+            });
+
+            if (isMountedRef.current) {
+              setTimeLeft(timeLeftMap);
+              setCanStartDuty(canStartMap);
+              setAllDuties(allTripsData);
+              setDuties(todayTripsData.slice(0, 1));
+              setDriverStats(prev => ({
+                ...prev,
+                totalTrips: completedCount,
+                todayTrips: todayTripsData.length,
+              }));
+              setLoading(false);
+            }
+          }, (error) => {
+            console.error('Error in trips listener:', error);
+            if (isMountedRef.current) {
+              setLoading(false);
+            }
+          });
+
+        tripsUnsubscribeRef.current = tripsUnsubscribe;
+
       } catch (error) {
-        console.error('Error fetching data:', error);
-        Alert.alert('Error', 'Failed to load driver data');
-        setLoading(false);
-        setRefreshing(false);
+        console.error('Error setting up listeners:', error);
+        if (isMountedRef.current) {
+          setLoading(false);
+        }
       }
     };
 
-    fetchDriverData();
-  }, [user, getDriverUid, fetchTodayTrips]);
+    setupListeners();
+
+    return () => {
+      isMountedRef.current = false;
+
+      if (driverUnsubscribeRef.current) {
+        driverUnsubscribeRef.current();
+        driverUnsubscribeRef.current = null;
+      }
+
+      if (tripsUnsubscribeRef.current) {
+        tripsUnsubscribeRef.current();
+        tripsUnsubscribeRef.current = null;
+      }
+    };
+  }, [user, getDriverUid]);
 
   if (loading) {
     return (
@@ -1046,6 +1055,10 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
       </View>
     );
   }
+
+  const driverStatusConfig = getDriverStatusConfig(driverStatus);
+  const isAvailable = driverStatus === DRIVER_STATUS.AVAILABLE;
+  const isOnTrip = driverStatus === DRIVER_STATUS.ON_TRIP;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -1064,20 +1077,20 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
             <View style={styles.statusRow}>
               <View style={[
                 styles.driverStatusBadge,
-                { backgroundColor: driverStatus === 'active' ? '#4CAF50' : '#FF9800' }
+                { backgroundColor: driverStatusConfig.color }
               ]}>
                 <Text style={styles.driverStatusText}>
-                  {driverStatus === 'active' ? '✅ ONLINE' : '⏸️ INACTIVE'}
+                  {driverStatusConfig.icon} {driverStatusConfig.label}
                 </Text>
               </View>
-              {driverOnDuty && (
-                <View style={[styles.driverStatusBadge, { backgroundColor: '#2196F3' }]}>
-                  <Text style={styles.driverStatusText}>🚌 ON DUTY</Text>
+              {isOnTrip && (
+                <View style={[styles.driverStatusBadge, { backgroundColor: BUS_STATUS_CONFIG[BUS_STATUS.ON_TRIP].color }]}>
+                  <Text style={styles.driverStatusText}>🚌 ON TRIP</Text>
                 </View>
               )}
               <TouchableOpacity onPress={toggleDriverStatus}>
                 <Text style={styles.toggleStatusText}>
-                  {driverStatus === 'active' ? 'Go Inactive' : 'Go Active'}
+                  {isAvailable ? 'Go Offline' : 'Go Online'}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -1103,11 +1116,13 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
             <Text style={styles.sectionTitle}>
               📋 {showAllDuties ? 'ALL DUTIES' : 'NEXT DUTY'} ({displayDuties.length})
             </Text>
-            <TouchableOpacity onPress={() => setShowAllDuties(!showAllDuties)}>
-              <Text style={styles.seeAllText}>
-                {showAllDuties ? 'SHOW LESS' : 'SEE ALL'}
-              </Text>
-            </TouchableOpacity>
+            {allDuties.length > 1 && (
+              <TouchableOpacity onPress={() => setShowAllDuties(!showAllDuties)}>
+                <Text style={styles.seeAllText}>
+                  {showAllDuties ? 'SHOW LESS' : 'SEE ALL'}
+                </Text>
+              </TouchableOpacity>
+            )}
           </View>
 
           {displayDuties.length > 0 ? (
@@ -1158,14 +1173,15 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
             </TouchableOpacity>
           </View>
 
-          {duties.filter(d => d.status === 'UPCOMING' || d.status === 'READY').length > 0 ? (
+          {duties.filter(d => d.status === TRIP_STATUS.SCHEDULED).length > 0 ? (
             duties
-              .filter(d => d.status === 'UPCOMING' || d.status === 'READY')
+              .filter(d => d.status === TRIP_STATUS.SCHEDULED)
               .slice(0, 3)
               .map(duty => (
                 <View key={duty.id} style={styles.upcomingItem}>
                   <View style={styles.upcomingItemLeft}>
                     <Text style={styles.upcomingItemTime}>{duty.startTime}</Text>
+                    <Text style={styles.upcomingItemDate}>{duty.date}</Text>
                     <Text style={styles.upcomingItemRoute}>{duty.routeName}</Text>
                     <Text style={styles.upcomingItemBus}>{duty.busNumber}</Text>
                     {duty.from && duty.to && (
@@ -1180,11 +1196,11 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
                   <TouchableOpacity
                     style={[
                       styles.upcomingItemButton,
-                      (driverStatus !== 'active' || !canStartDuty[duty.id]) && styles.disabledButton
+                      (!isAvailable || !canStartDuty[duty.id]) && styles.disabledButton
                     ]}
                     onPress={() => {
-                      if (driverStatus !== 'active') {
-                        Alert.alert('Cannot Start', 'Please go active first.');
+                      if (!isAvailable) {
+                        Alert.alert('Cannot Start', 'Please go online first.');
                         return;
                       }
                       if (!canStartDuty[duty.id]) {
@@ -1193,7 +1209,7 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
                       }
                       handleStartDuty(duty.id);
                     }}
-                    disabled={driverStatus !== 'active' || !canStartDuty[duty.id]}
+                    disabled={!isAvailable || !canStartDuty[duty.id]}
                   >
                     <Text style={styles.upcomingItemButtonText}>
                       {canStartDuty[duty.id] ? 'START' : 'WAIT'}
@@ -1210,38 +1226,21 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
 
         {/* Stats Section */}
         <View style={styles.statsSection}>
-          <TouchableOpacity
-            style={styles.statCard}
-            onPress={() => navigation.navigate('Earnings')}
-          >
+          <View style={styles.statCard}>
             <Text style={styles.statValue}>{driverStats.todayTrips}</Text>
             <Text style={styles.statLabel}>Today's Trips</Text>
-          </TouchableOpacity>
+          </View>
 
-          <TouchableOpacity
-            style={styles.statCard}
-            onPress={() => navigation.navigate('Earnings')}
-          >
-            <Text style={styles.statValue}>PKR {driverStats.todayEarnings.toLocaleString()}</Text>
-            <Text style={styles.statLabel}>Today's Earnings</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.statCard}
-            onPress={() => navigation.navigate('Earnings')}
-          >
+          <View style={styles.statCard}>
             <Text style={styles.statValue}>{driverStats.totalTrips}</Text>
             <Text style={styles.statLabel}>Total Trips</Text>
-          </TouchableOpacity>
+          </View>
 
-          <TouchableOpacity
-            style={styles.statCard}
-            onPress={() => Alert.alert('Rating', `Average rating: ${driverStats.averageRating.toFixed(1)} from ${driverStats.totalReviews} reviews`)}
-          >
+          <View style={styles.statCard}>
             <Text style={styles.statValue}>{driverStats.averageRating.toFixed(1)}</Text>
             <Text style={styles.statLabel}>Rating</Text>
             <Text style={styles.statSubtext}>({driverStats.totalReviews})</Text>
-          </TouchableOpacity>
+          </View>
         </View>
 
         {/* Quick Navigation */}
@@ -1259,7 +1258,7 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
             <TouchableOpacity
               style={styles.quickNavItem}
               onPress={() => {
-                if (driverOnDuty && currentTripId) {
+                if (isOnTrip && currentTripId) {
                   navigateBasedOnTripStatus(currentTripStatus);
                 } else {
                   Alert.alert('No Active Duty', 'Start a duty first to access route navigation.');
@@ -1292,7 +1291,7 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
   );
 };
 
-// Styles remain the same as before (unchanged)
+// Styles remain unchanged
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -1481,6 +1480,12 @@ const styles = StyleSheet.create({
     color: '#4A90E2',
     marginBottom: 4,
   },
+  dateInfo: {
+    fontSize: 14,
+    color: '#666666',
+    marginBottom: 4,
+    fontWeight: '500',
+  },
   timeSlot: {
     fontSize: 14,
     color: '#666666',
@@ -1503,6 +1508,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#999999',
     marginTop: 4,
+  },
+  repeatType: {
+    fontSize: 11,
+    color: '#4A90E2',
+    marginTop: 4,
+    fontStyle: 'italic',
   },
   dutyActions: {
     flexDirection: 'row',
@@ -1604,6 +1615,11 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#1A237E',
   },
+  upcomingItemDate: {
+    fontSize: 12,
+    color: '#666666',
+    marginTop: 2,
+  },
   upcomingItemRoute: {
     fontSize: 14,
     color: '#666666',
@@ -1654,7 +1670,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   statCard: {
-    width: '48%',
+    width: '31%',
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
     padding: 16,

@@ -4,6 +4,7 @@
     "D:\\MyProjects\\ZuGo2\\node_modules\\@react-native-clipboard\\clipboard\\android\\build\\generated\\source\\codegen\\jni\\CMakeLists.txt",
     "D:\\MyProjects\\ZuGo2\\node_modules\\@react-native-community\\datetimepicker\\android\\build\\generated\\source\\codegen\\jni\\CMakeLists.txt",
     "D:\\MyProjects\\ZuGo2\\node_modules\\@react-native-community\\geolocation\\android\\build\\generated\\source\\codegen\\jni\\CMakeLists.txt",
+    "D:\\MyProjects\\ZuGo2\\node_modules\\@react-native-community\\netinfo\\android\\build\\generated\\source\\codegen\\jni\\CMakeLists.txt",
     "D:\\MyProjects\\ZuGo2\\node_modules\\react-native-gesture-handler\\android\\build\\generated\\source\\codegen\\jni\\CMakeLists.txt",
     "D:\\MyProjects\\ZuGo2\\node_modules\\react-native-image-picker\\android\\build\\generated\\source\\codegen\\jni\\CMakeLists.txt",
     "D:\\MyProjects\\ZuGo2\\node_modules\\react-native-reanimated\\android\\build\\generated\\source\\codegen\\jni\\CMakeLists.txt",
@@ -11,6 +12,7 @@
     "D:\\MyProjects\\ZuGo2\\node_modules\\react-native-screens\\android\\src\\main\\jni\\CMakeLists.txt",
     "D:\\MyProjects\\ZuGo2\\node_modules\\react-native-sound\\android\\build\\generated\\source\\codegen\\jni\\CMakeLists.txt",
     "D:\\MyProjects\\ZuGo2\\node_modules\\react-native-vector-icons\\android\\build\\generated\\source\\codegen\\jni\\CMakeLists.txt",
+    "D:\\MyProjects\\ZuGo2\\node_modules\\react-native-webview\\android\\build\\generated\\source\\codegen\\jni\\CMakeLists.txt",
     "D:\\MyProjects\\ZuGo2\\node_modules\\react-native-worklets\\android\\build\\generated\\source\\codegen\\jni\\CMakeLists.txt",
     "D:\\MyProjects\\ZuGo2\\node_modules\\react-native\\ReactAndroid\\cmake-utils\\default-app-setup\\CMakeLists.txt"
   ],
@@ -46,6 +48,16 @@
       "toolchain": "toolchain",
       "abi": "x86",
       "artifactName": "react_codegen_RNCGeolocationSpec"
+    },
+    "react_codegen_RNCNetInfoSpec::@c36c96bfd5b5770618a5": {
+      "toolchain": "toolchain",
+      "abi": "x86",
+      "artifactName": "react_codegen_RNCNetInfoSpec"
+    },
+    "react_codegen_RNCWebViewSpec::@eb48929f9f7453740a6c": {
+      "toolchain": "toolchain",
+      "abi": "x86",
+      "artifactName": "react_codegen_RNCWebViewSpec"
     },
     "react_codegen_RNDateTimePickerCGen::@59b70ddc31ba2f8ef1d2": {
       "toolchain": "toolchain",

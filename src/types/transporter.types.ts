@@ -1,60 +1,61 @@
 // src/types/transporter.types.ts
-
-// Import Firebase Timestamp type
 import firestore from '@react-native-firebase/firestore';
+import { BusStatus } from './fleet.types';
+import { DriverStatus } from './driver.types';
+import { TripStatus } from './operations.types';
 
-// 🔥 BUS TYPE
-export type Bus = {
+// 🔥 BUS TYPE (Dashboard version)
+export type DashboardBus = {
   id: string;                    // Document ID
-  number: string;                 // Bus number (e.g., "BUS-001")
-  registration: string;           // Registration number
-  status: 'active' | 'maintenance' | 'inactive';
-  driverId?: string;              // Optional - assigned driver ID
-  driverName?: string;            // Optional - for display
-  lastMaintenance: firestore.Timestamp;  // Firebase Timestamp
+  number: string;                // Bus number (e.g., "BUS-001")
+  registration: string;          // Registration number
+  status: BusStatus;
+  driverId?: string;             // Optional - assigned driver ID
+  driverName?: string;           // Optional - for display
+  lastMaintenance: firestore.Timestamp;
   nextMaintenanceDue?: firestore.Timestamp;
-  transporterId: string;          // Who owns this bus
+  transporterId: string;
   createdAt: firestore.Timestamp;
   updatedAt?: firestore.Timestamp;
 };
 
-// 🔥 DRIVER TYPE
-export type Driver = {
+// 🔥 DRIVER TYPE (Dashboard version)
+export type DashboardDriver = {
   id: string;
   name: string;
   email: string;
   phone: string;
-  status: 'on-duty' | 'online' | 'offline';
+  status: DriverStatus;
   busAssignedId?: string;
   busNumber?: string;
-  rating: number;                 // 0-5 rating
+  rating: number;               // 0-5 rating
   totalTrips: number;
   transporterId: string;
   joinedAt: firestore.Timestamp;
   updatedAt?: firestore.Timestamp;
 };
 
-// 🔥 TRIP TYPE
-export type Trip = {
+// 🔥 TRIP TYPE (Dashboard version)
+export type DashboardTrip = {
   id: string;
-  time: firestore.Timestamp;      // Departure time
+  time: firestore.Timestamp;    // Departure time
   route: string;
   routeId: string;
   busId: string;
   busNumber: string;
   driverId: string;
   driverName: string;
-  status: 'on-time' | 'delayed' | 'upcoming' | 'completed' | 'cancelled';
+  status: TripStatus;
   passengers: number;
   revenue: number;
   transporterId: string;
-  date: firestore.Timestamp;       // Trip date
+  date: firestore.Timestamp;    // Trip date
   createdAt: firestore.Timestamp;
   updatedAt?: firestore.Timestamp;
 };
 
 // 🔥 NOTIFICATION TYPE
-export type Notification = {
+export type TransporterNotification = {
   id: string;
   type: 'maintenance' | 'success' | 'warning' | 'info' | 'emergency';
   title: string;
@@ -69,7 +70,7 @@ export type Notification = {
 };
 
 // 🔥 ALERT TYPE
-export type Alert = {
+export type TransporterAlert = {
   id: string;
   message: string;
   type: 'success' | 'warning' | 'error' | 'info';
@@ -81,19 +82,22 @@ export type Alert = {
 // 🔥 DASHBOARD STATS TYPE
 export type DashboardStats = {
   totalBuses: number;
-  activeBuses: number;
+  availableBuses: number;        // was activeBuses
+  onTripBuses: number;           // NEW
   maintenanceBuses: number;
   inactiveBuses: number;
   totalDrivers: number;
-  activeDrivers: number;
-  onlineDrivers: number;
+  availableDrivers: number;      // was activeDrivers/onlineDrivers
+  onTripDrivers: number;         // NEW
   offlineDrivers: number;
+  onLeaveDrivers: number;
+  suspendedDrivers: number;
   todayRevenue: number;
   todayTrips: number;
   completedTrips: number;
   delayedTrips: number;
-  upcomingTrips: number;
-  onTimePerformance: number;      // Percentage
+  scheduledTrips: number;        // was upcomingTrips
+  onTimePerformance: number;     // Percentage
   averageRating: number;
 };
 
@@ -108,13 +112,13 @@ export type ApiResponse<T> = {
 export type TripFilter = {
   startDate?: Date;
   endDate?: Date;
-  status?: Trip['status'];
+  status?: TripStatus;
   driverId?: string;
   busId?: string;
 };
 
 export type DriverFilter = {
-  status?: Driver['status'];
+  status?: DriverStatus;
   minRating?: number;
   searchQuery?: string;
 };

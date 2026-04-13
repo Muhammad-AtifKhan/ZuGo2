@@ -1,4 +1,4 @@
-// src/screens/transporter/FleetScreen.tsx - IMPROVED VERSION
+// src/screens/transporter/FleetScreen.tsx
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View,
@@ -13,7 +13,6 @@ import {
   FlatList,
   Modal,
   TextInput,
-  AlertButton,
   Platform,
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -27,159 +26,9 @@ import { Bus, BusStatus } from '../../types/fleet.types';
 
 // Constants
 import { COLORS, SIZES, SHADOWS } from '../../constants/theme';
+import { BUS_STATUS, BUS_STATUS_CONFIG, getBusStatusConfig } from '../../constants/status';
 
 type FleetScreenNavigationProp = StackNavigationProp<TransporterStackParamList, 'Fleet'>;
-
-// Driver Selection Modal Component (✅ Better UX than Alert)
-const DriverSelectionModal = ({
-  visible,
-  onClose,
-  onSelect,
-  onUnassign,
-  drivers,
-  busNumber,
-  currentDriverId,
-  loading
-}: {
-  visible: boolean;
-  onClose: () => void;
-  onSelect: (driverId: string, driverName: string) => void;
-  onUnassign: () => void;
-  drivers: Array<{ id: string; name: string; status: string; currentBusNumber?: string }>;
-  busNumber: string;
-  currentDriverId?: string | null;
-  loading?: boolean;
-}) => {
-  const [searchQuery, setSearchQuery] = useState('');
-
-  // Filter drivers based on search
-  const filteredDrivers = useMemo(() => {
-    if (!searchQuery.trim()) return drivers;
-    return drivers.filter(driver =>
-      driver.name.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-  }, [drivers, searchQuery]);
-
-  const getStatusColor = (status: string) => {
-    switch(status) {
-      case 'online': return COLORS.success;
-      case 'offline': return COLORS.danger;
-      case 'on-duty': return COLORS.warning;
-      default: return COLORS.textLight;
-    }
-  };
-
-  const getStatusIcon = (status: string) => {
-    switch(status) {
-      case 'online': return '🟢';
-      case 'offline': return '🔴';
-      case 'on-duty': return '🟡';
-      default: return '⚫';
-    }
-  };
-
-  return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="slide"
-      onRequestClose={onClose}
-    >
-      <View style={styles.modalOverlay}>
-        <View style={styles.driverModalContainer}>
-          <View style={styles.driverModalHeader}>
-            <Text style={styles.driverModalTitle}>👤 Assign Driver</Text>
-            <TouchableOpacity onPress={onClose} style={styles.driverModalClose}>
-              <Text style={styles.driverModalCloseText}>✕</Text>
-            </TouchableOpacity>
-          </View>
-
-          <Text style={styles.driverModalSubtitle}>
-            Bus: <Text style={styles.driverModalBusNumber}>{busNumber}</Text>
-          </Text>
-
-          {/* Search Bar */}
-          <View style={styles.driverSearchContainer}>
-            <Text style={styles.driverSearchIcon}>🔍</Text>
-            <TextInput
-              style={styles.driverSearchInput}
-              placeholder="Search drivers..."
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              placeholderTextColor={COLORS.textLight}
-            />
-          </View>
-
-          {/* Drivers List */}
-          <FlatList
-            data={filteredDrivers}
-            keyExtractor={(item) => item.id}
-            renderItem={({ item }) => (
-              <TouchableOpacity
-                style={[
-                  styles.driverItem,
-                  item.id === currentDriverId && styles.driverItemSelected
-                ]}
-                onPress={() => {
-                  if (item.status === 'on-duty') {
-                    Alert.alert(
-                      'Driver Unavailable',
-                      `${item.name} is currently ON-DUTY with an active trip. Please wait for the trip to end.`
-                    );
-                    return;
-                  }
-                  onSelect(item.id, item.name);
-                }}
-                disabled={loading}
-              >
-                <View style={styles.driverInfo}>
-                  <Text style={styles.driverName}>{item.name}</Text>
-                  {item.currentBusNumber && (
-                    <Text style={styles.driverBusInfo}>
-                      Currently on: {item.currentBusNumber}
-                    </Text>
-                  )}
-                </View>
-                <View style={[styles.driverStatus, { borderColor: getStatusColor(item.status) }]}>
-                  <Text style={styles.driverStatusText}>
-                    {getStatusIcon(item.status)} {item.status.toUpperCase()}
-                  </Text>
-                </View>
-              </TouchableOpacity>
-            )}
-            ListEmptyComponent={
-              <View style={styles.driverEmptyList}>
-                <Text style={styles.driverEmptyText}>No drivers found</Text>
-              </View>
-            }
-            contentContainerStyle={styles.driverListContent}
-            showsVerticalScrollIndicator={false}
-          />
-
-          {/* Action Buttons */}
-          <View style={styles.driverModalButtons}>
-            {currentDriverId && (
-              <TouchableOpacity
-                style={[styles.driverModalButton, styles.driverUnassignButton]}
-                onPress={onUnassign}
-                disabled={loading}
-              >
-                <Text style={styles.driverUnassignText}>Unassign Current Driver</Text>
-              </TouchableOpacity>
-            )}
-            <TouchableOpacity
-              style={[styles.driverModalButton, styles.driverCancelButton]}
-              onPress={onClose}
-              disabled={loading}
-            >
-              <Text style={styles.driverCancelText}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
-    </Modal>
-  );
-};
 
 // Maintenance Schedule Modal Component
 const MaintenanceScheduleModal = ({
@@ -259,26 +108,18 @@ const FleetScreen = () => {
   const [filter, setFilter] = useState<BusStatus | 'all'>('all');
   const [transporterName, setTransporterName] = useState('');
 
-  // Driver selection modal state
-  const [driverModal, setDriverModal] = useState({
-    visible: false,
-    bus: null as Bus | null,
-    drivers: [] as Array<{ id: string; name: string; status: string; currentBusNumber?: string }>,
-    loading: false,
-  });
-
   // Maintenance modal state
   const [maintenanceModal, setMaintenanceModal] = useState({
     visible: false,
     bus: null as Bus | null,
   });
 
-  // ✅ FIX: Use ref to prevent memory leaks
+  // Use ref to prevent memory leaks
   const listenersRef = useRef<(() => void)[]>([]);
 
   const user = auth().currentUser;
 
-  // ✅ FIX: Safe date comparison function
+  // Safe date comparison function
   const isDateExpired = (dateStr?: string | null): boolean => {
     if (!dateStr) return false;
     try {
@@ -290,7 +131,7 @@ const FleetScreen = () => {
     }
   };
 
-  // ✅ FIX: Check if date is within 30 days (for expiry warnings)
+  // Check if date is within 30 days (for expiry warnings)
   const isExpiringSoon = (dateStr?: string | null): boolean => {
     if (!dateStr) return false;
     try {
@@ -305,16 +146,16 @@ const FleetScreen = () => {
     }
   };
 
-  // Check if bus is on active trip - Optimized with isActive flag
+  // ✅ Check if bus is on active trip - using status field (no isActive flag)
   const checkBusOnTrip = async (busId: string): Promise<boolean> => {
     if (!user) return false;
 
     try {
-      // ✅ FIX: Using isActive flag for faster query
+      // ✅ Use status instead of isActive flag
       const activeTripsSnapshot = await firestore()
         .collection('trips')
         .where('busId', '==', busId)
-        .where('isActive', '==', true) // Add this field to trips collection
+        .where('status', 'in', ['in_progress', 'scheduled'])
         .limit(1)
         .get();
 
@@ -325,7 +166,7 @@ const FleetScreen = () => {
     }
   };
 
-  // 🔥 IMPORTANT: useEffect for opening AddBusScreen automatically
+  // Open AddBusScreen automatically
   useEffect(() => {
     const params = route.params as any;
     if (params?.openAddBus) {
@@ -363,26 +204,35 @@ const FleetScreen = () => {
 
     setLoading(true);
 
-    // ✅ FIX: Proper index handling
     const unsubscribe = firestore()
       .collection('buses')
       .where('transporterId', '==', user.uid)
       .orderBy('createdAt', 'desc')
       .onSnapshot(
         (snapshot) => {
-          const busesList = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data(),
-          })) as Bus[];
+          const busesList = snapshot.docs.map(doc => {
+            const data = doc.data();
+
+            // ✅ Map old status to new if needed (for backward compatibility)
+            let mappedStatus = data.status;
+            if (data.status === 'active') {
+              mappedStatus = BUS_STATUS.AVAILABLE;
+            }
+
+            return {
+              id: doc.id,
+              ...data,
+              status: mappedStatus,
+            } as Bus;
+          });
 
           setBuses(busesList);
           setLoading(false);
           setRefreshing(false);
 
-          // ✅ FIX: Check for expiring documents and show warnings
+          // Check for expiring documents
           busesList.forEach(bus => {
             if (isExpiringSoon(bus.insuranceExpiry)) {
-              // Show warning only once per session (you can implement a shown warnings array)
               console.log(`⚠️ Insurance expiring soon for bus ${bus.busNumber}`);
             }
             if (isExpiringSoon(bus.fitnessExpiry)) {
@@ -399,15 +249,7 @@ const FleetScreen = () => {
               'Please create the required index in Firebase Console:\n\n' +
               'Collection: buses\n' +
               'Fields: transporterId (Ascending), createdAt (Descending)',
-              [
-                { text: 'OK' },
-                {
-                  text: 'Open Console',
-                  onPress: () => {
-                    // Linking.openURL('https://console.firebase.google.com');
-                  }
-                }
-              ]
+              [{ text: 'OK' }]
             );
           } else {
             Alert.alert('Error', 'Failed to load buses. Please try again.');
@@ -424,21 +266,21 @@ const FleetScreen = () => {
     };
   }, [user]);
 
-  // ✅ FIX: Manual refresh with proper timeout
+  // Manual refresh
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    // Simulate refresh (data will come from listener)
     setTimeout(() => {
       setRefreshing(false);
     }, 1000);
   }, []);
 
-  // Stats calculation
+  // ✅ Stats calculation with new statuses
   const stats = useMemo(() => ({
     total: buses.length,
-    active: buses.filter(b => b.status === 'active').length,
-    maintenance: buses.filter(b => b.status === 'maintenance').length,
-    inactive: buses.filter(b => b.status === 'inactive').length,
+    available: buses.filter(b => b.status === BUS_STATUS.AVAILABLE).length,
+    onTrip: buses.filter(b => b.status === BUS_STATUS.ON_TRIP).length,
+    maintenance: buses.filter(b => b.status === BUS_STATUS.MAINTENANCE).length,
+    inactive: buses.filter(b => b.status === BUS_STATUS.INACTIVE).length,
     expiringSoon: buses.filter(b =>
       isExpiringSoon(b.insuranceExpiry) || isExpiringSoon(b.fitnessExpiry)
     ).length,
@@ -493,6 +335,8 @@ const FleetScreen = () => {
       if (fitnessExpiring) warningMessage += '• Fitness certificate expiring soon\n';
     }
 
+    const statusConfig = getBusStatusConfig(bus.status);
+
     Alert.alert(
       '🚌 Bus Details',
       `Bus Number: ${bus.busNumber}\n` +
@@ -502,7 +346,7 @@ const FleetScreen = () => {
       `Capacity: ${bus.capacity} seats\n` +
       `Fuel Type: ${bus.fuelType || 'N/A'}\n` +
       `Bus Type: ${bus.busType || 'Standard'}\n` +
-      `Status: ${bus.status.toUpperCase()}\n` +
+      `Status: ${statusConfig.icon} ${statusConfig.label}\n` +
       `Driver: ${bus.driverName || 'Not assigned'}\n` +
       `Insurance Expiry: ${formatDate(bus.insuranceExpiry)} ${insuranceExpired ? '❌ EXPIRED' : insuranceExpiring ? '⚠️ SOON' : ''}\n` +
       `Fitness Expiry: ${formatDate(bus.fitnessExpiry)} ${fitnessExpired ? '❌ EXPIRED' : fitnessExpiring ? '⚠️ SOON' : ''}` +
@@ -514,7 +358,7 @@ const FleetScreen = () => {
     );
   };
 
-  // ✅ FIX: Maintenance button with trip validation
+  // Maintenance button with trip validation
   const handleMaintenance = async (bus: Bus) => {
     if (!user) return;
 
@@ -559,7 +403,7 @@ const FleetScreen = () => {
 
       // Update bus status to maintenance
       batch.update(firestore().collection('buses').doc(bus.id), {
-        status: 'maintenance',
+        status: BUS_STATUS.MAINTENANCE,
         updatedAt: firestore.FieldValue.serverTimestamp(),
       });
 
@@ -613,7 +457,7 @@ const FleetScreen = () => {
                 .collection('buses')
                 .doc(bus.id)
                 .update({
-                  status: 'active',
+                  status: BUS_STATUS.AVAILABLE,
                   updatedAt: firestore.FieldValue.serverTimestamp(),
                 });
 
@@ -631,7 +475,7 @@ const FleetScreen = () => {
 
               Alert.alert(
                 '✅ Maintenance Completed',
-                'Bus is now ACTIVE and ready for service.'
+                'Bus is now AVAILABLE and ready for service.'
               );
             } catch (error) {
               console.error('Error logging maintenance:', error);
@@ -673,11 +517,11 @@ const FleetScreen = () => {
     }
   };
 
-  // ✅ FIXED: Activate/Deactivate button with trip validation
+  // ✅ Activate/Deactivate button with trip validation
   const handleChangeStatus = async (bus: Bus) => {
     if (!user) return;
 
-    if (bus.status === 'active') {
+    if (bus.status === BUS_STATUS.AVAILABLE) {
       // Check if bus is on trip before deactivating
       const isOnTrip = await checkBusOnTrip(bus.id);
       if (isOnTrip) {
@@ -702,7 +546,7 @@ const FleetScreen = () => {
 
                 // Deactivate bus
                 batch.update(firestore().collection('buses').doc(bus.id), {
-                  status: 'inactive',
+                  status: BUS_STATUS.INACTIVE,
                   updatedAt: firestore.FieldValue.serverTimestamp(),
                 });
 
@@ -726,25 +570,27 @@ const FleetScreen = () => {
           }
         ]
       );
-    } else {
+    } else if (bus.status === BUS_STATUS.INACTIVE || bus.status === BUS_STATUS.MAINTENANCE) {
+      const actionText = bus.status === BUS_STATUS.INACTIVE ? 'Activate' : 'Return to Service';
+
       Alert.alert(
-        '▶️ Activate Bus',
-        `Activate ${bus.busNumber} back to service?`,
+        `▶️ ${actionText}`,
+        `${actionText} ${bus.busNumber}?`,
         [
           { text: 'Cancel', style: 'cancel' },
           {
-            text: 'Activate',
+            text: actionText,
             onPress: async () => {
               try {
                 await firestore()
                   .collection('buses')
                   .doc(bus.id)
                   .update({
-                    status: 'active',
+                    status: BUS_STATUS.AVAILABLE,
                     updatedAt: firestore.FieldValue.serverTimestamp(),
                   });
 
-                Alert.alert('✅ Activated', `${bus.busNumber} is now active`);
+                Alert.alert('✅ Success', `${bus.busNumber} is now AVAILABLE`);
               } catch (error) {
                 console.error('Error activating bus:', error);
                 Alert.alert('Error', 'Failed to activate bus');
@@ -756,248 +602,9 @@ const FleetScreen = () => {
     }
   };
 
-  // ✅ FIXED: Open driver selection modal instead of Alert
-  const handleAssignDriver = async (bus: Bus) => {
-    if (!user) return;
-
-    // Check if bus is on trip
-    const isOnTrip = await checkBusOnTrip(bus.id);
-    if (isOnTrip) {
-      Alert.alert(
-        '⛔ Action Restricted',
-        `Cannot change driver while bus ${bus.busNumber} is on an active trip.\n\nPlease wait for the trip to complete.`
-      );
-      return;
-    }
-
-    // Cannot assign driver if bus is in maintenance
-    if (bus.status === 'maintenance') {
-      Alert.alert(
-        '⛔ Action Restricted',
-        `Cannot assign driver while bus is in MAINTENANCE status.\n\nPlease log maintenance as DONE first.`
-      );
-      return;
-    }
-
-    setDriverModal(prev => ({ ...prev, loading: true }));
-
-    try {
-      // Fetch all drivers
-      const driversSnapshot = await firestore()
-        .collection('drivers')
-        .where('transporterId', '==', user.uid)
-        .get();
-
-      if (driversSnapshot.empty) {
-        Alert.alert('No Drivers', 'No drivers found under your account.');
-        setDriverModal(prev => ({ ...prev, loading: false }));
-        return;
-      }
-
-      const drivers = driversSnapshot.docs.map(doc => {
-        const data = doc.data();
-        return {
-          id: doc.id,
-          name: data.fullName || 'Unknown',
-          status: data.status || 'offline',
-          currentBusNumber: data.busNumber,
-        };
-      });
-
-      setDriverModal({
-        visible: true,
-        bus: bus,
-        drivers: drivers,
-        loading: false,
-      });
-    } catch (error) {
-      console.error('Error fetching drivers:', error);
-      Alert.alert('Error', 'Failed to load drivers');
-      setDriverModal(prev => ({ ...prev, loading: false }));
-    }
-  };
-
-  // Handle driver selection from modal
-  const handleDriverSelect = async (driverId: string, driverName: string) => {
-    if (!user || !driverModal.bus) return;
-
-    const bus = driverModal.bus;
-    setDriverModal(prev => ({ ...prev, loading: true }));
-
-    try {
-      // Check if driver is already assigned to another bus
-      const driver = driverModal.drivers.find(d => d.id === driverId);
-
-      if (driver?.currentBusNumber && driver.currentBusNumber !== bus.busNumber) {
-        // Driver is assigned to another bus - ask for reassignment
-        Alert.alert(
-          'Driver Already Assigned',
-          `${driverName} is currently assigned to bus ${driver.currentBusNumber}. Do you want to reassign them to ${bus.busNumber}?`,
-          [
-            { text: 'Cancel', style: 'cancel' },
-            {
-              text: 'Reassign',
-              onPress: async () => {
-                try {
-                  const batch = firestore().batch();
-
-                  // Find the bus this driver is currently assigned to
-                  const previousBusSnapshot = await firestore()
-                    .collection('buses')
-                    .where('driverId', '==', driverId)
-                    .limit(1)
-                    .get();
-
-                  if (!previousBusSnapshot.empty) {
-                    const previousBus = previousBusSnapshot.docs[0];
-                    batch.update(previousBus.ref, {
-                      driverId: null,
-                      driverName: null,
-                      updatedAt: firestore.FieldValue.serverTimestamp(),
-                    });
-                  }
-
-                  // If target bus already had a driver, clear that driver's assignment
-                  if (bus.driverId && bus.driverId !== driverId) {
-                    const prevDriverRef = firestore().collection('drivers').doc(bus.driverId);
-                    batch.update(prevDriverRef, {
-                      busAssignedId: null,
-                      busNumber: null,
-                      vehicleAssigned: '',
-                      updatedAt: firestore.FieldValue.serverTimestamp(),
-                    });
-                  }
-
-                  // Update target bus
-                  const busRef = firestore().collection('buses').doc(bus.id);
-                  batch.update(busRef, {
-                    driverId: driverId,
-                    driverName: driverName,
-                    updatedAt: firestore.FieldValue.serverTimestamp(),
-                  });
-
-                  // Update new driver
-                  const driverRef = firestore().collection('drivers').doc(driverId);
-                  batch.update(driverRef, {
-                    busAssignedId: bus.id,
-                    busNumber: bus.busNumber,
-                    vehicleAssigned: bus.busNumber,
-                    updatedAt: firestore.FieldValue.serverTimestamp(),
-                  });
-
-                  await batch.commit();
-                  Alert.alert('✅ Success', `${driverName} has been reassigned to ${bus.busNumber}`);
-                  setDriverModal({ visible: false, bus: null, drivers: [], loading: false });
-                } catch (error) {
-                  console.error('Error during reassignment:', error);
-                  Alert.alert('Error', 'Failed to reassign driver.');
-                }
-              }
-            }
-          ]
-        );
-      } else if (driverId === bus.driverId) {
-        Alert.alert('Already Assigned', `${driverName} is already assigned to this bus.`);
-      } else {
-        // New assignment - no conflict
-        try {
-          const batch = firestore().batch();
-
-          // If bus already has a driver, clear that driver's assignment
-          if (bus.driverId) {
-            const prevDriverRef = firestore().collection('drivers').doc(bus.driverId);
-            batch.update(prevDriverRef, {
-              busAssignedId: null,
-              busNumber: null,
-              vehicleAssigned: '',
-              updatedAt: firestore.FieldValue.serverTimestamp(),
-            });
-          }
-
-          // Update bus
-          const busRef = firestore().collection('buses').doc(bus.id);
-          batch.update(busRef, {
-            driverId: driverId,
-            driverName: driverName,
-            updatedAt: firestore.FieldValue.serverTimestamp(),
-          });
-
-          // Update driver
-          const driverRef = firestore().collection('drivers').doc(driverId);
-          batch.update(driverRef, {
-            busAssignedId: bus.id,
-            busNumber: bus.busNumber,
-            vehicleAssigned: bus.busNumber,
-            updatedAt: firestore.FieldValue.serverTimestamp(),
-          });
-
-          await batch.commit();
-          Alert.alert('✅ Success', `${driverName} has been assigned to ${bus.busNumber}`);
-          setDriverModal({ visible: false, bus: null, drivers: [], loading: false });
-        } catch (error) {
-          console.error('Error during assignment:', error);
-          Alert.alert('Error', 'Failed to assign driver.');
-        }
-      }
-    } catch (error) {
-      console.error('Error in driver selection:', error);
-      Alert.alert('Error', 'Failed to process driver assignment.');
-    } finally {
-      setDriverModal(prev => ({ ...prev, loading: false }));
-    }
-  };
-
-  // Handle unassign driver
-  const handleUnassignDriver = async () => {
-    if (!user || !driverModal.bus) return;
-
-    const bus = driverModal.bus;
-    setDriverModal(prev => ({ ...prev, loading: true }));
-
-    try {
-      const batch = firestore().batch();
-
-      batch.update(firestore().collection('buses').doc(bus.id), {
-        driverId: null,
-        driverName: null,
-        updatedAt: firestore.FieldValue.serverTimestamp(),
-      });
-
-      if (bus.driverId) {
-        batch.update(firestore().collection('drivers').doc(bus.driverId), {
-          busAssignedId: null,
-          busNumber: null,
-          vehicleAssigned: '',
-          updatedAt: firestore.FieldValue.serverTimestamp(),
-        });
-      }
-
-      await batch.commit();
-      Alert.alert('✅ Driver Unassigned', 'Driver removed from bus');
-      setDriverModal({ visible: false, bus: null, drivers: [], loading: false });
-    } catch (error) {
-      console.error('Error unassigning driver:', error);
-      Alert.alert('Error', 'Failed to unassign driver');
-    }
-  };
-
-  // Status color helper
-  const getStatusColor = (status: string) => {
-    switch(status) {
-      case 'active': return COLORS.success;
-      case 'maintenance': return COLORS.warning;
-      case 'inactive': return COLORS.danger;
-      default: return COLORS.textLight;
-    }
-  };
-
-  const getStatusIcon = (status: string) => {
-    switch(status) {
-      case 'active': return '🟢';
-      case 'maintenance': return '🟡';
-      case 'inactive': return '🔴';
-      default: return '⚫';
-    }
+  // ✅ Get status display using centralized config
+  const getStatusDisplay = (status: string) => {
+    return getBusStatusConfig(status);
   };
 
   const formatDate = (dateStr: string) => {
@@ -1005,13 +612,16 @@ const FleetScreen = () => {
     return dateStr;
   };
 
-  // ✅ FIX: useCallback for renderItem to prevent unnecessary re-renders
+  // Render bus item
   const renderBusItem = useCallback(({ item: bus }: { item: Bus }) => {
     const insuranceExpired = isDateExpired(bus.insuranceExpiry);
     const fitnessExpired = isDateExpired(bus.fitnessExpiry);
     const insuranceExpiring = isExpiringSoon(bus.insuranceExpiry);
     const fitnessExpiring = isExpiringSoon(bus.fitnessExpiry);
     const hasWarning = insuranceExpired || fitnessExpired || insuranceExpiring || fitnessExpiring;
+
+    const statusConfig = getStatusDisplay(bus.status);
+    const isAvailable = bus.status === BUS_STATUS.AVAILABLE;
 
     return (
       <View key={bus.id} style={[styles.busCard, SHADOWS.medium]}>
@@ -1030,9 +640,9 @@ const FleetScreen = () => {
               </View>
               <Text style={styles.busRegistration}>{bus.registrationNumber}</Text>
             </View>
-            <View style={[styles.statusBadge, { backgroundColor: getStatusColor(bus.status) }]}>
+            <View style={[styles.statusBadge, { backgroundColor: statusConfig.color }]}>
               <Text style={styles.statusText}>
-                {getStatusIcon(bus.status)} {bus.status.toUpperCase()}
+                {statusConfig.icon} {statusConfig.label}
               </Text>
             </View>
           </View>
@@ -1084,13 +694,6 @@ const FleetScreen = () => {
 
           <TouchableOpacity
             style={styles.actionButton}
-            onPress={() => handleAssignDriver(bus)}
-          >
-            <Text style={styles.actionButtonText}>👤 Driver</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.actionButton}
             onPress={() => handleMaintenance(bus)}
           >
             <Text style={styles.actionButtonText}>🔧 Maintain</Text>
@@ -1099,21 +702,30 @@ const FleetScreen = () => {
           <TouchableOpacity
             style={[
               styles.actionButton,
-              bus.status === 'active' ? styles.deactivateButton : styles.activateButton
+              isAvailable ? styles.deactivateButton : styles.activateButton
             ]}
             onPress={() => handleChangeStatus(bus)}
           >
             <Text style={[
               styles.actionButtonText,
-              bus.status === 'active' ? styles.deactivateText : styles.activateText
+              isAvailable ? styles.deactivateText : styles.activateText
             ]}>
-              {bus.status === 'active' ? '⏸️' : '▶️'}
+              {isAvailable ? '⏸️' : '▶️'}
             </Text>
           </TouchableOpacity>
         </View>
       </View>
     );
   }, []);
+
+  // ✅ Filter options with new statuses
+  const filterOptions: { id: BusStatus | 'all'; label: string; icon: string; color: string; count: number }[] = [
+    { id: 'all', label: 'All', icon: '🚌', color: COLORS.primary, count: stats.total },
+    { id: BUS_STATUS.AVAILABLE, label: 'Available', icon: '🟢', color: '#4CAF50', count: stats.available },
+    { id: BUS_STATUS.ON_TRIP, label: 'On Trip', icon: '🚌', color: '#2196F3', count: stats.onTrip },
+    { id: BUS_STATUS.MAINTENANCE, label: 'Maintenance', icon: '🔧', color: '#FF9800', count: stats.maintenance },
+    { id: BUS_STATUS.INACTIVE, label: 'Inactive', icon: '🔴', color: '#F44336', count: stats.inactive },
+  ];
 
   if (loading) {
     return (
@@ -1126,18 +738,6 @@ const FleetScreen = () => {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Driver Selection Modal */}
-      <DriverSelectionModal
-        visible={driverModal.visible}
-        onClose={() => setDriverModal({ visible: false, bus: null, drivers: [], loading: false })}
-        onSelect={handleDriverSelect}
-        onUnassign={handleUnassignDriver}
-        drivers={driverModal.drivers}
-        busNumber={driverModal.bus?.busNumber || ''}
-        currentDriverId={driverModal.bus?.driverId}
-        loading={driverModal.loading}
-      />
-
       {/* Maintenance Schedule Modal */}
       <MaintenanceScheduleModal
         visible={maintenanceModal.visible}
@@ -1160,50 +760,26 @@ const FleetScreen = () => {
         </TouchableOpacity>
       </View>
 
-      {/* Stats */}
+      {/* Stats Cards */}
       <View style={styles.statsContainer}>
-        <TouchableOpacity
-          style={[styles.statCard, SHADOWS.small, filter === 'all' && styles.statCardActive]}
-          onPress={() => setFilter('all')}
-          activeOpacity={0.7}
-        >
-          <Text style={styles.statValue}>{stats.total}</Text>
-          <Text style={styles.statLabel}>Total</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.statCard, { backgroundColor: '#E8F5E8' }, SHADOWS.small, filter === 'active' && styles.statCardActive]}
-          onPress={() => setFilter('active')}
-          activeOpacity={0.7}
-        >
-          <Text style={[styles.statValue, { color: COLORS.success }]}>{stats.active}</Text>
-          <Text style={styles.statLabel}>Active</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.statCard, { backgroundColor: '#FFF3E0' }, SHADOWS.small, filter === 'maintenance' && styles.statCardActive]}
-          onPress={() => setFilter('maintenance')}
-          activeOpacity={0.7}
-        >
-          <Text style={[styles.statValue, { color: COLORS.warning }]}>{stats.maintenance}</Text>
-          <Text style={styles.statLabel}>Maintenance</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.statCard, { backgroundColor: '#FFEBEE' }, SHADOWS.small, filter === 'inactive' && styles.statCardActive]}
-          onPress={() => setFilter('inactive')}
-          activeOpacity={0.7}
-        >
-          <Text style={[styles.statValue, { color: COLORS.danger }]}>{stats.inactive}</Text>
-          <Text style={styles.statLabel}>Inactive</Text>
-        </TouchableOpacity>
-
-        {stats.expiringSoon > 0 && (
-          <View style={[styles.statCard, { backgroundColor: '#FFF3CD' }]}>
-            <Text style={[styles.statValue, { color: '#856404' }]}>{stats.expiringSoon}</Text>
-            <Text style={styles.statLabel}>⚠️ Expiring</Text>
-          </View>
-        )}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+          {filterOptions.map((option) => (
+            <TouchableOpacity
+              key={option.id}
+              style={[
+                styles.statCard,
+                { backgroundColor: `${option.color}15` },
+                filter === option.id && styles.statCardActive
+              ]}
+              onPress={() => setFilter(option.id)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.statIcon}>{option.icon}</Text>
+              <Text style={[styles.statValue, { color: option.color }]}>{option.count}</Text>
+              <Text style={styles.statLabel}>{option.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
       </View>
 
       {/* Bus List */}
@@ -1294,43 +870,37 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   statsContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    paddingHorizontal: SIZES.md,
-    paddingVertical: SIZES.md,
     backgroundColor: COLORS.white,
+    paddingVertical: SIZES.sm,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
-    zIndex: 5,
   },
   statCard: {
-    flex: 1,
-    minWidth: 80,
+    minWidth: 85,
     borderRadius: SIZES.md,
     padding: SIZES.sm,
-    margin: 4,
+    marginHorizontal: 4,
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 70,
-    backgroundColor: COLORS.greyLight,
+    minHeight: 75,
   },
   statCardActive: {
     borderWidth: 2,
     borderColor: COLORS.secondary,
   },
-  statValue: {
+  statIcon: {
     fontSize: 20,
+    marginBottom: 2,
+  },
+  statValue: {
+    fontSize: 18,
     fontWeight: '700',
-    color: COLORS.primary,
     marginBottom: 2,
   },
   statLabel: {
-    fontSize: 12,
+    fontSize: 11,
     color: COLORS.textLight,
     textAlign: 'center',
-  },
-  listContainer: {
-    flex: 1,
   },
   listContent: {
     paddingHorizontal: SIZES.md,
@@ -1535,150 +1105,6 @@ const styles = StyleSheet.create({
   },
   modalScheduleText: {
     color: COLORS.white,
-    fontWeight: '600',
-  },
-  // Driver Modal Styles
-  driverModalContainer: {
-    backgroundColor: COLORS.white,
-    borderRadius: SIZES.lg,
-    width: '90%',
-    maxWidth: 500,
-    maxHeight: '80%',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.25,
-        shadowRadius: 4,
-      },
-      android: {
-        elevation: 5,
-      },
-    }),
-  },
-  driverModalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: SIZES.md,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-  },
-  driverModalTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: COLORS.primary,
-  },
-  driverModalClose: {
-    padding: SIZES.xs,
-  },
-  driverModalCloseText: {
-    fontSize: 20,
-    color: COLORS.textLight,
-  },
-  driverModalSubtitle: {
-    fontSize: 14,
-    color: COLORS.textLight,
-    paddingHorizontal: SIZES.md,
-    paddingTop: SIZES.sm,
-  },
-  driverModalBusNumber: {
-    color: COLORS.primary,
-    fontWeight: '600',
-  },
-  driverSearchContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.greyLight,
-    marginHorizontal: SIZES.md,
-    marginVertical: SIZES.sm,
-    paddingHorizontal: SIZES.sm,
-    borderRadius: SIZES.xs,
-  },
-  driverSearchIcon: {
-    fontSize: 16,
-    marginRight: SIZES.xs,
-    color: COLORS.textLight,
-  },
-  driverSearchInput: {
-    flex: 1,
-    paddingVertical: SIZES.sm,
-    fontSize: 15,
-    color: COLORS.text,
-  },
-  driverListContent: {
-    paddingHorizontal: SIZES.md,
-  },
-  driverItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: SIZES.md,
-    paddingHorizontal: SIZES.md,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-  },
-  driverItemSelected: {
-    backgroundColor: COLORS.secondary + '20',
-  },
-  driverInfo: {
-    flex: 1,
-  },
-  driverName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: COLORS.text,
-    marginBottom: 2,
-  },
-  driverBusInfo: {
-    fontSize: 12,
-    color: COLORS.textLight,
-  },
-  driverStatus: {
-    paddingHorizontal: SIZES.sm,
-    paddingVertical: 4,
-    borderRadius: 16,
-    borderWidth: 1,
-    marginLeft: SIZES.sm,
-  },
-  driverStatusText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: COLORS.text,
-  },
-  driverEmptyList: {
-    padding: SIZES.xl,
-    alignItems: 'center',
-  },
-  driverEmptyText: {
-    fontSize: 16,
-    color: COLORS.textLight,
-  },
-  driverModalButtons: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    padding: SIZES.md,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
-  },
-  driverModalButton: {
-    paddingHorizontal: SIZES.md,
-    paddingVertical: SIZES.sm,
-    borderRadius: SIZES.xs,
-    marginLeft: SIZES.sm,
-  },
-  driverUnassignButton: {
-    backgroundColor: '#FFEBEE',
-  },
-  driverCancelButton: {
-    backgroundColor: COLORS.greyLight,
-  },
-  driverUnassignText: {
-    color: COLORS.danger,
-    fontWeight: '600',
-  },
-  driverCancelText: {
-    color: COLORS.text,
     fontWeight: '600',
   },
 });

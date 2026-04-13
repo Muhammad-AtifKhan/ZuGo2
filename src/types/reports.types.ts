@@ -1,5 +1,7 @@
 // src/types/reports.types.ts
 import firestore from '@react-native-firebase/firestore';
+import { BusStatus } from './fleet.types';
+import { DriverStatus } from './driver.types';
 
 export type DailyRevenue = {
   day: string;
@@ -19,7 +21,7 @@ export type BusPerformance = {
   trips: number;
   revenue: number;
   rating: number;
-  status: string;
+  status: BusStatus;
 };
 
 export type DriverPerformance = {
@@ -28,7 +30,7 @@ export type DriverPerformance = {
   trips: number;
   rating: number;
   revenue: number;
-  status: string;
+  status: DriverStatus;
 };
 
 export type CompanyProfile = {
@@ -65,8 +67,8 @@ export type ReportStats = {
   avgDailyRevenue: number;
   totalTrips: number;
   avgRating: number;
-  activeBuses: number;
-  activeDrivers: number;
+  availableBuses: number;      // was activeBuses
+  availableDrivers: number;    // was activeDrivers
   completedTrips: number;
   cancelledTrips: number;
 };

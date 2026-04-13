@@ -108,6 +108,30 @@ if(NOT "${NEW_GLOB}" STREQUAL "${OLD_GLOB}")
   file(TOUCH_NOCREATE "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86/CMakeFiles/cmake.verify_globs")
 endif()
 
+# react_codegen_SRCS at D:/MyProjects/ZuGo2/node_modules/@react-native-community/netinfo/android/build/generated/source/codegen/jni/CMakeLists.txt:9 (file)
+file(GLOB NEW_GLOB LIST_DIRECTORIES true "D:/MyProjects/ZuGo2/node_modules/@react-native-community/netinfo/android/build/generated/source/codegen/jni/*.cpp")
+set(OLD_GLOB
+  "D:/MyProjects/ZuGo2/node_modules/@react-native-community/netinfo/android/build/generated/source/codegen/jni/RNCNetInfoSpec-generated.cpp"
+  )
+if(NOT "${NEW_GLOB}" STREQUAL "${OLD_GLOB}")
+  message("-- GLOB mismatch!")
+  file(TOUCH_NOCREATE "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86/CMakeFiles/cmake.verify_globs")
+endif()
+
+# react_codegen_SRCS at D:/MyProjects/ZuGo2/node_modules/@react-native-community/netinfo/android/build/generated/source/codegen/jni/CMakeLists.txt:9 (file)
+file(GLOB NEW_GLOB LIST_DIRECTORIES true "D:/MyProjects/ZuGo2/node_modules/@react-native-community/netinfo/android/build/generated/source/codegen/jni/react/renderer/components/RNCNetInfoSpec/*.cpp")
+set(OLD_GLOB
+  "D:/MyProjects/ZuGo2/node_modules/@react-native-community/netinfo/android/build/generated/source/codegen/jni/react/renderer/components/RNCNetInfoSpec/ComponentDescriptors.cpp"
+  "D:/MyProjects/ZuGo2/node_modules/@react-native-community/netinfo/android/build/generated/source/codegen/jni/react/renderer/components/RNCNetInfoSpec/EventEmitters.cpp"
+  "D:/MyProjects/ZuGo2/node_modules/@react-native-community/netinfo/android/build/generated/source/codegen/jni/react/renderer/components/RNCNetInfoSpec/Props.cpp"
+  "D:/MyProjects/ZuGo2/node_modules/@react-native-community/netinfo/android/build/generated/source/codegen/jni/react/renderer/components/RNCNetInfoSpec/ShadowNodes.cpp"
+  "D:/MyProjects/ZuGo2/node_modules/@react-native-community/netinfo/android/build/generated/source/codegen/jni/react/renderer/components/RNCNetInfoSpec/States.cpp"
+  )
+if(NOT "${NEW_GLOB}" STREQUAL "${OLD_GLOB}")
+  message("-- GLOB mismatch!")
+  file(TOUCH_NOCREATE "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86/CMakeFiles/cmake.verify_globs")
+endif()
+
 # react_codegen_SRCS at D:/MyProjects/ZuGo2/node_modules/react-native-gesture-handler/android/build/generated/source/codegen/jni/CMakeLists.txt:9 (file)
 file(GLOB NEW_GLOB LIST_DIRECTORIES true "D:/MyProjects/ZuGo2/node_modules/react-native-gesture-handler/android/build/generated/source/codegen/jni/*.cpp")
 set(OLD_GLOB
@@ -321,6 +345,30 @@ set(OLD_GLOB
   "D:/MyProjects/ZuGo2/node_modules/react-native-vector-icons/android/build/generated/source/codegen/jni/react/renderer/components/RNVectorIconsSpec/Props.cpp"
   "D:/MyProjects/ZuGo2/node_modules/react-native-vector-icons/android/build/generated/source/codegen/jni/react/renderer/components/RNVectorIconsSpec/ShadowNodes.cpp"
   "D:/MyProjects/ZuGo2/node_modules/react-native-vector-icons/android/build/generated/source/codegen/jni/react/renderer/components/RNVectorIconsSpec/States.cpp"
+  )
+if(NOT "${NEW_GLOB}" STREQUAL "${OLD_GLOB}")
+  message("-- GLOB mismatch!")
+  file(TOUCH_NOCREATE "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86/CMakeFiles/cmake.verify_globs")
+endif()
+
+# react_codegen_SRCS at D:/MyProjects/ZuGo2/node_modules/react-native-webview/android/build/generated/source/codegen/jni/CMakeLists.txt:9 (file)
+file(GLOB NEW_GLOB LIST_DIRECTORIES true "D:/MyProjects/ZuGo2/node_modules/react-native-webview/android/build/generated/source/codegen/jni/*.cpp")
+set(OLD_GLOB
+  "D:/MyProjects/ZuGo2/node_modules/react-native-webview/android/build/generated/source/codegen/jni/RNCWebViewSpec-generated.cpp"
+  )
+if(NOT "${NEW_GLOB}" STREQUAL "${OLD_GLOB}")
+  message("-- GLOB mismatch!")
+  file(TOUCH_NOCREATE "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86/CMakeFiles/cmake.verify_globs")
+endif()
+
+# react_codegen_SRCS at D:/MyProjects/ZuGo2/node_modules/react-native-webview/android/build/generated/source/codegen/jni/CMakeLists.txt:9 (file)
+file(GLOB NEW_GLOB LIST_DIRECTORIES true "D:/MyProjects/ZuGo2/node_modules/react-native-webview/android/build/generated/source/codegen/jni/react/renderer/components/RNCWebViewSpec/*.cpp")
+set(OLD_GLOB
+  "D:/MyProjects/ZuGo2/node_modules/react-native-webview/android/build/generated/source/codegen/jni/react/renderer/components/RNCWebViewSpec/ComponentDescriptors.cpp"
+  "D:/MyProjects/ZuGo2/node_modules/react-native-webview/android/build/generated/source/codegen/jni/react/renderer/components/RNCWebViewSpec/EventEmitters.cpp"
+  "D:/MyProjects/ZuGo2/node_modules/react-native-webview/android/build/generated/source/codegen/jni/react/renderer/components/RNCWebViewSpec/Props.cpp"
+  "D:/MyProjects/ZuGo2/node_modules/react-native-webview/android/build/generated/source/codegen/jni/react/renderer/components/RNCWebViewSpec/ShadowNodes.cpp"
+  "D:/MyProjects/ZuGo2/node_modules/react-native-webview/android/build/generated/source/codegen/jni/react/renderer/components/RNCWebViewSpec/States.cpp"
   )
 if(NOT "${NEW_GLOB}" STREQUAL "${OLD_GLOB}")
   message("-- GLOB mismatch!")

@@ -49,6 +49,7 @@ interface BookingDetails {
   paymentStatus: 'paid' | 'pending' | 'failed';
   status: 'confirmed' | 'pending_payment' | 'cancelled' | 'expired';
   paymentDeadline?: Date;
+  tripId?: string; // ✅ ADDED: tripId for seat updates
   bankDetails?: {
     accountNumber: string;
     accountTitle: string;
@@ -66,6 +67,7 @@ const BookingConfirmationScreen = () => {
   const [error, setError] = useState<string | null>(null);
   const [bookingDetails, setBookingDetails] = useState<BookingDetails | null>(null);
   const [timeRemaining, setTimeRemaining] = useState<string>('');
+  const [isConfirming, setIsConfirming] = useState(false);
 
   useEffect(() => {
     const fetchBooking = async () => {
@@ -86,13 +88,15 @@ const BookingConfirmationScreen = () => {
         const travelDate = data.travelDate?.toDate?.() ?? new Date();
         const paymentDeadline = data.paymentDeadline?.toDate?.();
 
-        let tripTime = '--:--';
-        let arrivalTime = '--:--';
+        let tripTime = data.departureTime ?? '--:--';
+        let arrivalTime = data.arrivalTime ?? '--:--';
+
+        // If tripId exists, fetch trip details
         if (data.tripId) {
           const tripDoc = await firestore().collection('trips').doc(data.tripId).get();
           const tripData = tripDoc.data();
-          tripTime = tripData?.departureTime ?? '--:--';
-          arrivalTime = tripData?.arrivalTime ?? '--:--';
+          tripTime = tripData?.departureTime ?? tripTime;
+          arrivalTime = tripData?.arrivalTime ?? arrivalTime;
         }
 
         setBookingDetails({
@@ -122,6 +126,7 @@ const BookingConfirmationScreen = () => {
           paymentStatus: data.paymentStatus ?? 'pending',
           status: data.status ?? 'pending_payment',
           paymentDeadline,
+          tripId: data.tripId, // ✅ ADDED: store tripId
           bankDetails: data.bankDetails,
           createdAt: data.createdAt?.toDate?.() ?? new Date(),
         });
@@ -158,6 +163,99 @@ const BookingConfirmationScreen = () => {
 
     return () => clearInterval(timer);
   }, [bookingDetails]);
+
+  // ✅ NEW: Manual payment confirmation function
+  const handleManualPaymentConfirm = async () => {
+    if (!bookingDetails) return;
+
+    // Check if booking is already confirmed
+    if (bookingDetails.paymentStatus === 'paid') {
+      Alert.alert('Already Confirmed', 'This booking is already confirmed.');
+      return;
+    }
+
+    // Check if payment deadline has passed
+    if (bookingDetails.paymentDeadline && bookingDetails.paymentDeadline < new Date()) {
+      Alert.alert(
+        'Payment Deadline Passed',
+        'The payment deadline for this booking has expired. Please make a new booking.',
+        [
+          {
+            text: 'OK',
+            onPress: () => {
+              navigation.goBack();
+            }
+          }
+        ]
+      );
+      return;
+    }
+
+    setIsConfirming(true);
+
+    try {
+      // ✅ Optional: Add fake verification delay for demo feel
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      const bookingRef = firestore().collection('bookings').doc(bookingDetails.id);
+
+      // 1. Update booking status
+      await bookingRef.update({
+        status: 'confirmed',
+        paymentStatus: 'paid',
+        confirmedAt: firestore.FieldValue.serverTimestamp(),
+        updatedAt: firestore.FieldValue.serverTimestamp(),
+      });
+
+      // 2. Update seats from reserved to booked
+      const seatNumbers = bookingDetails.seatNumbers;
+      const tripId = bookingDetails.tripId;
+
+      if (!tripId) {
+        console.warn('⚠️ No tripId found in booking, skipping seat updates');
+      } else {
+        for (const seatNum of seatNumbers) {
+          const seatRef = firestore()
+            .collection('trips')
+            .doc(tripId)
+            .collection('seats')
+            .doc(seatNum);
+
+          await seatRef.update({
+            status: 'booked',
+            isBooked: true,
+            bookedBy: bookingDetails.id,
+            updatedAt: firestore.FieldValue.serverTimestamp(),
+          });
+        }
+
+        // 3. Update trip's available seats count
+        await firestore().collection('trips').doc(tripId).update({
+          availableSeats: firestore.FieldValue.increment(-seatNumbers.length),
+          updatedAt: firestore.FieldValue.serverTimestamp(),
+        });
+      }
+
+      // 4. Refresh local state
+      setBookingDetails(prev => prev ? {
+        ...prev,
+        status: 'confirmed',
+        paymentStatus: 'paid',
+      } : null);
+
+      Alert.alert(
+        'Payment Confirmed!',
+        'Your booking is now confirmed. Your tickets are ready.',
+        [{ text: 'OK' }]
+      );
+
+    } catch (error: any) {
+      console.error('Manual confirmation error:', error);
+      Alert.alert('Error', error.message || 'Failed to confirm payment. Please try again.');
+    } finally {
+      setIsConfirming(false);
+    }
+  };
 
   const handleAddToCalendar = () => {
     Alert.alert(
@@ -272,20 +370,9 @@ ${statusText}
         {
           text: '1 hour before',
           onPress: () => {
-            const reminderTime = new Date();
-            const [hours, minutes] = bookingDetails.boardingTime
-              .replace('AM', '')
-              .replace('PM', '')
-              .split(':')
-              .map(Number);
-
-            const isPM = bookingDetails.boardingTime.includes('PM');
-            reminderTime.setHours(isPM && hours !== 12 ? hours + 12 : hours, minutes, 0);
-            reminderTime.setHours(reminderTime.getHours() - 1);
-
             Alert.alert(
               'Reminder Set',
-              `Reminder set for ${reminderTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+              `Reminder set for 1 hour before boarding (${bookingDetails.boardingTime})`,
               [{ text: 'OK' }]
             );
           }
@@ -449,6 +536,10 @@ ${bookingDetails.paymentStatus !== 'paid' ?
   const isPending = !isPaid && bookingDetails.status === 'pending_payment';
   const isExpired = bookingDetails.status === 'expired';
 
+  // ✅ Show "I HAVE PAID" button only for JazzCash/Easypaisa pending payments
+  const showManualConfirmButton = isPending &&
+    (bookingDetails.paymentMethod === 'jazzcash' || bookingDetails.paymentMethod === 'easypaisa');
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView style={styles.container}>
@@ -465,7 +556,7 @@ ${bookingDetails.paymentStatus !== 'paid' ?
           )}
           {isPending && (
             <Text style={styles.statusSubtitle}>
-              Complete payment to confirm your seats
+              Complete payment and tap "I HAVE PAID" to confirm your booking
             </Text>
           )}
           {isExpired && (
@@ -474,6 +565,27 @@ ${bookingDetails.paymentStatus !== 'paid' ?
             </Text>
           )}
         </View>
+
+        {/* ✅ NEW: I HAVE PAID BUTTON */}
+        {showManualConfirmButton && (
+          <TouchableOpacity
+            style={styles.manualConfirmButton}
+            onPress={handleManualPaymentConfirm}
+            disabled={isConfirming}
+          >
+            {isConfirming ? (
+              <>
+                <ActivityIndicator size="small" color="#FFF" />
+                <Text style={styles.manualConfirmButtonText}>VERIFYING...</Text>
+              </>
+            ) : (
+              <>
+                <Icon name="check-circle" size={24} color="#FFF" />
+                <Text style={styles.manualConfirmButtonText}>I HAVE PAID</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        )}
 
         {/* Booking Code / Ticket Number */}
         <View style={styles.ticketNumberCard}>
@@ -574,6 +686,47 @@ ${bookingDetails.paymentStatus !== 'paid' ?
               <Icon name="info" size={20} color="#FF9800" />
               <Text style={styles.instructionText}>
                 Seats will be confirmed after transfer verification (2-4 hours)
+              </Text>
+            </View>
+          </View>
+        )}
+
+        {/* JazzCash/Easypaisa Instructions */}
+        {isPending && (bookingDetails.paymentMethod === 'jazzcash' || bookingDetails.paymentMethod === 'easypaisa') && (
+          <View style={styles.instructionsCard}>
+            <Icon name="phone-android" size={24} color="#4A90E2" />
+            <Text style={styles.instructionsTitle}>
+              {bookingDetails.paymentMethod === 'jazzcash' ? 'JazzCash' : 'Easypaisa'} Payment
+            </Text>
+
+            <View style={styles.instructionItem}>
+              <Icon name="looks-one" size={20} color="#4A90E2" />
+              <Text style={styles.instructionText}>
+                Open {bookingDetails.paymentMethod === 'jazzcash' ? 'JazzCash' : 'Easypaisa'} app
+              </Text>
+            </View>
+            <View style={styles.instructionItem}>
+              <Icon name="looks-two" size={20} color="#4A90E2" />
+              <Text style={styles.instructionText}>
+                Go to "Pay Merchant" or "Scan QR"
+              </Text>
+            </View>
+            <View style={styles.instructionItem}>
+              <Icon name="looks-3" size={20} color="#4A90E2" />
+              <Text style={styles.instructionText}>
+                Enter Merchant ID: ZUGO123
+              </Text>
+            </View>
+            <View style={styles.instructionItem}>
+              <Icon name="looks-4" size={20} color="#4A90E2" />
+              <Text style={styles.instructionText}>
+                Amount: PKR {bookingDetails.total.toLocaleString()}
+              </Text>
+            </View>
+            <View style={styles.instructionItem}>
+              <Icon name="check-circle" size={20} color="#4CAF50" />
+              <Text style={styles.instructionText}>
+                After payment, click "I HAVE PAID" button above
               </Text>
             </View>
           </View>
@@ -764,7 +917,7 @@ ${bookingDetails.paymentStatus !== 'paid' ?
           {!isPaid && (
             <View style={styles.noteItem}>
               <Icon name="warning" size={16} color="#FF9800" />
-              <Text style={styles.noteText}>Complete payment within deadline to confirm seats</Text>
+              <Text style={styles.noteText}>Complete payment and tap "I HAVE PAID" to confirm your seats</Text>
             </View>
           )}
 
@@ -843,73 +996,38 @@ ${bookingDetails.paymentStatus !== 'paid' ?
 };
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#F8F9FA',
-  },
-  loadingContainer: {
-    flex: 1,
+  safeArea: { flex: 1, backgroundColor: '#F8F9FA' },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
+  loadingText: { marginTop: 16, fontSize: 16, color: '#666' },
+  errorContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
+  errorText: { marginTop: 16, fontSize: 16, color: '#F44336', textAlign: 'center' },
+  retryButton: { marginTop: 24, paddingVertical: 12, paddingHorizontal: 24, backgroundColor: '#4A90E2', borderRadius: 8 },
+  retryButtonText: { color: '#FFF', fontWeight: '600' },
+  container: { flex: 1, padding: 16 },
+  statusContainer: { alignItems: 'center', marginVertical: 20 },
+  statusCircle: { width: 100, height: 100, borderRadius: 50, justifyContent: 'center', alignItems: 'center', marginBottom: 16, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
+  statusTitle: { fontSize: 24, fontWeight: 'bold', marginBottom: 4 },
+  statusSubtitle: { fontSize: 16, color: '#666', textAlign: 'center' },
+  // ✅ NEW STYLES
+  manualConfirmButton: {
+    backgroundColor: '#4CAF50',
+    borderRadius: 16,
+    paddingVertical: 18,
+    flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-  },
-  loadingText: {
-    marginTop: 16,
-    fontSize: 16,
-    color: '#666',
-  },
-  errorContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-  },
-  errorText: {
-    marginTop: 16,
-    fontSize: 16,
-    color: '#F44336',
-    textAlign: 'center',
-  },
-  retryButton: {
-    marginTop: 24,
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    backgroundColor: '#4A90E2',
-    borderRadius: 8,
-  },
-  retryButtonText: {
-    color: '#FFF',
-    fontWeight: '600',
-  },
-  container: {
-    flex: 1,
-    padding: 16,
-  },
-  statusContainer: {
-    alignItems: 'center',
-    marginVertical: 20,
-  },
-  statusCircle: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    justifyContent: 'center',
-    alignItems: 'center',
     marginBottom: 16,
+    shadowColor: '#4CAF50',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 4,
   },
-  statusTitle: {
-    fontSize: 24,
+  manualConfirmButtonText: {
+    color: '#FFF',
+    fontSize: 18,
     fontWeight: 'bold',
-    marginBottom: 4,
-  },
-  statusSubtitle: {
-    fontSize: 16,
-    color: '#666',
-    textAlign: 'center',
+    marginLeft: 10,
   },
   ticketNumberCard: {
     backgroundColor: '#FFF',
@@ -923,372 +1041,72 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 5,
   },
-  ticketNumberLabel: {
-    fontSize: 14,
-    color: '#666',
-    fontWeight: '600',
-    marginBottom: 8,
-  },
-  ticketNumber: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#4A90E2',
-    letterSpacing: 1,
-    marginBottom: 8,
-  },
-  copyButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 8,
-  },
-  copyButtonText: {
-    fontSize: 14,
-    color: '#4A90E2',
-    marginLeft: 4,
-  },
-  deadlineCard: {
-    backgroundColor: '#FFF3E0',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#FFE0B2',
-  },
-  deadlineInfo: {
-    marginLeft: 12,
-    flex: 1,
-  },
-  deadlineLabel: {
-    fontSize: 14,
-    color: '#E65100',
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  deadlineTime: {
-    fontSize: 16,
-    color: '#1A1A1A',
-    fontWeight: '600',
-    marginBottom: 2,
-  },
-  deadlineCountdown: {
-    fontSize: 14,
-    color: '#FF9800',
-    fontWeight: '600',
-  },
-  instructionsCard: {
-    backgroundColor: '#F0F8FF',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#BBDEFB',
-  },
-  instructionsTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#1A237E',
-    marginTop: 12,
-    marginBottom: 16,
-  },
-  bankDetailsCard: {
-    backgroundColor: '#FFF',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-  },
-  bankDetailLabel: {
-    fontSize: 14,
-    color: '#666',
-    marginTop: 8,
-  },
-  bankDetailValue: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1A1A1A',
-    marginBottom: 8,
-  },
-  ticketCard: {
-    backgroundColor: '#FFF',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-  ticketSection: {
-    marginBottom: 24,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1A237E',
-    marginLeft: 12,
-  },
-  detailText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#1A1A1A',
-    marginBottom: 4,
-  },
-  detailSubText: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 2,
-  },
-  journeyRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  locationItem: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  locationDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: '#4A90E2',
-    marginRight: 12,
-  },
-  destinationDot: {
-    backgroundColor: '#4CAF50',
-  },
-  locationLabel: {
-    fontSize: 12,
-    color: '#666',
-    marginBottom: 4,
-  },
-  locationText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1A1A1A',
-  },
-  arrowIcon: {
-    marginHorizontal: 20,
-  },
-  detailsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-  },
-  detailItem: {
-    width: '48%',
-    marginBottom: 16,
-  },
-  detailLabel: {
-    fontSize: 12,
-    color: '#666',
-    marginTop: 4,
-    marginBottom: 2,
-  },
-  detailValue: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1A1A1A',
-  },
-  boardingInfo: {
-    backgroundColor: '#F0F8FF',
-    borderRadius: 12,
-    padding: 16,
-  },
-  boardingItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  boardingTextContainer: {
-    marginLeft: 12,
-    flex: 1,
-  },
-  boardingLabel: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 2,
-  },
-  boardingValue: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1A1A1A',
-  },
-  paymentSummary: {
-    backgroundColor: '#F8F9FA',
-    borderRadius: 12,
-    padding: 16,
-  },
-  paymentRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  paymentLabel: {
-    fontSize: 14,
-    color: '#666',
-  },
-  paymentValue: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1A1A1A',
-  },
-  discountText: {
-    color: '#4CAF50',
-  },
-  totalRow: {
-    marginTop: 8,
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: '#E0E0E0',
-  },
-  totalLabel: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#1A237E',
-  },
-  totalValue: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#4CAF50',
-  },
-  paymentMethodRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 12,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#E0E0E0',
-  },
-  paymentMethodLabel: {
-    fontSize: 14,
-    color: '#666',
-  },
-  paymentMethodValue: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1A1A1A',
-  },
-  paymentStatusRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  paymentStatusLabel: {
-    fontSize: 14,
-    color: '#666',
-  },
-  paymentStatusBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  paymentStatusBadgeText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#FFF',
-  },
-  qrContainer: {
-    alignItems: 'center',
-    padding: 20,
-    borderWidth: 1,
-    borderColor: '#E3E8EF',
-    borderRadius: 12,
-    marginTop: 20,
-  },
-  qrPlaceholder: {
-    alignItems: 'center',
-  },
-  qrText: {
-    fontSize: 16,
-    color: '#666',
-    marginTop: 12,
-    fontWeight: '500',
-  },
-  notesCard: {
-    backgroundColor: '#FFF',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-  notesTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#1A237E',
-    marginBottom: 16,
-  },
-  noteItem: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: 12,
-  },
-  noteText: {
-    fontSize: 14,
-    color: '#666',
-    marginLeft: 12,
-    flex: 1,
-    lineHeight: 20,
-  },
-  actionsContainer: {
-    backgroundColor: '#FFF',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-  actionRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 20,
-  },
-  actionButton: {
-    alignItems: 'center',
-    width: '30%',
-  },
-  actionText: {
-    fontSize: 12,
-    color: '#666',
-    marginTop: 8,
-    textAlign: 'center',
-  },
-  doneButton: {
-    backgroundColor: '#4A90E2',
-    borderRadius: 12,
-    paddingVertical: 18,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 30,
-    shadowColor: '#4A90E2',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  doneButtonText: {
-    color: '#FFF',
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginRight: 10,
-  },
+  ticketNumberLabel: { fontSize: 14, color: '#666', fontWeight: '600', marginBottom: 8 },
+  ticketNumber: { fontSize: 24, fontWeight: 'bold', color: '#4A90E2', letterSpacing: 1, marginBottom: 8 },
+  copyButton: { flexDirection: 'row', alignItems: 'center', padding: 8 },
+  copyButtonText: { fontSize: 14, color: '#4A90E2', marginLeft: 4 },
+  deadlineCard: { backgroundColor: '#FFF3E0', borderRadius: 12, padding: 16, marginBottom: 16, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#FFE0B2' },
+  deadlineInfo: { marginLeft: 12, flex: 1 },
+  deadlineLabel: { fontSize: 14, color: '#E65100', fontWeight: '600', marginBottom: 4 },
+  deadlineTime: { fontSize: 16, color: '#1A1A1A', fontWeight: '600', marginBottom: 2 },
+  deadlineCountdown: { fontSize: 14, color: '#FF9800', fontWeight: '600' },
+  instructionsCard: { backgroundColor: '#F0F8FF', borderRadius: 16, padding: 20, marginBottom: 16, borderWidth: 1, borderColor: '#BBDEFB' },
+  instructionsTitle: { fontSize: 18, fontWeight: 'bold', color: '#1A237E', marginTop: 12, marginBottom: 16 },
+  instructionItem: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+  instructionText: { fontSize: 14, color: '#666', marginLeft: 12, flex: 1 },
+  bankDetailsCard: { backgroundColor: '#FFF', borderRadius: 12, padding: 16, marginBottom: 16 },
+  bankDetailLabel: { fontSize: 14, color: '#666', marginTop: 8 },
+  bankDetailValue: { fontSize: 16, fontWeight: '600', color: '#1A1A1A', marginBottom: 8 },
+  ticketCard: { backgroundColor: '#FFF', borderRadius: 16, padding: 20, marginBottom: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 5 },
+  ticketSection: { marginBottom: 24 },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
+  sectionTitle: { fontSize: 16, fontWeight: '600', color: '#1A237E', marginLeft: 12 },
+  detailText: { fontSize: 18, fontWeight: '600', color: '#1A1A1A', marginBottom: 4 },
+  detailSubText: { fontSize: 14, color: '#666', marginBottom: 2 },
+  journeyRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  locationItem: { flex: 1, flexDirection: 'row', alignItems: 'center' },
+  locationDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: '#4A90E2', marginRight: 12 },
+  destinationDot: { backgroundColor: '#4CAF50' },
+  locationLabel: { fontSize: 12, color: '#666', marginBottom: 4 },
+  locationText: { fontSize: 16, fontWeight: '600', color: '#1A1A1A' },
+  arrowIcon: { marginHorizontal: 20 },
+  detailsGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
+  detailItem: { width: '48%', marginBottom: 16 },
+  detailLabel: { fontSize: 12, color: '#666', marginTop: 4, marginBottom: 2 },
+  detailValue: { fontSize: 16, fontWeight: '600', color: '#1A1A1A' },
+  boardingInfo: { backgroundColor: '#F0F8FF', borderRadius: 12, padding: 16 },
+  boardingItem: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+  boardingTextContainer: { marginLeft: 12, flex: 1 },
+  boardingLabel: { fontSize: 14, color: '#666', marginBottom: 2 },
+  boardingValue: { fontSize: 16, fontWeight: '600', color: '#1A1A1A' },
+  paymentSummary: { backgroundColor: '#F8F9FA', borderRadius: 12, padding: 16 },
+  paymentRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
+  paymentLabel: { fontSize: 14, color: '#666' },
+  paymentValue: { fontSize: 14, fontWeight: '600', color: '#1A1A1A' },
+  discountText: { color: '#4CAF50' },
+  totalRow: { marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#E0E0E0' },
+  totalLabel: { fontSize: 16, fontWeight: 'bold', color: '#1A237E' },
+  totalValue: { fontSize: 18, fontWeight: 'bold', color: '#4CAF50' },
+  paymentMethodRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#E0E0E0' },
+  paymentMethodLabel: { fontSize: 14, color: '#666' },
+  paymentMethodValue: { fontSize: 14, fontWeight: '600', color: '#1A1A1A' },
+  paymentStatusRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 },
+  paymentStatusLabel: { fontSize: 14, color: '#666' },
+  paymentStatusBadge: { paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 },
+  paymentStatusBadgeText: { fontSize: 12, fontWeight: '600', color: '#FFF' },
+  qrContainer: { alignItems: 'center', padding: 20, borderWidth: 1, borderColor: '#E3E8EF', borderRadius: 12, marginTop: 20 },
+  qrPlaceholder: { alignItems: 'center' },
+  qrText: { fontSize: 16, color: '#666', marginTop: 12, fontWeight: '500' },
+  notesCard: { backgroundColor: '#FFF', borderRadius: 16, padding: 20, marginBottom: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 5 },
+  notesTitle: { fontSize: 18, fontWeight: '600', color: '#1A237E', marginBottom: 16 },
+  noteItem: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 12 },
+  noteText: { fontSize: 14, color: '#666', marginLeft: 12, flex: 1, lineHeight: 20 },
+  actionsContainer: { backgroundColor: '#FFF', borderRadius: 16, padding: 20, marginBottom: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 5 },
+  actionRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 },
+  actionButton: { alignItems: 'center', width: '30%' },
+  actionText: { fontSize: 12, color: '#666', marginTop: 8, textAlign: 'center' },
+  doneButton: { backgroundColor: '#4A90E2', borderRadius: 12, paddingVertical: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 30, shadowColor: '#4A90E2', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
+  doneButtonText: { color: '#FFF', fontSize: 18, fontWeight: 'bold', marginRight: 10 },
 });
 
 export default BookingConfirmationScreen;

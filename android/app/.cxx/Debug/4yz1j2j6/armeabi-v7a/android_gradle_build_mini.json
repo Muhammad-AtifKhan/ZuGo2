@@ -4,6 +4,7 @@
     "D:\\MyProjects\\ZuGo2\\node_modules\\@react-native-clipboard\\clipboard\\android\\build\\generated\\source\\codegen\\jni\\CMakeLists.txt",
     "D:\\MyProjects\\ZuGo2\\node_modules\\@react-native-community\\datetimepicker\\android\\build\\generated\\source\\codegen\\jni\\CMakeLists.txt",
     "D:\\MyProjects\\ZuGo2\\node_modules\\@react-native-community\\geolocation\\android\\build\\generated\\source\\codegen\\jni\\CMakeLists.txt",
+    "D:\\MyProjects\\ZuGo2\\node_modules\\@react-native-community\\netinfo\\android\\build\\generated\\source\\codegen\\jni\\CMakeLists.txt",
     "D:\\MyProjects\\ZuGo2\\node_modules\\react-native-gesture-handler\\android\\build\\generated\\source\\codegen\\jni\\CMakeLists.txt",
     "D:\\MyProjects\\ZuGo2\\node_modules\\react-native-image-picker\\android\\build\\generated\\source\\codegen\\jni\\CMakeLists.txt",
     "D:\\MyProjects\\ZuGo2\\node_modules\\react-native-reanimated\\android\\build\\generated\\source\\codegen\\jni\\CMakeLists.txt",
@@ -11,6 +12,7 @@
     "D:\\MyProjects\\ZuGo2\\node_modules\\react-native-screens\\android\\src\\main\\jni\\CMakeLists.txt",
     "D:\\MyProjects\\ZuGo2\\node_modules\\react-native-sound\\android\\build\\generated\\source\\codegen\\jni\\CMakeLists.txt",
     "D:\\MyProjects\\ZuGo2\\node_modules\\react-native-vector-icons\\android\\build\\generated\\source\\codegen\\jni\\CMakeLists.txt",
+    "D:\\MyProjects\\ZuGo2\\node_modules\\react-native-webview\\android\\build\\generated\\source\\codegen\\jni\\CMakeLists.txt",
     "D:\\MyProjects\\ZuGo2\\node_modules\\react-native-worklets\\android\\build\\generated\\source\\codegen\\jni\\CMakeLists.txt",
     "D:\\MyProjects\\ZuGo2\\node_modules\\react-native\\ReactAndroid\\cmake-utils\\default-app-setup\\CMakeLists.txt"
   ],
@@ -49,6 +51,11 @@
       "abi": "armeabi-v7a",
       "runtimeFiles": []
     },
+    "react_codegen_RNCWebViewSpec::@eb48929f9f7453740a6c": {
+      "artifactName": "react_codegen_RNCWebViewSpec",
+      "abi": "armeabi-v7a",
+      "runtimeFiles": []
+    },
     "react_codegen_RNDateTimePickerCGen::@59b70ddc31ba2f8ef1d2": {
       "artifactName": "react_codegen_RNDateTimePickerCGen",
       "abi": "armeabi-v7a",
@@ -65,6 +72,11 @@
         "C:\\Users\\Muhammad_Atif_Khan\\.gradle\\caches\\8.13\\transforms\\a23ed67b2edeb9ce0dd199ade731b727\\transformed\\react-android-0.83.0-debug\\prefab\\modules\\jsi\\libs\\android.armeabi-v7a\\libjsi.so",
         "C:\\Users\\Muhammad_Atif_Khan\\.gradle\\caches\\8.13\\transforms\\a23ed67b2edeb9ce0dd199ade731b727\\transformed\\react-android-0.83.0-debug\\prefab\\modules\\reactnative\\libs\\android.armeabi-v7a\\libreactnative.so"
       ]
+    },
+    "react_codegen_RNCNetInfoSpec::@c36c96bfd5b5770618a5": {
+      "artifactName": "react_codegen_RNCNetInfoSpec",
+      "abi": "armeabi-v7a",
+      "runtimeFiles": []
     },
     "react_codegen_rnworklets::@68f58d84d4754f193387": {
       "artifactName": "react_codegen_rnworklets",

@@ -1,4 +1,4 @@
-// src/screens/driver/VehicleCheckScreen.tsx - FIXED VERSION
+// src/screens/driver/VehicleCheckScreen.tsx - STANDARDIZED STATUSES
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
@@ -18,22 +18,22 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import firestore from '@react-native-firebase/firestore';
 import auth from '@react-native-firebase/auth';
 
+// ✅ Import standardized status constants
+import {
+  BUS_STATUS,
+  BUS_STATUS_CONFIG,
+  DRIVER_STATUS,
+  DRIVER_STATUS_CONFIG,
+  TRIP_STATUS,
+  TRIP_STATUS_CONFIG,
+} from '../../constants/status';
+
 type VehicleCheckScreenProps = {
   navigation: StackNavigationProp<any>;
   route?: any;
 };
 
-// Constants
-const TRIP_STATUS = {
-  SCHEDULED: 'scheduled',
-  UPCOMING: 'upcoming',
-  VEHICLE_CHECK: 'vehicle_check',
-  BOARDING: 'boarding',
-  IN_PROGRESS: 'in-progress',
-  COMPLETED: 'completed',
-  DELAYED: 'delayed',
-} as const;
-
+// ✅ Issue severity (can keep local or move to constants)
 const ISSUE_SEVERITY = {
   LOW: 'low',
   MEDIUM: 'medium',
@@ -74,22 +74,11 @@ interface VehicleCheck {
   checkType: 'pre-trip' | 'post-trip' | 'weekly' | 'incident';
   items: ChecklistItem[];
   passed: boolean;
-  issues?: VehicleIssue[];
+  issues?: any[];
   odometerReading?: number;
   fuelLevel?: number;
   notes?: string;
   completedAt: any;
-}
-
-interface VehicleIssue {
-  id: string;
-  type: string;
-  description: string;
-  severity: 'low' | 'medium' | 'high' | 'critical';
-  status: 'reported' | 'in-progress' | 'resolved';
-  reportedAt: any;
-  resolvedAt?: any;
-  photos?: string[];
 }
 
 const VehicleCheckScreen: React.FC<VehicleCheckScreenProps> = ({ navigation, route }) => {
@@ -105,6 +94,7 @@ const VehicleCheckScreen: React.FC<VehicleCheckScreenProps> = ({ navigation, rou
   const [driverUid, setDriverUid] = useState<string>('');
   const [busInfo, setBusInfo] = useState<{ id: string; number: string; model?: string } | null>(null);
   const [tripData, setTripData] = useState<any>(null);
+  const [tripBusInfo, setTripBusInfo] = useState<{ id: string; number: string } | null>(null);
 
   const isStartDutyFlow = !!dutyId || !!tripId;
   const [tripValidated, setTripValidated] = useState(false);
@@ -112,7 +102,9 @@ const VehicleCheckScreen: React.FC<VehicleCheckScreenProps> = ({ navigation, rou
   // Checklist state
   const [checklist, setChecklist] = useState<ChecklistItem[]>([]);
   const [odometerReading, setOdometerReading] = useState('');
+  const [odometerError, setOdometerError] = useState('');
   const [fuelLevel, setFuelLevel] = useState('');
+  const [fuelError, setFuelError] = useState('');
   const [notes, setNotes] = useState('');
 
   const [showIssueForm, setShowIssueForm] = useState(false);
@@ -132,6 +124,38 @@ const VehicleCheckScreen: React.FC<VehicleCheckScreenProps> = ({ navigation, rou
   useEffect(() => {
     setChecklist(CHECKLIST_ITEMS.map(item => ({ ...item, checked: false })));
   }, []);
+
+  // Validate odometer reading
+  const validateOdometer = (value: string): boolean => {
+    if (!value) return true;
+    const num = parseInt(value);
+    if (isNaN(num)) {
+      setOdometerError('Please enter a valid number');
+      return false;
+    }
+    if (num < 0) {
+      setOdometerError('Odometer cannot be negative');
+      return false;
+    }
+    setOdometerError('');
+    return true;
+  };
+
+  // Validate fuel level
+  const validateFuel = (value: string): boolean => {
+    if (!value) return true;
+    const num = parseInt(value);
+    if (isNaN(num)) {
+      setFuelError('Please enter a valid number');
+      return false;
+    }
+    if (num < 0 || num > 100) {
+      setFuelError('Fuel level must be between 0 and 100');
+      return false;
+    }
+    setFuelError('');
+    return true;
+  };
 
   // Get correct driver UID
   const getDriverUid = useCallback(async (authUid: string) => {
@@ -164,6 +188,48 @@ const VehicleCheckScreen: React.FC<VehicleCheckScreenProps> = ({ navigation, rou
     }
   }, []);
 
+  // ✅ Fetch bus info from trip
+  const fetchBusInfoFromTrip = useCallback(async (tripIdParam: string) => {
+    try {
+      const tripDoc = await firestore().collection('trips').doc(tripIdParam).get();
+      if (tripDoc.exists) {
+        const trip = tripDoc.data();
+        if (trip?.busId && trip?.busNumber) {
+          console.log('✅ Found bus info in trip:', trip.busNumber);
+          return {
+            id: trip.busId,
+            number: trip.busNumber,
+            model: trip.busModel,
+          };
+        }
+      }
+      return null;
+    } catch (error) {
+      console.error('Error fetching bus from trip:', error);
+      return null;
+    }
+  }, []);
+
+  // ✅ Fetch bus info from bus collection directly
+  const fetchBusInfoById = useCallback(async (busId: string) => {
+    try {
+      const busDoc = await firestore().collection('buses').doc(busId).get();
+      if (busDoc.exists) {
+        const bus = busDoc.data();
+        console.log('✅ Found bus info from buses collection:', bus?.busNumber);
+        return {
+          id: busId,
+          number: bus?.busNumber || bus?.registrationNumber || 'Unknown',
+          model: bus?.model,
+        };
+      }
+      return null;
+    } catch (error) {
+      console.error('Error fetching bus by ID:', error);
+      return null;
+    }
+  }, []);
+
   // Fetch driver, bus, and trip info
   useEffect(() => {
     if (!user) return;
@@ -175,25 +241,55 @@ const VehicleCheckScreen: React.FC<VehicleCheckScreenProps> = ({ navigation, rou
 
         // Driver info
         const driverDoc = await firestore().collection('drivers').doc(actualDriverId).get();
+        let driverData: any = null;
         if (driverDoc.exists) {
-          const data = driverDoc.data();
-          setDriverName(data?.fullName || 'Driver');
-          if (data?.vehicleAssignedBusId) {
-            setBusInfo({
-              id: data.vehicleAssignedBusId,
-              number: data.vehicleAssigned || 'B-001',
-            });
-          }
+          driverData = driverDoc.data();
+          setDriverName(driverData?.fullName || 'Driver');
         }
 
-        // Use duty details if available
+        // Try to get bus info in order of priority:
+        let finalBusInfo = null;
+
+        // 1. First try from dutyDetails (passed from previous screen)
         if (dutyDetails?.busNumber) {
-          setBusInfo({
+          console.log('📌 Got bus info from dutyDetails:', dutyDetails.busNumber);
+          finalBusInfo = {
             id: dutyDetails.busId || '',
             number: dutyDetails.busNumber,
             model: dutyDetails.busModel,
-          });
+          };
         }
+
+        // 2. If not, try from trip data
+        if (!finalBusInfo && tripId) {
+          const tripBus = await fetchBusInfoFromTrip(tripId);
+          if (tripBus) {
+            console.log('📌 Got bus info from trip:', tripBus.number);
+            finalBusInfo = tripBus;
+            setTripBusInfo(tripBus);
+          }
+        }
+
+        // 3. If still not, try from driver's assigned bus
+        if (!finalBusInfo && driverData?.vehicleAssignedBusId) {
+          const assignedBus = await fetchBusInfoById(driverData.vehicleAssignedBusId);
+          if (assignedBus) {
+            console.log('📌 Got bus info from driver assignment:', assignedBus.number);
+            finalBusInfo = assignedBus;
+          }
+        }
+
+        // 4. Last resort - use placeholder
+        if (!finalBusInfo) {
+          console.log('⚠️ No bus info found, using placeholder');
+          finalBusInfo = {
+            id: 'unknown',
+            number: 'Unknown Bus',
+          };
+        }
+
+        setBusInfo(finalBusInfo);
+        console.log('✅ Final bus info set:', finalBusInfo);
 
         // Validate trip if provided
         if (tripId) {
@@ -213,9 +309,8 @@ const VehicleCheckScreen: React.FC<VehicleCheckScreenProps> = ({ navigation, rou
               return;
             }
 
-            // ✅ FIX: Allow scheduled, upcoming, or vehicle_check (for resuming)
-            const allowedStatuses = [TRIP_STATUS.SCHEDULED, TRIP_STATUS.UPCOMING, TRIP_STATUS.VEHICLE_CHECK];
-            if (!allowedStatuses.includes(trip.status)) {
+            // ✅ Allow scheduled status only
+            if (trip.status !== TRIP_STATUS.SCHEDULED) {
               Alert.alert(
                 'Invalid Trip State',
                 `This trip is already ${trip.status}. Cannot proceed with vehicle check.`,
@@ -232,7 +327,7 @@ const VehicleCheckScreen: React.FC<VehicleCheckScreenProps> = ({ navigation, rou
           }
         }
 
-        // Fetch recent checks (optional, can be removed if not needed)
+        // Fetch recent checks (optional)
         const checksSnapshot = await firestore()
           .collection('vehicle_checks')
           .where('driverId', '==', actualDriverId)
@@ -270,13 +365,13 @@ const VehicleCheckScreen: React.FC<VehicleCheckScreenProps> = ({ navigation, rou
     };
 
     fetchData();
-  }, [user, dutyDetails, tripId, getDriverUid]);
+  }, [user, dutyDetails, tripId, getDriverUid, fetchBusInfoFromTrip, fetchBusInfoById]);
 
-  // ✅ Block back navigation during active duty flow
+  // Block back navigation during active duty flow
   useEffect(() => {
     if (!isStartDutyFlow) return;
 
-    const unsubscribe = navigation.addListener('beforeRemove', (e) => {
+    const unsubscribe = navigation.addListener('beforeRemove', (e: any) => {
       if (!saving && !allChecked) {
         e.preventDefault();
         Alert.alert(
@@ -297,15 +392,28 @@ const VehicleCheckScreen: React.FC<VehicleCheckScreenProps> = ({ navigation, rou
     );
   };
 
-  // Main handler for vehicle OK
+  // ✅ Main handler for vehicle OK - UPDATED with standardized statuses
   const handleVehicleOK = async () => {
     if (!allChecked) {
       Alert.alert('Incomplete Checklist', 'Please check all items before marking vehicle as OK.');
       return;
     }
 
+    // Validate inputs
+    const odometerValue = odometerReading ? parseInt(odometerReading) : null;
+    if (odometerReading && !validateOdometer(odometerReading)) {
+      Alert.alert('Invalid Odometer', odometerError);
+      return;
+    }
+
+    const fuelValue = fuelLevel ? parseInt(fuelLevel) : null;
+    if (fuelLevel && !validateFuel(fuelLevel)) {
+      Alert.alert('Invalid Fuel Level', fuelError);
+      return;
+    }
+
     if (!busInfo) {
-      Alert.alert('Error', 'No bus information available');
+      Alert.alert('Error', 'No bus information available. Please contact dispatcher.');
       return;
     }
 
@@ -334,8 +442,8 @@ const VehicleCheckScreen: React.FC<VehicleCheckScreenProps> = ({ navigation, rou
         items: checklist,
         checklist: checklistData,
         passed: true,
-        odometerReading: odometerReading ? parseInt(odometerReading) : null,
-        fuelLevel: fuelLevel ? parseInt(fuelLevel) : null,
+        odometerReading: odometerValue,
+        fuelLevel: fuelValue,
         notes: notes || null,
         completedAt: firestore.FieldValue.serverTimestamp(),
       };
@@ -346,31 +454,23 @@ const VehicleCheckScreen: React.FC<VehicleCheckScreenProps> = ({ navigation, rou
           const checkRef = firestore().collection('vehicle_checks').doc();
           transaction.set(checkRef, checkData);
 
-          // Update trip status to 'boarding' (consistent naming)
+          // ✅ Trip status remains SCHEDULED (boarding is next step, not a separate status)
           const tripRef = firestore().collection('trips').doc(tripId);
           transaction.update(tripRef, {
-            status: TRIP_STATUS.BOARDING,
             vehicleChecked: true,
             vehicleCheckedAt: firestore.FieldValue.serverTimestamp(),
             vehicleCheckId: checkRef.id,
           });
 
-          // ✅ FIX: Update driver: set onDuty = true, currentTripId, but keep status as is
-          const driverRef = firestore().collection('drivers').doc(driverUid || user?.uid);
-          transaction.update(driverRef, {
-            onDuty: true,
-            currentTripId: tripId,
-            lastDutyStart: firestore.FieldValue.serverTimestamp(),
-            // DO NOT change driver.status
-          });
+          // ✅ Driver: already ON_TRIP from dashboard, no change needed
+          // ❌ REMOVED: onDuty field update
 
-          // Update bus
-          if (busInfo.id) {
+          // ✅ Bus: already ON_TRIP from dashboard, update last check info only
+          if (busInfo.id && busInfo.id !== 'unknown') {
             const busRef = firestore().collection('buses').doc(busInfo.id);
             transaction.update(busRef, {
               lastCheck: firestore.FieldValue.serverTimestamp(),
               lastCheckId: checkRef.id,
-              currentTripId: tripId,
             });
           }
         });
@@ -383,9 +483,18 @@ const VehicleCheckScreen: React.FC<VehicleCheckScreenProps> = ({ navigation, rou
             {
               text: 'Go to Boarding',
               onPress: () => {
-                navigation.replace('Boarding', {
-                  tripId,
-                  dutyDetails,
+                // ✅ FIXED: Use navigation.navigate with nested navigator structure
+                // Since Boarding is inside Main Tab Navigator
+                navigation.navigate('Main', {
+                  screen: 'Boarding',
+                  params: {
+                    tripId,
+                    dutyDetails: {
+                      ...dutyDetails,
+                      busId: busInfo.id,
+                      busNumber: busInfo.number,
+                    },
+                  },
                 });
               },
             },
@@ -394,7 +503,7 @@ const VehicleCheckScreen: React.FC<VehicleCheckScreenProps> = ({ navigation, rou
       } else {
         // Regular vehicle check (not starting duty)
         const checkRef = await firestore().collection('vehicle_checks').add(checkData);
-        if (busInfo.id) {
+        if (busInfo.id && busInfo.id !== 'unknown') {
           await firestore().collection('buses').doc(busInfo.id).update({
             lastCheck: firestore.FieldValue.serverTimestamp(),
             lastCheckId: checkRef.id,
@@ -412,7 +521,7 @@ const VehicleCheckScreen: React.FC<VehicleCheckScreenProps> = ({ navigation, rou
     }
   };
 
-  // Issue reporting with atomic updates
+  // ✅ Issue reporting with atomic updates - UPDATED with standardized statuses
   const handleSubmitIssue = async () => {
     if (!selectedIssueType) {
       Alert.alert('Error', 'Please select an issue type.');
@@ -432,7 +541,41 @@ const VehicleCheckScreen: React.FC<VehicleCheckScreenProps> = ({ navigation, rou
     try {
       const issueTypeLabel = issueTypes.find(type => type.value === selectedIssueType)?.label;
 
+      // Prepare checklist data
+      const checklistData = Object.fromEntries(
+        checklist.map(item => [item.id, item.checked])
+      );
+
+      const odometerValue = odometerReading ? parseInt(odometerReading) : null;
+      const fuelValue = fuelLevel ? parseInt(fuelLevel) : null;
+
       await firestore().runTransaction(async (transaction) => {
+        // Create vehicle check record with passed: false
+        const checkRef = firestore().collection('vehicle_checks').doc();
+        transaction.set(checkRef, {
+          driverId: driverUid || user?.uid,
+          driverName,
+          tripId: tripId || null,
+          busId: busInfo.id,
+          busNumber: busInfo.number,
+          checkDate: firestore.FieldValue.serverTimestamp(),
+          checkType: isStartDutyFlow ? 'pre-trip' : 'weekly',
+          items: checklist,
+          checklist: checklistData,
+          passed: false,
+          issues: [{
+            type: selectedIssueType,
+            typeLabel: issueTypeLabel,
+            description: issueDescription,
+            severity: issueSeverity,
+            reportedAt: firestore.FieldValue.serverTimestamp(),
+          }],
+          odometerReading: odometerValue,
+          fuelLevel: fuelValue,
+          notes: notes || `Issue reported: ${issueDescription}`,
+          completedAt: firestore.FieldValue.serverTimestamp(),
+        });
+
         // Create issue record
         const issueRef = firestore().collection('vehicle_issues').doc();
         const issueData = {
@@ -441,6 +584,7 @@ const VehicleCheckScreen: React.FC<VehicleCheckScreenProps> = ({ navigation, rou
           driverId: driverUid || user?.uid,
           driverName,
           tripId: tripId || null,
+          vehicleCheckId: checkRef.id,
           type: selectedIssueType,
           description: issueDescription,
           severity: issueSeverity,
@@ -449,36 +593,48 @@ const VehicleCheckScreen: React.FC<VehicleCheckScreenProps> = ({ navigation, rou
         };
         transaction.set(issueRef, issueData);
 
-        // Update bus status (if critical/high)
-        if (issueSeverity === ISSUE_SEVERITY.CRITICAL || issueSeverity === ISSUE_SEVERITY.HIGH) {
+        // ✅ Update bus status based on severity
+        if (busInfo.id && busInfo.id !== 'unknown') {
           const busRef = firestore().collection('buses').doc(busInfo.id);
-          transaction.update(busRef, {
-            status: 'maintenance',
-            currentIssueId: issueRef.id,
-            lastIssueReported: firestore.FieldValue.serverTimestamp(),
-          });
-        } else {
-          const busRef = firestore().collection('buses').doc(busInfo.id);
-          transaction.update(busRef, {
-            lastIssueReported: firestore.FieldValue.serverTimestamp(),
-          });
+          if (issueSeverity === ISSUE_SEVERITY.CRITICAL || issueSeverity === ISSUE_SEVERITY.HIGH) {
+            transaction.update(busRef, {
+              status: BUS_STATUS.MAINTENANCE, // ✅ Standardized
+              currentIssueId: issueRef.id,
+              lastIssueReported: firestore.FieldValue.serverTimestamp(),
+            });
+          } else {
+            transaction.update(busRef, {
+              lastIssueReported: firestore.FieldValue.serverTimestamp(),
+            });
+          }
         }
 
-        // If this is a start duty flow, update trip to delayed and reset driver onDuty
+        // If this is a start duty flow, update trip to delayed
         if (isStartDutyFlow && tripId) {
           const tripRef = firestore().collection('trips').doc(tripId);
           transaction.update(tripRef, {
-            status: TRIP_STATUS.DELAYED,
+            status: TRIP_STATUS.DELAYED, // ✅ Standardized
             delayReason: `Vehicle issue: ${issueTypeLabel}`,
             delayReportedAt: firestore.FieldValue.serverTimestamp(),
+            vehicleCheckId: checkRef.id,
           });
 
-          // ✅ FIX: Reset driver onDuty and currentTripId
+          // ✅ Reset driver: set to AVAILABLE and clear currentTripId
           const driverRef = firestore().collection('drivers').doc(driverUid || user?.uid);
           transaction.update(driverRef, {
-            onDuty: false,
+            status: DRIVER_STATUS.AVAILABLE, // ✅ Standardized
             currentTripId: firestore.FieldValue.delete(),
           });
+
+          // ✅ Reset bus: set to AVAILABLE (can't go on trip with issues)
+          if (busInfo.id && busInfo.id !== 'unknown' &&
+              (issueSeverity !== ISSUE_SEVERITY.CRITICAL && issueSeverity !== ISSUE_SEVERITY.HIGH)) {
+            const busRef = firestore().collection('buses').doc(busInfo.id);
+            transaction.update(busRef, {
+              status: BUS_STATUS.AVAILABLE,
+              currentTripId: firestore.FieldValue.delete(),
+            });
+          }
         }
 
         // Create notification for maintenance team
@@ -490,10 +646,12 @@ const VehicleCheckScreen: React.FC<VehicleCheckScreenProps> = ({ navigation, rou
           busId: busInfo.id,
           busNumber: busInfo.number,
           issueId: issueRef.id,
+          vehicleCheckId: checkRef.id,
           severity: issueSeverity,
           timestamp: firestore.FieldValue.serverTimestamp(),
           read: false,
           actionable: true,
+          target: 'transporter',
         });
       });
 
@@ -505,13 +663,17 @@ const VehicleCheckScreen: React.FC<VehicleCheckScreenProps> = ({ navigation, rou
 
       Alert.alert(
         'Issue Reported',
-        `Your ${issueTypeLabel} issue has been reported to the maintenance team.${issueSeverity === ISSUE_SEVERITY.CRITICAL ? '\n\n⚠️ CRITICAL ISSUE: Emergency team notified.' : ''}`,
+        `Your ${issueTypeLabel} issue has been reported to the maintenance team.${
+          issueSeverity === ISSUE_SEVERITY.CRITICAL
+            ? '\n\n⚠️ CRITICAL ISSUE: Emergency team notified.'
+            : ''
+        }\n\nVehicle check record has been saved with the issue.`,
         [
           {
             text: 'OK',
             onPress: () => {
               if (isStartDutyFlow) {
-                navigation.goBack(); // Go back to dashboard
+                navigation.goBack();
               }
             },
           },
@@ -582,6 +744,11 @@ const VehicleCheckScreen: React.FC<VehicleCheckScreenProps> = ({ navigation, rou
             🚌 {busInfo.number} • Driver: {driverName}
           </Text>
         )}
+        {!busInfo && (
+          <Text style={styles.busInfoWarning}>
+            ⚠️ Bus information not available - please contact dispatcher
+          </Text>
+        )}
         {isStartDutyFlow && (
           <>
             <Text style={styles.headerSubtitle}>Required before starting duty</Text>
@@ -620,29 +787,37 @@ const VehicleCheckScreen: React.FC<VehicleCheckScreenProps> = ({ navigation, rou
           </Text>
         </View>
 
-        {/* Additional Readings */}
+        {/* Additional Readings with Validation */}
         <View style={styles.readingsSection}>
           <View style={styles.readingInput}>
             <Text style={styles.readingLabel}>Odometer (km)</Text>
             <TextInput
-              style={styles.readingField}
+              style={[styles.readingField, odometerError ? styles.inputError : null]}
               value={odometerReading}
-              onChangeText={setOdometerReading}
+              onChangeText={(text) => {
+                setOdometerReading(text);
+                validateOdometer(text);
+              }}
               keyboardType="numeric"
               placeholder="12345"
               placeholderTextColor="#999"
             />
+            {odometerError ? <Text style={styles.errorText}>{odometerError}</Text> : null}
           </View>
           <View style={styles.readingInput}>
             <Text style={styles.readingLabel}>Fuel Level (%)</Text>
             <TextInput
-              style={styles.readingField}
+              style={[styles.readingField, fuelError ? styles.inputError : null]}
               value={fuelLevel}
-              onChangeText={setFuelLevel}
+              onChangeText={(text) => {
+                setFuelLevel(text);
+                validateFuel(text);
+              }}
               keyboardType="numeric"
               placeholder="50"
               placeholderTextColor="#999"
             />
+            {fuelError ? <Text style={styles.errorText}>{fuelError}</Text> : null}
           </View>
         </View>
 
@@ -706,7 +881,7 @@ const VehicleCheckScreen: React.FC<VehicleCheckScreenProps> = ({ navigation, rou
           </View>
         )}
 
-        {/* Recent Checks (optional) */}
+        {/* Recent Checks */}
         <View style={styles.recentSection}>
           <Text style={styles.sectionTitle}>RECENT CHECKS</Text>
           <View style={styles.recentCard}>
@@ -864,7 +1039,7 @@ const VehicleCheckScreen: React.FC<VehicleCheckScreenProps> = ({ navigation, rou
   );
 };
 
-// Styles remain unchanged from original (omitted for brevity, keep as is)
+// Styles remain unchanged
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8F9FA' },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F8F9FA' },
@@ -872,6 +1047,7 @@ const styles = StyleSheet.create({
   header: { backgroundColor: '#1A237E', paddingHorizontal: 20, paddingVertical: 20, alignItems: 'center' },
   headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#FFFFFF', marginBottom: 4 },
   busInfo: { fontSize: 14, color: '#E3F2FD', marginBottom: 4 },
+  busInfoWarning: { fontSize: 14, color: '#FFD700', marginBottom: 4, textAlign: 'center' },
   headerSubtitle: { fontSize: 14, color: '#E3F2FD', marginBottom: 4 },
   tripInfo: { fontSize: 12, color: '#FFD700', marginTop: 4 },
   scrollView: { flex: 1, paddingHorizontal: 16 },
@@ -886,6 +1062,8 @@ const styles = StyleSheet.create({
   readingInput: { flex: 1 },
   readingLabel: { fontSize: 12, color: '#666666', marginBottom: 4 },
   readingField: { backgroundColor: '#FFFFFF', borderRadius: 8, padding: 12, fontSize: 14, color: '#1A237E', borderWidth: 1, borderColor: '#E0E0E0' },
+  inputError: { borderColor: '#F44336', borderWidth: 1 },
+  errorText: { fontSize: 10, color: '#F44336', marginTop: 4 },
   checklistSection: { marginTop: 20 },
   sectionTitle: { fontSize: 16, fontWeight: 'bold', color: '#1A237E', marginBottom: 12 },
   checklistContainer: { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
@@ -920,7 +1098,6 @@ const styles = StyleSheet.create({
   statusBadgeWarning: { backgroundColor: '#FFF3E0' },
   statusBadgeText: { fontSize: 12, fontWeight: '600', color: '#666666' },
   noRecentText: { textAlign: 'center', color: '#666666', padding: 20 },
-  // Modal Styles
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   modalContent: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: '80%' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: '#E0E0E0' },

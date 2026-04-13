@@ -1,4 +1,4 @@
-// src/screens/transporter/OperationsScreen.tsx - COMPLETE UPDATED VERSION
+// src/screens/transporter/OperationsScreen.tsx
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
@@ -21,10 +21,11 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import { TransporterStackParamList } from '../../navigation/TransporterNavigator';
 
 // Types
-import { Route, Trip, TripStatus, OperationsStats } from '../../types/operations.types';
+import { Route, Trip, TripStatus } from '../../types/operations.types';
 
 // Constants
 import { COLORS, SIZES, SHADOWS } from '../../constants/theme';
+import { TRIP_STATUS, TRIP_STATUS_CONFIG, getTripStatusConfig } from '../../constants/status';
 
 // Pakistan Cities Data
 const PAKISTAN_CITIES = [
@@ -32,35 +33,22 @@ const PAKISTAN_CITIES = [
   'Lahore', 'Faisalabad', 'Rawalpindi', 'Multan', 'Gujranwala', 'Sialkot', 'Bahawalpur',
   'Sargodha', 'Sheikhupura', 'Rahim Yar Khan', 'Jhang', 'Dera Ghazi Khan', 'Gujrat',
   'Sahiwal', 'Wah Cantonment', 'Kasur', 'Okara', 'Mandi Bahauddin', 'Chiniot',
-
   // Sindh
   'Karachi', 'Hyderabad', 'Sukkur', 'Larkana', 'Nawabshah', 'Mirpur Khas', 'Jacobabad',
   'Shikarpur', 'Dadu', 'Tando Allahyar', 'Thatta', 'Badin', 'Ghotki', 'Kashmore',
-
   // Khyber Pakhtunkhwa
   'Peshawar', 'Mardan', 'Abbottabad', 'Mingora', 'Kohat', 'Bannu', 'Dera Ismail Khan',
   'Charsadda', 'Nowshera', 'Swabi', 'Haripur', 'Mansehra', 'Batkhela', 'Timergara',
-
   // Balochistan
   'Quetta', 'Turbat', 'Khuzdar', 'Hub', 'Chaman', 'Sibi', 'Zhob', 'Gwadar',
   'Dera Murad Jamali', 'Loralai', 'Usta Muhammad', 'Pasni',
-
-  // Islamabad Capital Territory
+  // Islamabad
   'Islamabad',
-
   // Gilgit-Baltistan
   'Gilgit', 'Skardu', 'Hunza', 'Chilas', 'Gahkuch', 'Astore',
-
   // Azad Kashmir
   'Muzaffarabad', 'Mirpur', 'Rawalakot', 'Kotli', 'Bhimber', 'Bagh'
 ].sort();
-
-// Types for conflict checking
-type TimeConflict = {
-  hasConflict: boolean;
-  conflictingTrip?: FirebaseTrip;
-  reason?: string;
-};
 
 // City Picker Modal Component
 const CityPickerModal = ({
@@ -178,7 +166,7 @@ type FirebaseTrip = {
   departureTime: string;
   arrivalTime: string;
   days: string[];
-  status: TripStatus;
+  status: string;
   totalSeats: number;
   availableSeats: number;
   fare: number;
@@ -191,12 +179,14 @@ type FirebaseTrip = {
   endDate?: string;
   repeatType?: string;
   cancelledAt?: any;
+  date?: string;
+  dayOfWeek?: string;
 };
 
 const OperationsScreen = () => {
   const navigation = useNavigation<OperationsScreenNavigationProp>();
   const route = useRoute();
-  const [activeTab, setActiveTab] = useState('schedule');
+  const [activeTab, setActiveTab] = useState<'schedule' | 'routes' | 'today'>('schedule');
   const [routeModalVisible, setRouteModalVisible] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -226,7 +216,7 @@ const OperationsScreen = () => {
   const user = auth().currentUser;
   const daysOfWeek = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
-  // 🔥 Open ScheduleTripScreen automatically
+  // Open ScheduleTripScreen automatically
   useFocusEffect(
     useCallback(() => {
       const params = route.params as any;
@@ -256,7 +246,7 @@ const OperationsScreen = () => {
     return () => unsubscribe();
   }, [user]);
 
-  // 🔥 REAL-TIME ROUTES LISTENER
+  // REAL-TIME ROUTES LISTENER
   useEffect(() => {
     if (!user) return;
 
@@ -278,7 +268,7 @@ const OperationsScreen = () => {
     return () => unsubscribe();
   }, [user]);
 
-  // 🔥 REAL-TIME TRIPS LISTENER
+  // REAL-TIME TRIPS LISTENER
   useEffect(() => {
     if (!user) return;
 
@@ -309,14 +299,14 @@ const OperationsScreen = () => {
     return () => unsubscribe();
   }, [user]);
 
-  // 🔥 FETCH AVAILABLE BUSES
+  // FETCH AVAILABLE BUSES
   useEffect(() => {
     if (!user) return;
 
     const unsubscribe = firestore()
       .collection('buses')
       .where('transporterId', '==', user.uid)
-      .where('status', '==', 'active')
+      .where('status', '==', 'available')
       .onSnapshot(
         (snapshot) => {
           const busesList = snapshot.docs.map(doc => ({
@@ -332,14 +322,14 @@ const OperationsScreen = () => {
     return () => unsubscribe();
   }, [user]);
 
-  // 🔥 FETCH AVAILABLE DRIVERS
+  // FETCH AVAILABLE DRIVERS
   useEffect(() => {
     if (!user) return;
 
     const unsubscribe = firestore()
       .collection('drivers')
       .where('transporterId', '==', user.uid)
-      .where('status', '==', 'active')
+      .where('status', '==', 'available')
       .onSnapshot(
         (snapshot) => {
           const driversList = snapshot.docs.map(doc => ({
@@ -356,67 +346,61 @@ const OperationsScreen = () => {
   }, [user]);
 
   // Manual refresh
-  const onRefresh = useCallback(() => {
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
+    setTimeout(() => {
+      setRefreshing(false);
+    }, 1000);
   }, []);
 
-  // ✅ Fetch distance from OpenStreetMap
-  const fetchDistanceFromOSM = async (fromCity: string, toCity: string) => {
-    if (!fromCity || !toCity) return null;
+  // ✅ Check if trip is expired (30 minutes after departure time)
+  const isTripExpired = useCallback((trip: FirebaseTrip): boolean => {
+    if (trip.status !== TRIP_STATUS.SCHEDULED) return false;
 
-    try {
-      // Add "Pakistan" to get more accurate results
-      const fromQuery = encodeURIComponent(`${fromCity}, Pakistan`);
-      const toQuery = encodeURIComponent(`${toCity}, Pakistan`);
+    const now = new Date();
+    const tripDate = trip.date || new Date().toISOString().split('T')[0];
+    const [hours, minutes] = trip.departureTime.split(':').map(Number);
 
-      // First get coordinates for from city
-      const fromResponse = await fetch(
-        `https://nominatim.openstreetmap.org/search?q=${fromQuery}&format=json&limit=1`,
-        {
-          headers: {
-            'User-Agent': 'BusBuddy/1.0' // Required by Nominatim
-          }
-        }
-      );
-      const fromData = await fromResponse.json();
+    const depDateTime = new Date(tripDate);
+    depDateTime.setHours(hours, minutes, 0, 0);
 
-      // Get coordinates for to city
-      const toResponse = await fetch(
-        `https://nominatim.openstreetmap.org/search?q=${toQuery}&format=json&limit=1`,
-        {
-          headers: {
-            'User-Agent': 'BusBuddy/1.0'
-          }
-        }
-      );
-      const toData = await toResponse.json();
+    const thirtyMinutesAfter = new Date(depDateTime.getTime() + 30 * 60 * 1000);
+    return now > thirtyMinutesAfter;
+  }, []);
 
-      if (fromData.length > 0 && toData.length > 0) {
-        // Get route distance using OSRM
-        const routeResponse = await fetch(
-          `https://router.project-osrm.org/route/v1/driving/${fromData[0].lon},${fromData[0].lat};${toData[0].lon},${toData[0].lat}?overview=false`
-        );
-        const routeData = await routeResponse.json();
-
-        if (routeData.routes && routeData.routes.length > 0) {
-          // Distance in meters, convert to km
-          const distanceKm = Math.round(routeData.routes[0].distance / 1000);
-          return `${distanceKm} km`;
-        }
-      }
-      return null;
-    } catch (error) {
-      console.error('Error fetching distance:', error);
-      return null;
+  // ✅ Get effective status with centralized config
+  const getEffectiveStatus = useCallback((trip: FirebaseTrip): string => {
+    if (isTripExpired(trip)) {
+      return 'expired';
     }
-  };
+    // Map old statuses to new ones
+    if (trip.status === 'upcoming' || trip.status === 'scheduled') {
+      return TRIP_STATUS.SCHEDULED;
+    }
+    if (trip.status === 'active' || trip.status === 'on-time' || trip.status === 'in-progress') {
+      return TRIP_STATUS.IN_PROGRESS;
+    }
+    return trip.status;
+  }, [isTripExpired]);
 
-  // ✅ Get today's trips
+  // ✅ Get status display using centralized config
+  const getStatusDisplay = useCallback((status: string) => {
+    if (status === 'expired') {
+      return { label: 'Expired', icon: '⏰', color: '#FF6B6B' };
+    }
+    return getTripStatusConfig(status);
+  }, []);
+
+  // Get today's trips
   const getTodayTrips = useCallback(() => {
     const today = new Date();
+    const todayStr = today.toISOString().split('T')[0];
     const dayName = today.toLocaleDateString('en-US', { weekday: 'short' });
 
     return trips.filter(trip => {
+      if (trip.date) {
+        return trip.date === todayStr;
+      }
       if (trip.days?.includes('Daily')) return true;
       if (trip.days?.includes(dayName)) return true;
 
@@ -433,17 +417,21 @@ const OperationsScreen = () => {
     });
   }, [trips]);
 
-  // ✅ Calculate stats
+  // ✅ Calculate stats with new statuses
   const stats = useMemo(() => {
     const todayTripsArray = getTodayTrips();
 
-    const activeTrips = trips.filter(t =>
-      t.status === 'active' || t.status === 'upcoming'
-    ).length;
+    const activeTrips = trips.filter(t => {
+      const effectiveStatus = getEffectiveStatus(t);
+      return effectiveStatus === TRIP_STATUS.IN_PROGRESS || effectiveStatus === TRIP_STATUS.SCHEDULED;
+    }).length;
 
-    const todayTrips = todayTripsArray.length;
-    const completedTrips = trips.filter(t => t.status === 'completed').length;
-    const delayedTrips = trips.filter(t => t.status === 'delayed').length;
+    const scheduledTrips = trips.filter(t => getEffectiveStatus(t) === TRIP_STATUS.SCHEDULED).length;
+    const inProgressTrips = trips.filter(t => getEffectiveStatus(t) === TRIP_STATUS.IN_PROGRESS).length;
+    const completedTrips = trips.filter(t => t.status === TRIP_STATUS.COMPLETED).length;
+    const delayedTrips = trips.filter(t => t.status === TRIP_STATUS.DELAYED).length;
+    const cancelledTrips = trips.filter(t => t.status === TRIP_STATUS.CANCELLED).length;
+    const expiredTrips = trips.filter(t => isTripExpired(t)).length;
 
     let totalPassengers = 0;
     let totalRevenue = 0;
@@ -456,16 +444,55 @@ const OperationsScreen = () => {
 
     return {
       activeTrips,
-      todayTrips,
+      todayTrips: todayTripsArray.length,
+      scheduledTrips,
+      inProgressTrips,
       completedTrips,
       delayedTrips,
+      cancelledTrips,
+      expiredTrips,
       totalRevenue,
       totalPassengers,
       totalRoutes: routes.length,
     };
-  }, [trips, routes, getTodayTrips]);
+  }, [trips, routes, getTodayTrips, getEffectiveStatus, isTripExpired]);
 
   const todayTrips = useMemo(() => getTodayTrips(), [getTodayTrips]);
+
+  // Format date for display
+  const formatTripDate = useCallback((trip: FirebaseTrip): string => {
+    if (trip.date) {
+      const date = new Date(trip.date);
+      return date.toLocaleDateString('en-US', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric'
+      });
+    }
+    if (trip.days && trip.days.length > 0) {
+      if (trip.days.includes('Daily')) return 'Daily';
+      return trip.days.join(', ');
+    }
+    return 'N/A';
+  }, []);
+
+  // Check if trip is today
+  const isTripToday = useCallback((trip: FirebaseTrip): boolean => {
+    const today = new Date().toISOString().split('T')[0];
+    if (trip.date) {
+      return trip.date === today;
+    }
+    const today2 = new Date();
+    const dayName = today2.toLocaleDateString('en-US', { weekday: 'short' });
+    if (trip.days?.includes('Daily')) return true;
+    if (trip.days?.includes(dayName)) return true;
+    if (trip.startDate && trip.endDate) {
+      const tripStart = new Date(trip.startDate);
+      const tripEnd = new Date(trip.endDate);
+      return today2 >= tripStart && today2 <= tripEnd;
+    }
+    return false;
+  }, []);
 
   // Format trip for display
   const getDisplayTrip = (trip: FirebaseTrip) => {
@@ -491,198 +518,6 @@ const OperationsScreen = () => {
     };
   };
 
-  // ✅ Conflict checking helper functions
-  const areDaysOverlapping = (days1: string[], days2: string[]): boolean => {
-    if (days1.includes('Daily') || days2.includes('Daily')) return true;
-    return days1.some(day => days2.includes(day));
-  };
-
-  const checkTripConflict = (
-    existingTrip: FirebaseTrip,
-    newDepTime: Date,
-    newArrTime: Date,
-    newDays: string[],
-    newStartDate?: string,
-    newEndDate?: string,
-    type: 'bus' | 'driver' = 'bus'
-  ): TimeConflict => {
-
-    // Check day overlap
-    const dayOverlap = areDaysOverlapping(newDays, existingTrip.days || []);
-    if (!dayOverlap) return { hasConflict: false };
-
-    // Parse existing trip times
-    const existingDep = new Date(`1970-01-01T${existingTrip.departureTime}`);
-    const existingArr = new Date(`1970-01-01T${existingTrip.arrivalTime}`);
-
-    // Check time overlap
-    const timeOverlap = (
-      (newDepTime >= existingDep && newDepTime < existingArr) ||
-      (newArrTime > existingDep && newArrTime <= existingArr) ||
-      (newDepTime <= existingDep && newArrTime >= existingArr)
-    );
-
-    if (!timeOverlap) return { hasConflict: false };
-
-    // Check date range overlap if applicable
-    if (newStartDate && newEndDate && existingTrip.startDate && existingTrip.endDate) {
-      const newStart = new Date(newStartDate);
-      const newEnd = new Date(newEndDate);
-      const existingStart = new Date(existingTrip.startDate);
-      const existingEnd = new Date(existingTrip.endDate);
-
-      const dateOverlap = (
-        (newStart >= existingStart && newStart <= existingEnd) ||
-        (newEnd >= existingStart && newEnd <= existingEnd) ||
-        (newStart <= existingStart && newEnd >= existingEnd)
-      );
-
-      if (!dateOverlap) return { hasConflict: false };
-    }
-
-    // Calculate if driver can physically make it (for driver conflicts)
-    if (type === 'driver') {
-      const timeBetween = Math.abs(newDepTime.getTime() - existingArr.getTime());
-      const hoursBetween = timeBetween / (1000 * 60 * 60);
-
-      // If new trip starts before existing trip ends, definite conflict
-      if (newDepTime < existingArr) {
-        return {
-          hasConflict: true,
-          conflictingTrip: existingTrip,
-          reason: `Driver still on trip ${existingTrip.routeCode} until ${existingTrip.arrivalTime}`
-        };
-      }
-
-      // If new trip starts after existing trip ends, check if driver can reach starting point
-      // Assuming average speed of 60 km/h and max distance of 500km between cities
-      if (hoursBetween < 2) { // Minimum 2 hours to return to starting point
-        return {
-          hasConflict: true,
-          conflictingTrip: existingTrip,
-          reason: `Driver cannot reach starting point in time (only ${Math.round(hoursBetween * 10) / 10} hours gap)`
-        };
-      }
-    }
-
-    // For bus conflicts, simple time overlap is enough
-    if (type === 'bus' && timeOverlap) {
-      return {
-        hasConflict: true,
-        conflictingTrip: existingTrip,
-        reason: `Bus already scheduled ${existingTrip.departureTime}-${existingTrip.arrivalTime}`
-      };
-    }
-
-    return { hasConflict: false };
-  };
-
-  // ✅ Main conflict check function
-  const checkSchedulingConflicts = async (
-    busId: string,
-    driverId: string,
-    departureTime: string,
-    arrivalTime: string,
-    days: string[],
-    startDate?: string,
-    endDate?: string,
-    excludeTripId?: string
-  ): Promise<{ hasConflict: boolean; conflicts: string[] }> => {
-    const conflicts: string[] = [];
-
-    try {
-      // Get all active/upcoming trips
-      const snapshot = await firestore()
-        .collection('trips')
-        .where('status', 'in', ['active', 'upcoming', 'delayed'])
-        .get();
-
-      const allTrips = snapshot.docs
-        .map(doc => ({ id: doc.id, ...doc.data() } as FirebaseTrip))
-        .filter(trip => trip.id !== excludeTripId); // Exclude current trip if editing
-
-      // Parse times for comparison
-      const newDepTime = new Date(`1970-01-01T${departureTime}`);
-      const newArrTime = new Date(`1970-01-01T${arrivalTime}`);
-
-      // Check each existing trip
-      for (const trip of allTrips) {
-        // Check if same bus
-        if (trip.busId === busId) {
-          const busConflict = checkTripConflict(
-            trip,
-            newDepTime,
-            newArrTime,
-            days,
-            startDate,
-            endDate,
-            'bus'
-          );
-          if (busConflict.hasConflict && busConflict.reason) {
-            conflicts.push(`Bus conflict: ${busConflict.reason}`);
-          }
-        }
-
-        // Check if same driver
-        if (trip.driverId === driverId) {
-          const driverConflict = checkTripConflict(
-            trip,
-            newDepTime,
-            newArrTime,
-            days,
-            startDate,
-            endDate,
-            'driver'
-          );
-          if (driverConflict.hasConflict && driverConflict.reason) {
-            conflicts.push(`Driver conflict: ${driverConflict.reason}`);
-          }
-        }
-      }
-
-      // Check driver-bus assignment consistency
-      const bus = buses.find(b => b.id === busId);
-      const driver = drivers.find(d => d.id === driverId);
-
-      if (bus?.assignedDriverId && bus.assignedDriverId !== driverId) {
-        conflicts.push(`Bus ${bus.busNumber} is permanently assigned to a different driver`);
-      }
-
-      if (driver?.assignedBusId && driver.assignedBusId !== busId) {
-        conflicts.push(`Driver ${driver.fullName} is permanently assigned to a different bus`);
-      }
-
-      // Check minimum rest time for driver (8 hours between trips)
-      const driverTrips = allTrips.filter(t => t.driverId === driverId);
-      for (const trip of driverTrips) {
-        const tripArrTime = new Date(`1970-01-01T${trip.arrivalTime}`);
-        const timeDiff = Math.abs(newDepTime.getTime() - tripArrTime.getTime());
-        const hoursDiff = timeDiff / (1000 * 60 * 60);
-
-        if (hoursDiff < 8 && areDaysOverlapping(days, trip.days || [])) {
-          conflicts.push(`Driver needs minimum 8 hours rest between trips (only ${Math.round(hoursDiff * 10) / 10} hours gap)`);
-        }
-      }
-
-      // Check if arrival time is after departure time
-      if (newArrTime <= newDepTime) {
-        conflicts.push('Arrival time must be after departure time');
-      }
-
-      return {
-        hasConflict: conflicts.length > 0,
-        conflicts
-      };
-
-    } catch (error) {
-      console.error('Error checking conflicts:', error);
-      return {
-        hasConflict: true,
-        conflicts: ['Error checking conflicts. Please try again.']
-      };
-    }
-  };
-
   // Schedule Trip button handler
   const handleScheduleTrip = () => {
     navigation.navigate('ScheduleTripScreen', {
@@ -702,7 +537,45 @@ const OperationsScreen = () => {
     setCityPickerVisible(true);
   };
 
-  // Handle city selection with auto distance fetch
+  // Fetch distance from OpenStreetMap
+  const fetchDistanceFromOSM = async (fromCity: string, toCity: string) => {
+    if (!fromCity || !toCity) return null;
+
+    try {
+      const fromQuery = encodeURIComponent(`${fromCity}, Pakistan`);
+      const toQuery = encodeURIComponent(`${toCity}, Pakistan`);
+
+      const fromResponse = await fetch(
+        `https://nominatim.openstreetmap.org/search?q=${fromQuery}&format=json&limit=1`,
+        { headers: { 'User-Agent': 'BusBuddy/1.0' } }
+      );
+      const fromData = await fromResponse.json();
+
+      const toResponse = await fetch(
+        `https://nominatim.openstreetmap.org/search?q=${toQuery}&format=json&limit=1`,
+        { headers: { 'User-Agent': 'BusBuddy/1.0' } }
+      );
+      const toData = await toResponse.json();
+
+      if (fromData.length > 0 && toData.length > 0) {
+        const routeResponse = await fetch(
+          `https://router.project-osrm.org/route/v1/driving/${fromData[0].lon},${fromData[0].lat};${toData[0].lon},${toData[0].lat}?overview=false`
+        );
+        const routeData = await routeResponse.json();
+
+        if (routeData.routes && routeData.routes.length > 0) {
+          const distanceKm = Math.round(routeData.routes[0].distance / 1000);
+          return `${distanceKm} km`;
+        }
+      }
+      return null;
+    } catch (error) {
+      console.error('Error fetching distance:', error);
+      return null;
+    }
+  };
+
+  // Handle city selection
   const handleCitySelect = async (city: string) => {
     const updatedRoute = { ...newRoute };
 
@@ -714,7 +587,6 @@ const OperationsScreen = () => {
 
     setNewRoute(updatedRoute);
 
-    // If both cities are selected, fetch distance
     if (updatedRoute.from && updatedRoute.to) {
       try {
         setRouteLoading(true);
@@ -740,7 +612,6 @@ const OperationsScreen = () => {
       return;
     }
 
-    // Check route code for current transporter only
     const routeExists = routes.some(route =>
       route.code === newRoute.code.toUpperCase() &&
       route.transporterId === user.uid
@@ -754,12 +625,24 @@ const OperationsScreen = () => {
     setRouteLoading(true);
 
     try {
+      // ✅ Calculate duration from distance (rough estimate)
+      let duration = '2h 0m';
+      if (newRoute.distance) {
+        const distanceNum = parseInt(newRoute.distance.replace(/[^0-9]/g, ''));
+        if (!isNaN(distanceNum)) {
+          const hours = Math.floor(distanceNum / 60);
+          const minutes = Math.round((distanceNum % 60) * 0.6);
+          duration = hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+        }
+      }
+
       const routeData = {
         code: newRoute.code.toUpperCase(),
         name: newRoute.name,
         from: newRoute.from,
         to: newRoute.to,
         distance: newRoute.distance,
+        duration: duration, // ✅ ADD THIS
         fare: parseInt(newRoute.fare) || 0,
         transporterId: user.uid,
         createdAt: firestore.FieldValue.serverTimestamp(),
@@ -810,7 +693,7 @@ const OperationsScreen = () => {
     });
   };
 
-  // ✅ UPDATED: Track Trip handler - Navigates to TripTrackingScreen
+  // Track Trip handler
   const handleTrackTrip = (trip: FirebaseTrip) => {
     navigation.navigate('TripTrackingScreen', {
       tripId: trip.id,
@@ -826,15 +709,19 @@ const OperationsScreen = () => {
   // View Trip Details handler
   const handleViewTripDetails = (trip: FirebaseTrip) => {
     const { routeName, passengers, revenue } = getDisplayTrip(trip);
+    const tripDate = formatTripDate(trip);
+    const effectiveStatus = getEffectiveStatus(trip);
+    const statusConfig = getStatusDisplay(effectiveStatus);
 
     Alert.alert(
       'Trip Details',
       `Route: ${routeName}\n` +
+      `Date: ${tripDate}\n` +
       `Bus: ${trip.busNumber}\n` +
       `Driver: ${trip.driverName}\n` +
       `Time: ${trip.departureTime} - ${trip.arrivalTime}\n` +
       `Days: ${trip.days?.join(', ') || 'N/A'}\n` +
-      `Status: ${trip.status}\n` +
+      `Status: ${statusConfig.icon} ${statusConfig.label}\n` +
       `Seats: ${trip.availableSeats || 0}/${trip.totalSeats || 0}\n` +
       `Passengers: ${passengers}\n` +
       `Fare: PKR ${trip.fare || 0}\n` +
@@ -846,43 +733,17 @@ const OperationsScreen = () => {
     );
   };
 
-  // Helper functions
-  const getStatusColor = (status: string) => {
-    switch(status) {
-      case 'active': return COLORS.success;
-      case 'upcoming': return COLORS.info;
-      case 'delayed': return COLORS.warning;
-      case 'completed': return COLORS.purple;
-      case 'cancelled': return COLORS.danger;
-      default: return COLORS.textLight;
-    }
-  };
-
-  const getStatusIcon = (status: string) => {
-    switch(status) {
-      case 'active': return '🟢';
-      case 'upcoming': return '🔵';
-      case 'delayed': return '🟡';
-      case 'completed': return '🟣';
-      case 'cancelled': return '🔴';
-      default: return '⚫';
-    }
-  };
-
-  const getStatusLabel = (status: string) => {
-    switch(status) {
-      case 'active': return 'Active';
-      case 'upcoming': return 'Upcoming';
-      case 'delayed': return 'Delayed';
-      case 'completed': return 'Completed';
-      case 'cancelled': return 'Cancelled';
-      default: return status;
-    }
-  };
-
-  // Render trip card
+  // ✅ Render trip card with new status display
   const renderTripCard = ({ item }: { item: FirebaseTrip }) => {
     const { routeName, routeCode, passengers, revenue } = getDisplayTrip(item);
+    const effectiveStatus = getEffectiveStatus(item);
+    const statusConfig = getStatusDisplay(effectiveStatus);
+    const tripDate = formatTripDate(item);
+    const isToday = isTripToday(item);
+
+    // Check if trip can be tracked (scheduled or in_progress, and today)
+    const canTrack = isToday &&
+      (effectiveStatus === TRIP_STATUS.SCHEDULED || effectiveStatus === TRIP_STATUS.IN_PROGRESS);
 
     return (
       <TouchableOpacity
@@ -895,10 +756,11 @@ const OperationsScreen = () => {
           <View style={styles.tripTitleContainer}>
             <Text style={styles.tripRoute}>{routeName}</Text>
             <Text style={styles.tripCode}>{routeCode}</Text>
+            <Text style={styles.tripDate}>📅 {tripDate}</Text>
           </View>
-          <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) }]}>
+          <View style={[styles.statusBadge, { backgroundColor: statusConfig.color }]}>
             <Text style={styles.statusText}>
-              {getStatusIcon(item.status)} {getStatusLabel(item.status)}
+              {statusConfig.icon} {statusConfig.label}
             </Text>
           </View>
         </View>
@@ -951,15 +813,21 @@ const OperationsScreen = () => {
             <Text style={styles.actionButtonText}>✏️ Edit</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity
-            style={[styles.actionButton, styles.trackButton]}
-            onPress={(e) => {
-              e.stopPropagation();
-              handleTrackTrip(item);
-            }}
-          >
-            <Text style={[styles.actionButtonText, styles.trackButtonText]}>📍 Track</Text>
-          </TouchableOpacity>
+          {canTrack ? (
+            <TouchableOpacity
+              style={[styles.actionButton, styles.trackButton]}
+              onPress={(e) => {
+                e.stopPropagation();
+                handleTrackTrip(item);
+              }}
+            >
+              <Text style={[styles.actionButtonText, styles.trackButtonText]}>📍 Track</Text>
+            </TouchableOpacity>
+          ) : (
+            <View style={[styles.actionButton, styles.trackButtonDisabled]}>
+              <Text style={[styles.actionButtonText, styles.trackButtonTextDisabled]}>📍 Track</Text>
+            </View>
+          )}
         </View>
       </TouchableOpacity>
     );
@@ -980,6 +848,10 @@ const OperationsScreen = () => {
         <View style={styles.routeDetail}>
           <Text style={styles.routeDetailIcon}>📏</Text>
           <Text style={styles.routeDetailText}>{item.distance}</Text>
+        </View>
+        <View style={styles.routeDetail}>
+          <Text style={styles.routeDetailIcon}>⏱️</Text>
+          <Text style={styles.routeDetailText}>{item.duration || '2h 0m'}</Text>
         </View>
         <View style={styles.routeDetail}>
           <Text style={styles.routeDetailIcon}>💰</Text>
@@ -1026,8 +898,8 @@ const OperationsScreen = () => {
         onPress={() => setActiveTab('schedule')}
         activeOpacity={0.7}
       >
-        <Text style={styles.statValue}>{stats.activeTrips}</Text>
-        <Text style={styles.statLabel}>Active Trips</Text>
+        <Text style={styles.statValue}>{stats.inProgressTrips}</Text>
+        <Text style={styles.statLabel}>In Progress</Text>
       </TouchableOpacity>
 
       <TouchableOpacity
@@ -1041,11 +913,11 @@ const OperationsScreen = () => {
 
       <TouchableOpacity
         style={styles.statCard}
-        onPress={() => Alert.alert('Passengers', `Total: ${stats.totalPassengers} passengers`)}
+        onPress={() => Alert.alert('Scheduled', `${stats.scheduledTrips} trips scheduled`)}
         activeOpacity={0.7}
       >
-        <Text style={styles.statValue}>{stats.totalPassengers}</Text>
-        <Text style={styles.statLabel}>Passengers</Text>
+        <Text style={styles.statValue}>{stats.scheduledTrips}</Text>
+        <Text style={styles.statLabel}>Scheduled</Text>
       </TouchableOpacity>
 
       <TouchableOpacity
@@ -1053,7 +925,7 @@ const OperationsScreen = () => {
         onPress={() => Alert.alert('Revenue', `Total: PKR ${stats.totalRevenue.toLocaleString()}`)}
         activeOpacity={0.7}
       >
-        <Text style={styles.statValue}>PKR {stats.totalRevenue.toLocaleString()}</Text>
+        <Text style={styles.statValue}>PKR {(stats.totalRevenue / 1000).toFixed(1)}K</Text>
         <Text style={styles.statLabel}>Revenue</Text>
       </TouchableOpacity>
     </View>
@@ -1089,7 +961,6 @@ const OperationsScreen = () => {
               editable={!routeLoading}
             />
 
-            {/* From City with Picker */}
             <TouchableOpacity
               style={styles.cityPickerButton}
               onPress={() => openCityPicker('from')}
@@ -1102,7 +973,6 @@ const OperationsScreen = () => {
               <Text style={styles.dropdownIcon}>▼</Text>
             </TouchableOpacity>
 
-            {/* To City with Picker */}
             <TouchableOpacity
               style={styles.cityPickerButton}
               onPress={() => openCityPicker('to')}
@@ -1120,7 +990,7 @@ const OperationsScreen = () => {
                 style={[styles.input, styles.halfInput]}
                 placeholder="Distance (auto-fetched)"
                 value={newRoute.distance}
-                editable={false} // Make it read-only since it's auto-fetched
+                editable={false}
                 placeholderTextColor={COLORS.textLight}
               />
               <TextInput
@@ -1181,7 +1051,6 @@ const OperationsScreen = () => {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* City Picker Modal */}
       <CityPickerModal
         visible={cityPickerVisible}
         onClose={() => setCityPickerVisible(false)}
@@ -1190,7 +1059,6 @@ const OperationsScreen = () => {
         selectedCity={cityPickerField === 'from' ? newRoute.from : newRoute.to}
       />
 
-      {/* Header */}
       <View style={styles.header}>
         <View>
           <Text style={styles.title}>📅 Operations</Text>
@@ -1212,17 +1080,15 @@ const OperationsScreen = () => {
         </View>
       </View>
 
-      {/* Stats */}
       {renderStatsHeader()}
 
-      {/* Tabs */}
       <View style={styles.tabContainer}>
         <TouchableOpacity
           style={[styles.tab, activeTab === 'schedule' && styles.tabActive]}
           onPress={() => setActiveTab('schedule')}
         >
           <Text style={[styles.tabText, activeTab === 'schedule' && styles.tabTextActive]}>
-            📅 Schedule
+            📅 All Trips
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
@@ -1243,7 +1109,6 @@ const OperationsScreen = () => {
         </TouchableOpacity>
       </View>
 
-      {/* Content based on active tab */}
       {activeTab === 'schedule' && (
         <FlatList
           data={trips}
@@ -1252,9 +1117,14 @@ const OperationsScreen = () => {
           contentContainerStyle={styles.listContainer}
           showsVerticalScrollIndicator={false}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={[COLORS.primary]}
+              tintColor={COLORS.primary}
+            />
           }
-          ListHeaderComponent={<Text style={styles.sectionTitle}>All Scheduled Trips</Text>}
+          ListHeaderComponent={<Text style={styles.sectionTitle}>All Trips</Text>}
           ListEmptyComponent={renderEmptyState('trips')}
         />
       )}
@@ -1267,7 +1137,12 @@ const OperationsScreen = () => {
           contentContainerStyle={styles.listContainer}
           showsVerticalScrollIndicator={false}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={[COLORS.primary]}
+              tintColor={COLORS.primary}
+            />
           }
           ListHeaderComponent={<Text style={styles.sectionTitle}>Available Routes</Text>}
           ListEmptyComponent={renderEmptyState('routes')}
@@ -1282,20 +1157,35 @@ const OperationsScreen = () => {
           contentContainerStyle={styles.listContainer}
           showsVerticalScrollIndicator={false}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={[COLORS.primary]}
+              tintColor={COLORS.primary}
+            />
           }
-          ListHeaderComponent={<Text style={styles.sectionTitle}>Today's Schedule</Text>}
+          ListHeaderComponent={
+            <>
+              <Text style={styles.sectionTitle}>Today's Schedule</Text>
+              <Text style={styles.todayDate}>
+                {new Date().toLocaleDateString('en-US', {
+                  weekday: 'long',
+                  year: 'numeric',
+                  month: 'long',
+                  day: 'numeric'
+                })}
+              </Text>
+            </>
+          }
           ListEmptyComponent={renderEmptyState('trips')}
         />
       )}
 
-      {/* Add Route Modal */}
       {renderRouteModal()}
     </SafeAreaView>
   );
 };
 
-// Stylesheet
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -1401,8 +1291,13 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
     color: COLORS.primary,
-    marginBottom: SIZES.md,
+    marginBottom: SIZES.xs,
     marginTop: SIZES.xs,
+  },
+  todayDate: {
+    fontSize: 14,
+    color: COLORS.textLight,
+    marginBottom: SIZES.md,
   },
   tripCard: {
     backgroundColor: COLORS.white,
@@ -1429,6 +1324,12 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: COLORS.textLight,
     marginTop: 2,
+  },
+  tripDate: {
+    fontSize: 12,
+    color: COLORS.info,
+    marginTop: 4,
+    fontWeight: '500',
   },
   statusBadge: {
     paddingHorizontal: SIZES.sm,
@@ -1502,6 +1403,13 @@ const styles = StyleSheet.create({
   },
   trackButtonText: {
     color: COLORS.info,
+  },
+  trackButtonDisabled: {
+    backgroundColor: '#F5F5F5',
+    opacity: 0.5,
+  },
+  trackButtonTextDisabled: {
+    color: COLORS.textLight,
   },
   routeCard: {
     backgroundColor: COLORS.white,
@@ -1656,7 +1564,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontSize: 15,
   },
-  // City Picker Styles
   cityPickerButton: {
     flexDirection: 'row',
     alignItems: 'center',

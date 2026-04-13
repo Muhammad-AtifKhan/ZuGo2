@@ -1,3 +1,4 @@
+// src/screens/transporter/DashboardScreen.tsx
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
@@ -16,12 +17,26 @@ import { useNavigation } from '@react-navigation/native';
 import firestore from '@react-native-firebase/firestore';
 import auth from '@react-native-firebase/auth';
 
+// Constants
+import { COLORS, SIZES, SHADOWS } from '../../constants/theme';
+import {
+  BUS_STATUS,
+  BUS_STATUS_CONFIG,
+  DRIVER_STATUS,
+  DRIVER_STATUS_CONFIG,
+  TRIP_STATUS,
+  TRIP_STATUS_CONFIG,
+  getBusStatusConfig,
+  getDriverStatusConfig,
+  getTripStatusConfig,
+} from '../../constants/status';
+
 // Types
-type Bus = {
+type DashboardBus = {
   id: string;
   number: string;
   registration: string;
-  status: 'active' | 'maintenance' | 'inactive';
+  status: string;
   driver?: string;
   driverId?: string;
   lastMaintenance: string;
@@ -29,18 +44,18 @@ type Bus = {
   capacity: number;
 };
 
-type Driver = {
+type DashboardDriver = {
   id: string;
   name: string;
   contact: string;
-  status: 'on-duty' | 'online' | 'offline';
+  status: string;
   busAssigned?: string;
   busId?: string;
   rating: number;
   totalTrips: number;
 };
 
-type Trip = {
+type DashboardTrip = {
   id: string;
   time: string;
   route: string;
@@ -49,7 +64,7 @@ type Trip = {
   busId: string;
   driver: string;
   driverId: string;
-  status: 'on-time' | 'delayed' | 'upcoming' | 'completed';
+  status: string;
   passengers: number;
   revenue: number;
   departureTime: string;
@@ -88,36 +103,41 @@ const DashboardScreen = () => {
   const [transporterName, setTransporterName] = useState('');
 
   // Data states
-  const [buses, setBuses] = useState<Bus[]>([]);
-  const [drivers, setDrivers] = useState<Driver[]>([]);
-  const [trips, setTrips] = useState<Trip[]>([]);
+  const [buses, setBuses] = useState<DashboardBus[]>([]);
+  const [drivers, setDrivers] = useState<DashboardDriver[]>([]);
+  const [trips, setTrips] = useState<DashboardTrip[]>([]);
   const [alerts, setAlerts] = useState<AlertType[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
 
-  // Stats state
+  // ✅ Stats state with new statuses
   const [stats, setStats] = useState({
     totalBuses: 0,
-    activeBuses: 0,
+    availableBuses: 0,
+    onTripBuses: 0,
     maintenanceBuses: 0,
     inactiveBuses: 0,
     totalDrivers: 0,
-    activeDrivers: 0,
-    onlineDrivers: 0,
+    availableDrivers: 0,
+    onTripDrivers: 0,
     offlineDrivers: 0,
+    onLeaveDrivers: 0,
+    suspendedDrivers: 0,
     todayRevenue: 0,
     todayTrips: 0,
     onTimePerformance: 0,
+    scheduledTrips: 0,
+    inProgressTrips: 0,
     completedTrips: 0,
     delayedTrips: 0,
-    upcomingTrips: 0,
+    cancelledTrips: 0,
     averageRating: 0,
   });
 
   // Live stats
   const [liveStats, setLiveStats] = useState({
-    activeTrips: 0,
+    inProgressTrips: 0,
     delayedTrips: 0,
-    upcomingTrips: 0,
+    scheduledTrips: 0,
     todayRevenue: 0,
   });
 
@@ -136,18 +156,11 @@ const DashboardScreen = () => {
         }
 
         // Set up listeners
-        const unsubscribers = [
-          setupBusesListener(),
-          setupDriversListener(),
-          setupTripsListener(),
-          setupAlertsListener(),
-          setupNotificationsListener(),
-        ];
-
-        // Cleanup on unmount
-        return () => {
-          unsubscribers.forEach(unsubscribe => unsubscribe());
-        };
+        setupBusesListener();
+        setupDriversListener();
+        setupTripsListener();
+        setupAlertsListener();
+        setupNotificationsListener();
 
       } catch (error) {
         console.error('Error fetching dashboard data:', error);
@@ -167,31 +180,36 @@ const DashboardScreen = () => {
       .where('transporterId', '==', transporterId)
       .onSnapshot(
         (snapshot) => {
-          const busesList: Bus[] = [];
+          const busesList: DashboardBus[] = [];
           snapshot.forEach(doc => {
             const data = doc.data();
+            // ✅ Map old status to new if needed
+            let status = data.status;
+            if (status === 'active') status = BUS_STATUS.AVAILABLE;
+
             busesList.push({
               id: doc.id,
               number: data.busNumber || data.number || '',
-              registration: data.registration || '',
-              status: data.status || 'inactive',
+              registration: data.registration || data.registrationNumber || '',
+              status: status,
               driver: data.driverName || data.driver,
               driverId: data.driverId,
-              lastMaintenance: data.lastMaintenance?.toDate?.()?.toLocaleDateString() || data.lastMaintenance || 'N/A',
-              nextMaintenance: data.nextMaintenance?.toDate?.()?.toLocaleDateString() || data.nextMaintenance || 'N/A',
+              lastMaintenance: data.lastMaintenance?.toDate?.()?.toLocaleDateString() || 'N/A',
+              nextMaintenance: data.nextMaintenance?.toDate?.()?.toLocaleDateString() || 'N/A',
               capacity: data.capacity || 40,
             });
           });
 
           setBuses(busesList);
 
-          // Update stats
+          // ✅ Update stats with new statuses
           setStats(prev => ({
             ...prev,
             totalBuses: busesList.length,
-            activeBuses: busesList.filter(b => b.status === 'active').length,
-            maintenanceBuses: busesList.filter(b => b.status === 'maintenance').length,
-            inactiveBuses: busesList.filter(b => b.status === 'inactive').length,
+            availableBuses: busesList.filter(b => b.status === BUS_STATUS.AVAILABLE).length,
+            onTripBuses: busesList.filter(b => b.status === BUS_STATUS.ON_TRIP).length,
+            maintenanceBuses: busesList.filter(b => b.status === BUS_STATUS.MAINTENANCE).length,
+            inactiveBuses: busesList.filter(b => b.status === BUS_STATUS.INACTIVE).length,
           }));
         },
         (error) => console.error('Buses listener error:', error)
@@ -204,16 +222,22 @@ const DashboardScreen = () => {
       .where('transporterId', '==', transporterId)
       .onSnapshot(
         (snapshot) => {
-          const driversList: Driver[] = [];
+          const driversList: DashboardDriver[] = [];
           snapshot.forEach(doc => {
             const data = doc.data();
+            // ✅ Map old status to new
+            let status = data.status;
+            if (status === 'active' || status === 'online') status = DRIVER_STATUS.AVAILABLE;
+            if (status === 'on-duty') status = DRIVER_STATUS.ON_TRIP;
+            if (status === 'inactive' || status === 'offline') status = DRIVER_STATUS.OFFLINE;
+
             driversList.push({
               id: doc.id,
               name: data.fullName || data.name || '',
               contact: data.contactNumber || data.phone || '',
-              status: data.status || 'offline',
-              busAssigned: data.busNumber,
-              busId: data.busId,
+              status: status,
+              busAssigned: data.busNumber || data.vehicleAssigned,
+              busId: data.busId || data.busAssignedId,
               rating: data.rating || 0,
               totalTrips: data.totalRides || 0,
             });
@@ -226,12 +250,15 @@ const DashboardScreen = () => {
             ? driversList.reduce((sum, d) => sum + d.rating, 0) / driversList.length
             : 0;
 
+          // ✅ Update stats with new statuses
           setStats(prev => ({
             ...prev,
             totalDrivers: driversList.length,
-            activeDrivers: driversList.filter(d => d.status === 'on-duty').length,
-            onlineDrivers: driversList.filter(d => d.status === 'online').length,
-            offlineDrivers: driversList.filter(d => d.status === 'offline').length,
+            availableDrivers: driversList.filter(d => d.status === DRIVER_STATUS.AVAILABLE).length,
+            onTripDrivers: driversList.filter(d => d.status === DRIVER_STATUS.ON_TRIP).length,
+            offlineDrivers: driversList.filter(d => d.status === DRIVER_STATUS.OFFLINE).length,
+            onLeaveDrivers: driversList.filter(d => d.status === DRIVER_STATUS.ON_LEAVE).length,
+            suspendedDrivers: driversList.filter(d => d.status === DRIVER_STATUS.SUSPENDED).length,
             averageRating: Math.round(avgRating * 10) / 10,
           }));
         },
@@ -252,12 +279,17 @@ const DashboardScreen = () => {
       .where('date', '<', tomorrow.toISOString().split('T')[0])
       .onSnapshot(
         (snapshot) => {
-          const tripsList: Trip[] = [];
+          const tripsList: DashboardTrip[] = [];
           let totalRevenue = 0;
 
           snapshot.forEach(doc => {
             const data = doc.data();
-            const trip: Trip = {
+            // ✅ Map old status to new
+            let status = data.status;
+            if (status === 'upcoming' || status === 'scheduled') status = TRIP_STATUS.SCHEDULED;
+            if (status === 'active' || status === 'on-time' || status === 'in-progress') status = TRIP_STATUS.IN_PROGRESS;
+
+            const trip: DashboardTrip = {
               id: doc.id,
               time: data.departureTime || '',
               route: data.routeName || '',
@@ -266,8 +298,8 @@ const DashboardScreen = () => {
               busId: data.busId || '',
               driver: data.driverName || '',
               driverId: data.driverId || '',
-              status: mapTripStatus(data.status),
-              passengers: data.bookedSeats || 0,
+              status: status,
+              passengers: data.bookedSeats || (data.totalSeats - data.availableSeats) || 0,
               revenue: data.revenue || 0,
               departureTime: data.departureTime || '',
               arrivalTime: data.arrivalTime || '',
@@ -278,26 +310,31 @@ const DashboardScreen = () => {
 
           setTrips(tripsList);
 
-          // Calculate stats
-          const onTimeTrips = tripsList.filter(t => t.status === 'on-time').length;
-          const delayedTrips = tripsList.filter(t => t.status === 'delayed').length;
-          const completedTrips = tripsList.filter(t => t.status === 'completed').length;
-          const upcomingTrips = tripsList.filter(t => t.status === 'upcoming').length;
+          // ✅ Calculate stats with new statuses
+          const scheduledTrips = tripsList.filter(t => t.status === TRIP_STATUS.SCHEDULED).length;
+          const inProgressTrips = tripsList.filter(t => t.status === TRIP_STATUS.IN_PROGRESS).length;
+          const completedTrips = tripsList.filter(t => t.status === TRIP_STATUS.COMPLETED).length;
+          const delayedTrips = tripsList.filter(t => t.status === TRIP_STATUS.DELAYED).length;
+          const cancelledTrips = tripsList.filter(t => t.status === TRIP_STATUS.CANCELLED).length;
 
           setStats(prev => ({
             ...prev,
             todayTrips: tripsList.length,
             todayRevenue: totalRevenue,
-            onTimePerformance: tripsList.length > 0 ? Math.round((onTimeTrips / tripsList.length) * 100) : 0,
-            completedTrips: completedTrips,
-            delayedTrips: delayedTrips,
-            upcomingTrips: upcomingTrips,
+            onTimePerformance: tripsList.length > 0
+              ? Math.round(((inProgressTrips + completedTrips) / tripsList.length) * 100)
+              : 0,
+            scheduledTrips,
+            inProgressTrips,
+            completedTrips,
+            delayedTrips,
+            cancelledTrips,
           }));
 
           setLiveStats({
-            activeTrips: tripsList.filter(t => t.status === 'on-time' || t.status === 'delayed').length,
-            delayedTrips: delayedTrips,
-            upcomingTrips: upcomingTrips,
+            inProgressTrips,
+            delayedTrips,
+            scheduledTrips,
             todayRevenue: totalRevenue,
           });
         },
@@ -364,18 +401,6 @@ const DashboardScreen = () => {
   };
 
   // Helper functions
-  const mapTripStatus = (status: string): Trip['status'] => {
-    switch (status) {
-      case 'active':
-      case 'in-progress': return 'on-time';
-      case 'delayed': return 'delayed';
-      case 'scheduled':
-      case 'upcoming': return 'upcoming';
-      case 'completed': return 'completed';
-      default: return 'upcoming';
-    }
-  };
-
   const getTimeAgo = (date: Date): string => {
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
@@ -390,24 +415,9 @@ const DashboardScreen = () => {
     return `${diffDays} days ago`;
   };
 
-  const getStatusIcon = (status: string) => {
-    switch(status) {
-      case 'active': case 'on-time': return '🟢';
-      case 'maintenance': case 'delayed': return '🟡';
-      case 'inactive': case 'completed': return '🔵';
-      case 'upcoming': return '⚪';
-      default: return '⚫';
-    }
-  };
-
-  const getStatusColor = (status: string) => {
-    switch(status) {
-      case 'active': case 'on-time': return '#4CAF50';
-      case 'maintenance': case 'delayed': return '#FF9800';
-      case 'inactive': case 'completed': return '#2196F3';
-      case 'upcoming': return '#9C27B0';
-      default: return '#666666';
-    }
+  // ✅ Get status display using centralized config
+  const getTripStatusDisplay = (status: string) => {
+    return getTripStatusConfig(status);
   };
 
   // Refresh handler
@@ -420,31 +430,17 @@ const DashboardScreen = () => {
   const handleQuickAction = (action: string) => {
     switch(action) {
       case 'Add Bus':
-        navigation.navigate('Fleet', {
-          screen: 'AddBus'
-        });
+        navigation.navigate('Fleet' as never);
         break;
-
       case 'Add Driver':
-        navigation.navigate('Drivers', {
-          screen: 'AddDriver'
-        });
+        navigation.navigate('Drivers' as never);
         break;
-
       case 'Schedule Trip':
-        navigation.navigate('Operations', {
-          screen: 'ScheduleTrip'
-        });
+        navigation.navigate('Operations' as never);
         break;
-
       case 'Send Announcement':
         setAnnounceModalVisible(true);
         break;
-
-      case 'Generate Report':
-        navigation.navigate('ReportsProfile');
-        break;
-
       default:
         Alert.alert('Coming Soon', 'This feature will be available soon');
     }
@@ -469,31 +465,21 @@ const DashboardScreen = () => {
   const handleNotificationAction = (notification: Notification) => {
     switch(notification.type) {
       case 'maintenance':
-        if (notification.actionData?.busId) {
-          navigation.navigate('Fleet', {
-            screen: 'BusDetails',
-            params: { busId: notification.actionData.busId }
-          });
-        } else {
-          navigation.navigate('Fleet');
-        }
+        navigation.navigate('Fleet' as never);
         break;
-
       case 'warning':
-        navigation.navigate('Operations');
+        navigation.navigate('Operations' as never);
         break;
-
       case 'emergency':
         Alert.alert(
           '🚨 EMERGENCY',
           notification.message,
           [
             { text: 'Call Driver', onPress: () => Alert.alert('Calling', 'Connecting to driver...') },
-            { text: 'View Details', onPress: () => navigation.navigate('Emergency') }
+            { text: 'View Details', onPress: () => navigation.navigate('Operations' as never) }
           ]
         );
         break;
-
       default:
         Alert.alert(notification.type, notification.message);
     }
@@ -540,13 +526,11 @@ const DashboardScreen = () => {
           text: 'Send',
           onPress: async () => {
             try {
-              // Get all drivers
               const driversSnapshot = await firestore()
                 .collection('drivers')
                 .where('transporterId', '==', transporterId)
                 .get();
 
-              // Create notifications for all drivers
               const batch = firestore().batch();
               driversSnapshot.docs.forEach(driverDoc => {
                 const notifRef = firestore().collection('notifications').doc();
@@ -564,7 +548,6 @@ const DashboardScreen = () => {
                 });
               });
 
-              // Save announcement record
               const announceRef = firestore().collection('announcements').doc();
               batch.set(announceRef, {
                 transporterId: transporterId,
@@ -597,27 +580,17 @@ const DashboardScreen = () => {
 
       switch(alert.type) {
         case 'warning':
-          Alert.alert(
-            '⚠️ Maintenance Required',
-            alert.message,
-            [
-              { text: 'Cancel', style: 'cancel' },
-              { text: 'Schedule Maintenance', onPress: () => navigation.navigate('Fleet') },
-            ]
-          );
+          Alert.alert('⚠️ Maintenance Required', alert.message, [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Schedule Maintenance', onPress: () => navigation.navigate('Fleet' as never) },
+          ]);
           break;
-
         case 'error':
-          Alert.alert(
-            '❌ Emergency',
-            alert.message,
-            [
-              { text: 'Cancel', style: 'cancel' },
-              { text: 'View Details', onPress: () => navigation.navigate('Emergency') },
-            ]
-          );
+          Alert.alert('❌ Emergency', alert.message, [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'View Details', onPress: () => navigation.navigate('Operations' as never) },
+          ]);
           break;
-
         default:
           Alert.alert('Info', alert.message);
       }
@@ -626,20 +599,13 @@ const DashboardScreen = () => {
     }
   };
 
-  // View all trips
-  const handleViewAllTrips = () => {
-    navigation.navigate('Operations', {
-      screen: 'Schedule'
-    });
-  };
-
   const unreadCount = notifications.filter(n => !n.read).length;
 
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#1A237E" />
+          <ActivityIndicator size="large" color={COLORS.primary} />
           <Text style={styles.loadingText}>Loading Dashboard...</Text>
         </View>
       </SafeAreaView>
@@ -673,7 +639,7 @@ const DashboardScreen = () => {
           </TouchableOpacity>
         </View>
 
-        {/* Notifications Dropdown Modal */}
+        {/* Notifications Dropdown */}
         {showNotifications && (
           <View style={styles.notificationsDropdown}>
             <View style={styles.notificationsHeader}>
@@ -718,7 +684,7 @@ const DashboardScreen = () => {
               style={styles.viewAllNotifications}
               onPress={() => {
                 setShowNotifications(false);
-                navigation.navigate('Notifications');
+                navigation.navigate('Notifications' as never);
               }}
             >
               <Text style={styles.viewAllText}>View All Notifications →</Text>
@@ -726,21 +692,21 @@ const DashboardScreen = () => {
           </View>
         )}
 
-        {/* Quick Stats */}
+        {/* ✅ Quick Stats with new statuses */}
         <Text style={styles.sectionTitle}>📊 Business Overview</Text>
         <View style={styles.statsContainer}>
           <View style={styles.statCard}>
             <Text style={[styles.statIcon, { color: '#4A90E2' }]}>🚌</Text>
             <Text style={styles.statValue}>{stats.totalBuses}</Text>
             <Text style={styles.statLabel}>Total Buses</Text>
-            <Text style={styles.statSubLabel}>{stats.activeBuses} active</Text>
+            <Text style={styles.statSubLabel}>{stats.availableBuses} available</Text>
           </View>
 
           <View style={styles.statCard}>
             <Text style={[styles.statIcon, { color: '#4CAF50' }]}>👤</Text>
-            <Text style={styles.statValue}>{stats.activeDrivers}</Text>
-            <Text style={styles.statLabel}>Active Drivers</Text>
-            <Text style={styles.statSubLabel}>{stats.onlineDrivers} online</Text>
+            <Text style={styles.statValue}>{stats.availableDrivers}</Text>
+            <Text style={styles.statLabel}>Available Drivers</Text>
+            <Text style={styles.statSubLabel}>{stats.onTripDrivers} on trip</Text>
           </View>
 
           <View style={styles.statCard}>
@@ -802,27 +768,30 @@ const DashboardScreen = () => {
           </TouchableOpacity>
         </View>
 
-        {/* Today's Trips */}
+        {/* ✅ Today's Trips with new status display */}
         <Text style={styles.sectionTitle}>📅 Today's Operations</Text>
         <View style={styles.tripsContainer}>
-          {trips.slice(0, 3).map((trip) => (
-            <View key={trip.id} style={styles.tripCard}>
-              <View style={styles.tripHeader}>
-                <Text style={styles.tripTime}>{trip.departureTime}</Text>
-                <View style={[styles.statusBadge, { backgroundColor: getStatusColor(trip.status) }]}>
-                  <Text style={styles.statusBadgeText}>
-                    {getStatusIcon(trip.status)} {trip.status}
-                  </Text>
+          {trips.slice(0, 3).map((trip) => {
+            const statusConfig = getTripStatusDisplay(trip.status);
+            return (
+              <View key={trip.id} style={styles.tripCard}>
+                <View style={styles.tripHeader}>
+                  <Text style={styles.tripTime}>{trip.departureTime}</Text>
+                  <View style={[styles.statusBadge, { backgroundColor: statusConfig.color }]}>
+                    <Text style={styles.statusBadgeText}>
+                      {statusConfig.icon} {statusConfig.label}
+                    </Text>
+                  </View>
+                </View>
+                <Text style={styles.tripRoute}>{trip.route}</Text>
+                <View style={styles.tripDetails}>
+                  <Text style={styles.tripDetail}>🚌 {trip.bus}</Text>
+                  <Text style={styles.tripDetail}>👤 {trip.driver}</Text>
+                  <Text style={styles.tripDetail}>👥 {trip.passengers} passengers</Text>
                 </View>
               </View>
-              <Text style={styles.tripRoute}>{trip.route}</Text>
-              <View style={styles.tripDetails}>
-                <Text style={styles.tripDetail}>🚌 {trip.bus}</Text>
-                <Text style={styles.tripDetail}>👤 {trip.driver}</Text>
-                <Text style={styles.tripDetail}>👥 {trip.passengers} passengers</Text>
-              </View>
-            </View>
-          ))}
+            );
+          })}
           {trips.length === 0 && (
             <View style={styles.emptyTrips}>
               <Text style={styles.emptyTripsText}>No trips scheduled for today</Text>
@@ -830,7 +799,7 @@ const DashboardScreen = () => {
           )}
           <TouchableOpacity
             style={styles.viewAllButton}
-            onPress={handleViewAllTrips}
+            onPress={() => navigation.navigate('Operations' as never)}
           >
             <Text style={styles.viewAllText}>View All Trips →</Text>
           </TouchableOpacity>
@@ -872,23 +841,23 @@ const DashboardScreen = () => {
           )}
         </View>
 
-        {/* Live Stats */}
+        {/* ✅ Live Stats with new statuses */}
         <Text style={styles.sectionTitle}>📈 Live Statistics</Text>
         <View style={styles.liveStatsContainer}>
           <View style={styles.liveStat}>
-            <Text style={styles.liveStatValue}>{liveStats.activeTrips}</Text>
-            <Text style={styles.liveStatLabel}>Active Trips</Text>
+            <Text style={styles.liveStatValue}>{liveStats.inProgressTrips}</Text>
+            <Text style={styles.liveStatLabel}>In Progress</Text>
           </View>
           <View style={styles.liveStat}>
             <Text style={styles.liveStatValue}>{liveStats.delayedTrips}</Text>
             <Text style={styles.liveStatLabel}>Delayed</Text>
           </View>
           <View style={styles.liveStat}>
-            <Text style={styles.liveStatValue}>{liveStats.upcomingTrips}</Text>
-            <Text style={styles.liveStatLabel}>Upcoming</Text>
+            <Text style={styles.liveStatValue}>{liveStats.scheduledTrips}</Text>
+            <Text style={styles.liveStatLabel}>Scheduled</Text>
           </View>
           <View style={styles.liveStat}>
-            <Text style={styles.liveStatValue}>PKR {liveStats.todayRevenue}</Text>
+            <Text style={styles.liveStatValue}>PKR {liveStats.todayRevenue.toLocaleString()}</Text>
             <Text style={styles.liveStatLabel}>Today</Text>
           </View>
         </View>
@@ -958,7 +927,7 @@ const styles = StyleSheet.create({
   loadingText: {
     marginTop: 12,
     fontSize: 16,
-    color: '#1A237E',
+    color: COLORS.primary,
   },
   header: {
     flexDirection: 'row',
@@ -966,7 +935,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 20,
-    backgroundColor: '#1A237E',
+    backgroundColor: COLORS.primary,
   },
   companyName: {
     fontSize: 20,
@@ -1028,7 +997,7 @@ const styles = StyleSheet.create({
   notificationsTitle: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#1A237E',
+    color: COLORS.primary,
   },
   markAllReadText: {
     fontSize: 14,
@@ -1098,7 +1067,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#1A237E',
+    color: COLORS.primary,
     marginTop: 24,
     marginBottom: 16,
     marginLeft: 16,
@@ -1129,7 +1098,7 @@ const styles = StyleSheet.create({
   statValue: {
     fontSize: 24,
     fontWeight: '700',
-    color: '#1A237E',
+    color: COLORS.primary,
     marginBottom: 4,
   },
   statLabel: {
@@ -1192,7 +1161,7 @@ const styles = StyleSheet.create({
   tripTime: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#1A237E',
+    color: COLORS.primary,
   },
   statusBadge: {
     paddingHorizontal: 12,
@@ -1308,7 +1277,7 @@ const styles = StyleSheet.create({
   liveStatValue: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#1A237E',
+    color: COLORS.primary,
     marginBottom: 4,
   },
   liveStatLabel: {
@@ -1336,7 +1305,7 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 20,
     fontWeight: '700',
-    color: '#1A237E',
+    color: COLORS.primary,
     marginBottom: 4,
   },
   modalSubtitle: {

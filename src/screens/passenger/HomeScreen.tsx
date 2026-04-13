@@ -1,5 +1,5 @@
-// src/screens/passenger/HomeScreen.tsx - WITH USEFOCUSEFFECT IMPLEMENTED
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+// src/screens/passenger/HomeScreen.tsx - STANDARDIZED STATUSES
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -23,6 +23,9 @@ import auth from '@react-native-firebase/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { cleanupExpiredBookings } from '../../utils/bookingCleanup';
+
+// ✅ Import standardized status constants
+import { TRIP_STATUS } from '../../constants/status';
 
 type HomeScreenNavigationProp = StackNavigationProp<PassengerStackParamList, 'Home'>;
 
@@ -63,6 +66,7 @@ interface Trip {
   availableSeats: number;
   fare: number;
   busType: string;
+  status?: string; // ✅ Added status field
 }
 
 interface QuickBooking {
@@ -93,7 +97,6 @@ interface RecentSearch {
 
 // Pakistan Cities Data (Hardcoded as backup)
 const PAKISTAN_CITIES = [
-  // Punjab
   { id: 'lhe', name: 'Lahore', code: 'LHE', province: 'Punjab', popular: true },
   { id: 'fsd', name: 'Faisalabad', code: 'FSD', province: 'Punjab', popular: true },
   { id: 'rwp', name: 'Rawalpindi', code: 'RWP', province: 'Punjab', popular: true },
@@ -102,29 +105,18 @@ const PAKISTAN_CITIES = [
   { id: 'skt', name: 'Sialkot', code: 'SKT', province: 'Punjab', popular: false },
   { id: 'bhv', name: 'Bahawalpur', code: 'BHV', province: 'Punjab', popular: false },
   { id: 'sgd', name: 'Sargodha', code: 'SGD', province: 'Punjab', popular: false },
-
-  // Sindh
   { id: 'khi', name: 'Karachi', code: 'KHI', province: 'Sindh', popular: true },
   { id: 'hdd', name: 'Hyderabad', code: 'HDD', province: 'Sindh', popular: true },
   { id: 'skz', name: 'Sukkur', code: 'SKZ', province: 'Sindh', popular: false },
-
-  // KPK
   { id: 'pew', name: 'Peshawar', code: 'PEW', province: 'KPK', popular: true },
   { id: 'abt', name: 'Abbottabad', code: 'ABT', province: 'KPK', popular: false },
-
-  // Balochistan
   { id: 'uet', name: 'Quetta', code: 'UET', province: 'Balochistan', popular: true },
   { id: 'gwd', name: 'Gwadar', code: 'GWD', province: 'Balochistan', popular: false },
-
-  // Islamabad
   { id: 'isb', name: 'Islamabad', code: 'ISB', province: 'Islamabad', popular: true },
-
-  // Gilgit-Baltistan
   { id: 'gil', name: 'Gilgit', code: 'GIL', province: 'Gilgit-Baltistan', popular: false },
   { id: 'skd', name: 'Skardu', code: 'SKD', province: 'Gilgit-Baltistan', popular: false },
 ];
 
-// Time slots for better UX
 const TIME_SLOTS = [
   { label: 'Anytime', value: '' },
   { label: 'Morning (6AM - 12PM)', value: 'morning' },
@@ -133,7 +125,6 @@ const TIME_SLOTS = [
   { label: 'Night (9PM - 6AM)', value: 'night' },
 ];
 
-// Skeleton component for loading
 const SkeletonCard = () => (
   <View style={styles.skeletonCard}>
     <View style={styles.skeletonHeader}>
@@ -155,7 +146,6 @@ const HomeScreen = () => {
   const navigation = useNavigation<HomeScreenNavigationProp>();
   const user = auth().currentUser;
 
-  // State for locations
   const [fromLocation, setFromLocation] = useState('');
   const [toLocation, setToLocation] = useState('');
   const [fromCode, setFromCode] = useState('');
@@ -163,13 +153,11 @@ const HomeScreen = () => {
   const [fromCityId, setFromCityId] = useState('');
   const [toCityId, setToCityId] = useState('');
 
-  // State for date/time
   const [travelDate, setTravelDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [travelTimeSlot, setTravelTimeSlot] = useState('');
   const [showTimePicker, setShowTimePicker] = useState(false);
 
-  // State for modals
   const [showCityModal, setShowCityModal] = useState(false);
   const [citySelectionType, setCitySelectionType] = useState<'from' | 'to'>('from');
   const [cities, setCities] = useState<City[]>([]);
@@ -177,7 +165,6 @@ const HomeScreen = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [loadingCities, setLoadingCities] = useState(false);
 
-  // State for routes and trips
   const [popularRoutes, setPopularRoutes] = useState<Route[]>([]);
   const [routeTrips, setRouteTrips] = useState<{ [key: string]: Trip[] }>({});
   const [quickBookings, setQuickBookings] = useState<QuickBooking[]>([]);
@@ -185,15 +172,28 @@ const HomeScreen = () => {
   const [loading, setLoading] = useState(false);
   const [loadingRoutes, setLoadingRoutes] = useState(true);
 
-  // Cache key for cities
   const CITIES_CACHE_KEY = '@zugo_cities_cache';
 
-  // Fetch cities from Firestore
+  const loadCitiesFromCache = useCallback(async () => {
+    try {
+      const cachedCities = await AsyncStorage.getItem(CITIES_CACHE_KEY);
+      if (cachedCities) {
+        const parsedCities = JSON.parse(cachedCities);
+        setCities(parsedCities);
+        setFilteredCities(parsedCities);
+        console.log('📦 Loaded cities from cache');
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('Error loading cities from cache:', error);
+      return false;
+    }
+  }, []);
+
   const fetchCities = useCallback(async () => {
     setLoadingCities(true);
     try {
-      console.log('📡 Fetching cities from Firestore...');
-
       const snapshot = await firestore()
         .collection('cities')
         .orderBy('name')
@@ -212,21 +212,15 @@ const HomeScreen = () => {
           });
         });
 
-        console.log(`✅ Loaded ${citiesList.length} cities from Firestore`);
         setCities(citiesList);
         setFilteredCities(citiesList);
-
-        // Cache for next time (optional - background)
-        AsyncStorage.setItem('@zugo_cities_cache', JSON.stringify(citiesList)).catch(() => {});
-
+        await AsyncStorage.setItem(CITIES_CACHE_KEY, JSON.stringify(citiesList));
       } else {
-        console.log('⚠️ No cities in Firestore, using hardcoded');
         setCities(PAKISTAN_CITIES);
         setFilteredCities(PAKISTAN_CITIES);
       }
     } catch (error) {
-      console.error('❌ Error fetching cities:', error);
-      // Fallback to hardcoded on error
+      console.error('Error fetching cities:', error);
       setCities(PAKISTAN_CITIES);
       setFilteredCities(PAKISTAN_CITIES);
     } finally {
@@ -234,46 +228,9 @@ const HomeScreen = () => {
     }
   }, []);
 
-  const fetchFreshCities = async () => {
-    try {
-      const snapshot = await firestore()
-        .collection('cities')
-        .orderBy('name')
-        .get();
-
-      if (!snapshot.empty) {
-        const citiesList: City[] = [];
-        snapshot.forEach(doc => {
-          const data = doc.data();
-          citiesList.push({
-            id: doc.id,
-            name: data.name,
-            code: data.code,
-            province: data.province,
-            popular: data.popular || false,
-            lat: data.lat,
-            lng: data.lng,
-          });
-        });
-
-        // Save to cache
-        await AsyncStorage.setItem(CITIES_CACHE_KEY, JSON.stringify(citiesList));
-
-        setCities(citiesList);
-        setFilteredCities(citiesList);
-      }
-    } catch (error) {
-      console.error('Error fetching fresh cities:', error);
-    }
-  };
-
-  // Fetch popular routes and their trips
   const fetchPopularRoutes = useCallback(async () => {
     setLoadingRoutes(true);
     try {
-      // Note: Create composite index in Firebase Console:
-      // Collection: routes
-      // Fields: popular (Ascending), bookingCount (Descending)
       const snapshot = await firestore()
         .collection('routes')
         .where('popular', '==', true)
@@ -309,12 +266,17 @@ const HomeScreen = () => {
 
       setPopularRoutes(routes);
 
-      // Fetch trips for these routes
-      if (routeIds.length > 0) {
+      const safeRouteIds = routeIds.slice(0, 10);
+
+      if (safeRouteIds.length > 0) {
+        const dateString = travelDate.toISOString().split('T')[0];
+
+        // ✅ Updated: Use standardized statuses for filtering available trips
         const tripsSnapshot = await firestore()
           .collection('trips')
-          .where('routeId', 'in', routeIds)
-          .where('status', 'in', ['active', 'upcoming'])
+          .where('routeId', 'in', safeRouteIds)
+          .where('status', 'in', [TRIP_STATUS.SCHEDULED, TRIP_STATUS.IN_PROGRESS])
+          .where('date', '==', dateString)
           .orderBy('departureTime')
           .get();
 
@@ -330,6 +292,7 @@ const HomeScreen = () => {
             availableSeats: data.availableSeats || 0,
             fare: data.fare || 0,
             busType: data.busType || 'Standard',
+            status: data.status, // ✅ Include status
           };
 
           if (!tripsByRoute[data.routeId]) {
@@ -342,12 +305,12 @@ const HomeScreen = () => {
       }
     } catch (error) {
       console.error('Error fetching popular routes:', error);
+      Alert.alert('Error', 'Failed to load popular routes. Please try again.');
     } finally {
       setLoadingRoutes(false);
     }
-  }, []);
+  }, [travelDate]);
 
-  // Fetch quick bookings (most booked routes)
   const fetchQuickBookings = useCallback(async () => {
     try {
       const snapshot = await firestore()
@@ -380,7 +343,6 @@ const HomeScreen = () => {
     }
   }, []);
 
-  // Load recent searches from AsyncStorage
   const loadRecentSearches = useCallback(async () => {
     try {
       const searchesJson = await AsyncStorage.getItem('@zugo_recent_searches');
@@ -393,7 +355,6 @@ const HomeScreen = () => {
     }
   }, []);
 
-  // Save recent search
   const saveRecentSearch = useCallback(async (
     fromId: string,
     toId: string,
@@ -425,35 +386,49 @@ const HomeScreen = () => {
     }
   }, [recentSearches]);
 
-  // Initial data load
   useEffect(() => {
-    fetchCities();
+    let isMounted = true;
+
+    const initializeCities = async () => {
+      const hasCache = await loadCitiesFromCache();
+      if (!hasCache && isMounted) {
+        await fetchCities();
+      } else if (isMounted) {
+        fetchCities();
+      }
+    };
+
+    initializeCities();
     fetchPopularRoutes();
     fetchQuickBookings();
     loadRecentSearches();
-  }, [fetchCities, fetchPopularRoutes, fetchQuickBookings, loadRecentSearches]);
 
-  // ✅ IMPLEMENTED: useFocusEffect for booking cleanup
+    return () => {
+      isMounted = false;
+    };
+  }, [fetchCities, fetchPopularRoutes, fetchQuickBookings, loadRecentSearches, loadCitiesFromCache]);
+
   useFocusEffect(
     useCallback(() => {
-      // This runs every time the screen comes into focus
-      console.log('🏠 HomeScreen focused - checking for expired bookings...');
+      let isActive = true;
 
-      if (user) {
-        // Run cleanup in background (don't await to avoid blocking UI)
-        cleanupExpiredBookings(user.uid).catch(error => {
-          console.error('Error in cleanupExpiredBookings:', error);
-        });
-      }
-
-      // Optional: Return cleanup function if needed
-      return () => {
-        console.log('🏠 HomeScreen unfocused');
+      const cleanupBookings = async () => {
+        if (!user || !isActive) return;
+        try {
+          await cleanupExpiredBookings(user.uid);
+        } catch (error) {
+          console.error('Cleanup error:', error);
+        }
       };
-    }, [user]) // Re-run if user changes
+
+      cleanupBookings();
+
+      return () => {
+        isActive = false;
+      };
+    }, [user])
   );
 
-  // Date picker handler
   const onDateChange = (event: any, selectedDate?: Date) => {
     setShowDatePicker(false);
     if (selectedDate) {
@@ -511,16 +486,12 @@ const HomeScreen = () => {
     setToCityId(tempId);
   };
 
-  // Get suggestions based on from city
   const getSuggestions = useCallback(() => {
     if (!fromCityId) return [];
-
-    const popularDestinations = cities.filter(c =>
-      c.id !== fromCityId && c.popular
-    ).slice(0, 3);
-
-    return popularDestinations;
+    return cities.filter(c => c.id !== fromCityId && c.popular).slice(0, 3);
   }, [fromCityId, cities]);
+
+  const suggestions = getSuggestions();
 
   const handleSearch = async () => {
     if (!fromLocation || !toLocation) {
@@ -582,6 +553,7 @@ const HomeScreen = () => {
       });
     } catch (error) {
       console.error('Search error:', error);
+      Alert.alert('Error', 'Failed to save search. Please try again.');
       navigation.navigate('SearchResults', {
         fromCityId,
         toCityId,
@@ -645,6 +617,15 @@ const HomeScreen = () => {
   };
 
   const handlePopularRoutePress = (route: Route) => {
+    if (!routeTrips[route.id]?.length) {
+      Alert.alert(
+        'No Trips Available',
+        `Sorry, no active trips found for ${route.fromCityName} → ${route.toCityName}. Please try another date.`,
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
     setFromLocation(route.fromCityName);
     setToLocation(route.toCityName);
     setFromCode(route.fromCode);
@@ -659,7 +640,7 @@ const HomeScreen = () => {
       toCityName: route.toCityName,
       fromCode: route.fromCode,
       toCode: route.toCode,
-      date: new Date().toISOString().split('T')[0],
+      date: travelDate.toISOString().split('T')[0],
       timeSlot: '',
       routeId: route.id,
     });
@@ -686,14 +667,8 @@ const HomeScreen = () => {
     );
   };
 
-  const formatFare = (fare: number) => {
-    return `PKR ${fare.toLocaleString()}`;
-  };
-
-  // Get trip for route (first available)
-  const getRouteTrip = (routeId: string): Trip | undefined => {
-    return routeTrips[routeId]?.[0];
-  };
+  const formatFare = (fare: number) => `PKR ${fare.toLocaleString()}`;
+  const getRouteTrip = (routeId: string): Trip | undefined => routeTrips[routeId]?.[0];
 
   const CitySelectionModal = () => (
     <Modal
@@ -759,7 +734,7 @@ const HomeScreen = () => {
                   </View>
                   <View style={styles.cityInfo}>
                     <Text style={styles.cityName}>{item.name}</Text>
-                    <Text style={styles.cityCode}>{item.code} • {item.province}</Text>
+                    <Text style={styles.cityCodeSmall}>{item.code} • {item.province}</Text>
                   </View>
                   {item.popular && (
                     <View style={styles.popularBadge}>
@@ -787,25 +762,17 @@ const HomeScreen = () => {
     </Modal>
   );
 
-  const suggestions = useMemo(() => getSuggestions(), [getSuggestions]);
-
   return (
     <SafeAreaView style={styles.safeArea}>
-      <ScrollView
-        style={styles.container}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Header */}
+      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
           <Text style={styles.title}>BOOK YOUR TRIP</Text>
           <Text style={styles.subtitle}>Find and book your bus in minutes</Text>
         </View>
 
-        {/* Search Section */}
         <View style={styles.searchCard}>
           <Text style={styles.sectionTitle}>SEARCH ROUTES</Text>
 
-          {/* From Location - Dropdown */}
           <TouchableOpacity
             style={styles.inputContainer}
             onPress={() => {
@@ -823,12 +790,10 @@ const HomeScreen = () => {
             <Icon name="arrow-drop-down" size={24} color="#666" />
           </TouchableOpacity>
 
-          {/* Swap Button */}
           <TouchableOpacity style={styles.swapButton} onPress={handleSwapLocations}>
             <Icon name="swap-vert" size={24} color="#4A90E2" />
           </TouchableOpacity>
 
-          {/* To Location - Dropdown */}
           <TouchableOpacity
             style={styles.inputContainer}
             onPress={() => {
@@ -846,13 +811,11 @@ const HomeScreen = () => {
             <Icon name="arrow-drop-down" size={24} color="#666" />
           </TouchableOpacity>
 
-          {/* Current Location Option */}
           <TouchableOpacity style={styles.currentLocationRow} onPress={handleCurrentLocation}>
             <Icon name="my-location" size={20} color="#4A90E2" />
             <Text style={styles.currentLocationText}>Use my current location</Text>
           </TouchableOpacity>
 
-          {/* Suggestions */}
           {fromLocation && suggestions.length > 0 && (
             <View style={styles.suggestionsContainer}>
               <Text style={styles.suggestionsTitle}>Popular from here:</Text>
@@ -875,14 +838,10 @@ const HomeScreen = () => {
             </View>
           )}
 
-          {/* Date & Time Row */}
           <View style={styles.row}>
             <View style={styles.halfInputContainer}>
               <Icon name="calendar-today" size={20} color="#4A90E2" style={styles.inputIcon} />
-              <TouchableOpacity
-                style={styles.dateButton}
-                onPress={() => setShowDatePicker(true)}
-              >
+              <TouchableOpacity style={styles.dateButton} onPress={() => setShowDatePicker(true)}>
                 <Text style={styles.dateText}>
                   {travelDate.toLocaleDateString('en-US', {
                     weekday: 'short',
@@ -895,10 +854,7 @@ const HomeScreen = () => {
 
             <View style={styles.halfInputContainer}>
               <Icon name="access-time" size={20} color="#4A90E2" style={styles.inputIcon} />
-              <TouchableOpacity
-                style={styles.dateButton}
-                onPress={() => setShowTimePicker(true)}
-              >
+              <TouchableOpacity style={styles.dateButton} onPress={() => setShowTimePicker(true)}>
                 <Text style={styles.dateText}>
                   {travelTimeSlot ? TIME_SLOTS.find(t => t.value === travelTimeSlot)?.label : 'Anytime'}
                 </Text>
@@ -906,7 +862,6 @@ const HomeScreen = () => {
             </View>
           </View>
 
-          {/* Time Slot Modal */}
           <Modal
             visible={showTimePicker}
             transparent
@@ -948,7 +903,6 @@ const HomeScreen = () => {
             </View>
           </Modal>
 
-          {/* Date Picker */}
           {showDatePicker && (
             <DateTimePicker
               value={travelDate}
@@ -959,11 +913,10 @@ const HomeScreen = () => {
             />
           )}
 
-          {/* Search Button */}
           <TouchableOpacity
-            style={[styles.searchButton, loading && styles.disabledButton]}
+            style={[styles.searchButton, (loading || !fromCityId || !toCityId) && styles.disabledButton]}
             onPress={handleSearch}
-            disabled={loading}
+            disabled={loading || !fromCityId || !toCityId}
           >
             {loading ? (
               <ActivityIndicator size="small" color="#FFF" />
@@ -976,7 +929,6 @@ const HomeScreen = () => {
           </TouchableOpacity>
         </View>
 
-        {/* Recent Searches */}
         {recentSearches.length > 0 && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>RECENT SEARCHES</Text>
@@ -997,7 +949,6 @@ const HomeScreen = () => {
           </View>
         )}
 
-        {/* Quick Bookings */}
         {quickBookings.length > 0 && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>QUICK BOOKINGS</Text>
@@ -1019,7 +970,6 @@ const HomeScreen = () => {
           </View>
         )}
 
-        {/* Popular Routes */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>POPULAR ROUTES</Text>
 
@@ -1067,7 +1017,6 @@ const HomeScreen = () => {
                           {trip?.departureTime || 'Multiple times'} - {trip?.arrivalTime || ''}
                         </Text>
                       </View>
-
                       <View style={styles.infoItem}>
                         <Icon name="hourglass-empty" size={16} color="#666" />
                         <Text style={styles.infoText}>{route.duration}</Text>
@@ -1077,24 +1026,16 @@ const HomeScreen = () => {
                     <View style={styles.routeInfoRow}>
                       <View style={styles.infoItem}>
                         <Icon name="attach-money" size={16} color="#666" />
-                        <Text style={styles.infoText}>
-                          From {formatFare(route.baseFare)}
-                        </Text>
+                        <Text style={styles.infoText}>From {formatFare(route.baseFare)}</Text>
                       </View>
-
                       <View style={styles.infoItem}>
                         <Icon name="star" size={16} color="#FFD700" />
-                        <Text style={styles.infoText}>
-                          {route.rating.toFixed(1)} ({route.totalRatings})
-                        </Text>
+                        <Text style={styles.infoText}>{route.rating.toFixed(1)} ({route.totalRatings})</Text>
                       </View>
-
                       {trip && (
                         <View style={styles.infoItem}>
                           <Icon name="event-seat" size={16} color="#666" />
-                          <Text style={styles.infoText}>
-                            {trip.availableSeats} seats
-                          </Text>
+                          <Text style={styles.infoText}>{trip.availableSeats} seats</Text>
                         </View>
                       )}
                     </View>
@@ -1115,550 +1056,103 @@ const HomeScreen = () => {
         </View>
       </ScrollView>
 
-      {/* City Selection Modal */}
       <CitySelectionModal />
     </SafeAreaView>
   );
 };
 
+// Styles remain unchanged
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#F8F9FA',
-  },
-  container: {
-    flex: 1,
-    padding: 16,
-  },
-  header: {
-    marginBottom: 24,
-    marginTop: 10,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#1A237E',
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: '#666',
-  },
-  searchCard: {
-    backgroundColor: '#FFF',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 24,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-  section: {
-    marginBottom: 24,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#1A237E',
-    marginBottom: 16,
-  },
-  inputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F8F9FA',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#E3E8EF',
-    height: 56,
-  },
-  inputIcon: {
-    marginRight: 12,
-  },
-  inputContent: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  inputText: {
-    fontSize: 16,
-    color: '#1A1A1A',
-  },
-  placeholderText: {
-    color: '#999',
-  },
-  cityCode: {
-    fontSize: 14,
-    color: '#4A90E2',
-    fontWeight: '500',
-    marginLeft: 8,
-  },
-  swapButton: {
-    position: 'absolute',
-    right: 30,
-    top: 90,
-    backgroundColor: '#FFF',
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#E3E8EF',
-    zIndex: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  currentLocationRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-    marginBottom: 16,
-  },
-  currentLocationText: {
-    fontSize: 14,
-    color: '#4A90E2',
-    marginLeft: 8,
-  },
-  suggestionsContainer: {
-    marginBottom: 16,
-  },
-  suggestionsTitle: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 8,
-  },
-  suggestionsList: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  suggestionChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F0F7FF',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#4A90E2',
-  },
-  suggestionChipText: {
-    fontSize: 14,
-    color: '#4A90E2',
-    marginLeft: 4,
-  },
-  row: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 8,
-  },
-  halfInputContainer: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F8F9FA',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    borderWidth: 1,
-    borderColor: '#E3E8EF',
-    height: 56,
-    marginRight: 12,
-  },
-  dateButton: {
-    flex: 1,
-    justifyContent: 'center',
-    height: '100%',
-  },
-  dateText: {
-    fontSize: 16,
-    color: '#1A1A1A',
-  },
-  searchButton: {
-    backgroundColor: '#4A90E2',
-    borderRadius: 12,
-    height: 56,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 16,
-    shadowColor: '#4A90E2',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  disabledButton: {
-    backgroundColor: '#B0B0B0',
-    shadowColor: '#666',
-  },
-  searchButtonText: {
-    color: '#FFF',
-    fontSize: 16,
-    fontWeight: '600',
-    marginRight: 8,
-  },
-  recentSearchCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFF',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 12,
-    marginRight: 12,
-    borderWidth: 1,
-    borderColor: '#E3E8EF',
-  },
-  recentSearchText: {
-    fontSize: 14,
-    color: '#1A1A1A',
-    marginLeft: 8,
-  },
-  quickBookingsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  quickBookingCard: {
-    flex: 1,
-    backgroundColor: '#FFF',
-    borderRadius: 12,
-    padding: 16,
-    marginRight: 12,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#E3E8EF',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  quickBookingIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#F0F7FF',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  quickBookingName: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1A1A1A',
-    marginBottom: 4,
-    textAlign: 'center',
-  },
-  quickBookingFare: {
-    fontSize: 14,
-    color: '#2E7D32',
-    fontWeight: 'bold',
-  },
-  routeCard: {
-    backgroundColor: '#FFF',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#E3E8EF',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  routeHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  busIconContainer: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: '#4A90E2',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 16,
-  },
-  routeTitleContainer: {
-    flex: 1,
-  },
-  routeName: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#1A237E',
-    marginBottom: 4,
-  },
-  routeNumber: {
-    fontSize: 14,
-    color: '#666',
-    fontWeight: '500',
-  },
-  routeDetails: {
-    marginBottom: 20,
-  },
-  routeRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: 16,
-  },
-  locationTextContainer: {
-    marginLeft: 12,
-    flex: 1,
-  },
-  routeFrom: {
-    fontSize: 16,
-    color: '#1A1A1A',
-    fontWeight: '500',
-    marginBottom: 4,
-  },
-  routeTo: {
-    fontSize: 16,
-    color: '#1A1A1A',
-    fontWeight: '500',
-  },
-  routeInfoRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 12,
-  },
-  infoItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  infoText: {
-    fontSize: 14,
-    color: '#666',
-    marginLeft: 8,
-  },
-  bookNowButton: {
-    backgroundColor: '#4A90E2',
-    borderRadius: 12,
-    paddingVertical: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  bookNowText: {
-    color: '#FFF',
-    fontSize: 16,
-    fontWeight: '600',
-    marginRight: 8,
-  },
-  // Skeleton Styles
-  skeletonCard: {
-    backgroundColor: '#FFF',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#E3E8EF',
-  },
-  skeletonHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  skeletonIcon: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: '#F0F0F0',
-    marginRight: 16,
-  },
-  skeletonTitleContainer: {
-    flex: 1,
-  },
-  skeletonTitle: {
-    height: 20,
-    backgroundColor: '#F0F0F0',
-    borderRadius: 4,
-    marginBottom: 8,
-    width: '80%',
-  },
-  skeletonSubtitle: {
-    height: 14,
-    backgroundColor: '#F0F0F0',
-    borderRadius: 4,
-    width: '60%',
-  },
-  skeletonContent: {
-    marginBottom: 20,
-  },
-  skeletonRow: {
-    height: 16,
-    backgroundColor: '#F0F0F0',
-    borderRadius: 4,
-    marginBottom: 12,
-    width: '90%',
-  },
-  skeletonButton: {
-    height: 48,
-    backgroundColor: '#F0F0F0',
-    borderRadius: 12,
-  },
-  // Modal Styles
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
-  },
-  modalContent: {
-    backgroundColor: '#FFF',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    minHeight: '70%',
-    padding: 20,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#1A237E',
-  },
-  closeButton: {
-    padding: 8,
-  },
-  searchContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F8F9FA',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: '#E3E8EF',
-    height: 50,
-  },
-  searchIcon: {
-    marginRight: 12,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 16,
-    color: '#1A1A1A',
-  },
-  loadingContainer: {
-    padding: 40,
-    alignItems: 'center',
-  },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 14,
-    color: '#666',
-  },
-  cityItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 16,
-    paddingHorizontal: 8,
-  },
-  cityItemSelected: {
-    backgroundColor: '#F0F7FF',
-    borderRadius: 8,
-  },
-  cityIconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#F0F7FF',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  cityInfo: {
-    flex: 1,
-  },
-  cityName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1A1A1A',
-    marginBottom: 4,
-  },
-  cityCode: {
-    fontSize: 12,
-    color: '#666',
-  },
-  popularBadge: {
-    backgroundColor: '#FFD700',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-    marginRight: 12,
-  },
-  popularBadgeText: {
-    fontSize: 10,
-    color: '#1A1A1A',
-    fontWeight: '600',
-  },
-  separator: {
-    height: 1,
-    backgroundColor: '#F0F0F0',
-  },
-  emptyContainer: {
-    padding: 40,
-    alignItems: 'center',
-  },
-  emptyText: {
-    marginTop: 12,
-    fontSize: 16,
-    color: '#999',
-    fontWeight: '600',
-  },
-  emptySubText: {
-    marginTop: 8,
-    fontSize: 14,
-    color: '#999',
-  },
-  // Time Picker Modal
-  timePickerContainer: {
-    backgroundColor: '#FFF',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 20,
-    maxHeight: '50%',
-  },
-  timePickerHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  timePickerTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#1A237E',
-  },
-  timeSlotItem: {
-    paddingVertical: 16,
-    paddingHorizontal: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
-  },
-  timeSlotItemSelected: {
-    backgroundColor: '#F0F7FF',
-  },
-  timeSlotText: {
-    fontSize: 16,
-    color: '#1A1A1A',
-  },
-  timeSlotTextSelected: {
-    color: '#4A90E2',
-    fontWeight: '600',
-  },
+  safeArea: { flex: 1, backgroundColor: '#F8F9FA' },
+  container: { flex: 1, padding: 16 },
+  header: { marginBottom: 24, marginTop: 10 },
+  title: { fontSize: 28, fontWeight: 'bold', color: '#1A237E', marginBottom: 8 },
+  subtitle: { fontSize: 16, color: '#666' },
+  searchCard: { backgroundColor: '#FFF', borderRadius: 16, padding: 20, marginBottom: 24, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 5 },
+  section: { marginBottom: 24 },
+  sectionTitle: { fontSize: 18, fontWeight: '600', color: '#1A237E', marginBottom: 16 },
+  inputContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F8F9FA', borderRadius: 12, paddingHorizontal: 16, marginBottom: 12, borderWidth: 1, borderColor: '#E3E8EF', height: 56 },
+  inputIcon: { marginRight: 12 },
+  inputContent: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  inputText: { fontSize: 16, color: '#1A1A1A' },
+  placeholderText: { color: '#999' },
+  cityCode: { fontSize: 14, color: '#4A90E2', fontWeight: '500', marginLeft: 8 },
+  cityCodeSmall: { fontSize: 12, color: '#666' },
+  swapButton: { position: 'absolute', right: 30, top: 90, backgroundColor: '#FFF', width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#E3E8EF', zIndex: 10, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 3 },
+  currentLocationRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, marginBottom: 16 },
+  currentLocationText: { fontSize: 14, color: '#4A90E2', marginLeft: 8 },
+  suggestionsContainer: { marginBottom: 16 },
+  suggestionsTitle: { fontSize: 14, color: '#666', marginBottom: 8 },
+  suggestionsList: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  suggestionChip: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F0F7FF', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, borderWidth: 1, borderColor: '#4A90E2' },
+  suggestionChipText: { fontSize: 14, color: '#4A90E2', marginLeft: 4 },
+  row: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 },
+  halfInputContainer: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#F8F9FA', borderRadius: 12, paddingHorizontal: 16, borderWidth: 1, borderColor: '#E3E8EF', height: 56, marginRight: 12 },
+  dateButton: { flex: 1, justifyContent: 'center', height: '100%' },
+  dateText: { fontSize: 16, color: '#1A1A1A' },
+  searchButton: { backgroundColor: '#4A90E2', borderRadius: 12, height: 56, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 16, shadowColor: '#4A90E2', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
+  disabledButton: { backgroundColor: '#B0B0B0', shadowColor: '#666' },
+  searchButtonText: { color: '#FFF', fontSize: 16, fontWeight: '600', marginRight: 8 },
+  recentSearchCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', paddingHorizontal: 16, paddingVertical: 12, borderRadius: 12, marginRight: 12, borderWidth: 1, borderColor: '#E3E8EF' },
+  recentSearchText: { fontSize: 14, color: '#1A1A1A', marginLeft: 8 },
+  quickBookingsContainer: { flexDirection: 'row', justifyContent: 'space-between' },
+  quickBookingCard: { flex: 1, backgroundColor: '#FFF', borderRadius: 12, padding: 16, marginRight: 12, alignItems: 'center', borderWidth: 1, borderColor: '#E3E8EF', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
+  quickBookingIcon: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#F0F7FF', justifyContent: 'center', alignItems: 'center', marginBottom: 8 },
+  quickBookingName: { fontSize: 14, fontWeight: '600', color: '#1A1A1A', marginBottom: 4, textAlign: 'center' },
+  quickBookingFare: { fontSize: 14, color: '#2E7D32', fontWeight: 'bold' },
+  routeCard: { backgroundColor: '#FFF', borderRadius: 16, padding: 20, marginBottom: 16, borderWidth: 1, borderColor: '#E3E8EF', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 4 },
+  routeHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 20 },
+  busIconContainer: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#4A90E2', justifyContent: 'center', alignItems: 'center', marginRight: 16 },
+  routeTitleContainer: { flex: 1 },
+  routeName: { fontSize: 20, fontWeight: 'bold', color: '#1A237E', marginBottom: 4 },
+  routeNumber: { fontSize: 14, color: '#666', fontWeight: '500' },
+  routeDetails: { marginBottom: 20 },
+  routeRow: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 16 },
+  locationTextContainer: { marginLeft: 12, flex: 1 },
+  routeFrom: { fontSize: 16, color: '#1A1A1A', fontWeight: '500', marginBottom: 4 },
+  routeTo: { fontSize: 16, color: '#1A1A1A', fontWeight: '500' },
+  routeInfoRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
+  infoItem: { flexDirection: 'row', alignItems: 'center' },
+  infoText: { fontSize: 14, color: '#666', marginLeft: 8 },
+  bookNowButton: { backgroundColor: '#4A90E2', borderRadius: 12, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
+  bookNowText: { color: '#FFF', fontSize: 16, fontWeight: '600', marginRight: 8 },
+  skeletonCard: { backgroundColor: '#FFF', borderRadius: 16, padding: 20, marginBottom: 16, borderWidth: 1, borderColor: '#E3E8EF' },
+  skeletonHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 20 },
+  skeletonIcon: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#F0F0F0', marginRight: 16 },
+  skeletonTitleContainer: { flex: 1 },
+  skeletonTitle: { height: 20, backgroundColor: '#F0F0F0', borderRadius: 4, marginBottom: 8, width: '80%' },
+  skeletonSubtitle: { height: 14, backgroundColor: '#F0F0F0', borderRadius: 4, width: '60%' },
+  skeletonContent: { marginBottom: 20 },
+  skeletonRow: { height: 16, backgroundColor: '#F0F0F0', borderRadius: 4, marginBottom: 12, width: '90%' },
+  skeletonButton: { height: 48, backgroundColor: '#F0F0F0', borderRadius: 12 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  modalContent: { backgroundColor: '#FFF', borderTopLeftRadius: 20, borderTopRightRadius: 20, minHeight: '70%', padding: 20 },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#1A237E' },
+  closeButton: { padding: 8 },
+  searchContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F8F9FA', borderRadius: 12, paddingHorizontal: 16, marginBottom: 20, borderWidth: 1, borderColor: '#E3E8EF', height: 50 },
+  searchIcon: { marginRight: 12 },
+  searchInput: { flex: 1, fontSize: 16, color: '#1A1A1A' },
+  loadingContainer: { padding: 40, alignItems: 'center' },
+  loadingText: { marginTop: 12, fontSize: 14, color: '#666' },
+  cityItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 16, paddingHorizontal: 8 },
+  cityItemSelected: { backgroundColor: '#F0F7FF', borderRadius: 8 },
+  cityIconContainer: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#F0F7FF', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  cityInfo: { flex: 1 },
+  cityName: { fontSize: 16, fontWeight: '600', color: '#1A1A1A', marginBottom: 4 },
+  popularBadge: { backgroundColor: '#FFD700', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, marginRight: 12 },
+  popularBadgeText: { fontSize: 10, color: '#1A1A1A', fontWeight: '600' },
+  separator: { height: 1, backgroundColor: '#F0F0F0' },
+  emptyContainer: { padding: 40, alignItems: 'center' },
+  emptyText: { marginTop: 12, fontSize: 16, color: '#999', fontWeight: '600' },
+  emptySubText: { marginTop: 8, fontSize: 14, color: '#999' },
+  timePickerContainer: { backgroundColor: '#FFF', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, maxHeight: '50%' },
+  timePickerHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  timePickerTitle: { fontSize: 20, fontWeight: 'bold', color: '#1A237E' },
+  timeSlotItem: { paddingVertical: 16, paddingHorizontal: 20, borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
+  timeSlotItemSelected: { backgroundColor: '#F0F7FF' },
+  timeSlotText: { fontSize: 16, color: '#1A1A1A' },
+  timeSlotTextSelected: { color: '#4A90E2', fontWeight: '600' },
 });
 
 export default HomeScreen;

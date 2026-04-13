@@ -1,4 +1,4 @@
-// src/screens/passenger/SearchResultsScreen.tsx - UPDATED TO USE FROMCODE/TOCODE
+// src/screens/passenger/SearchResultsScreen.tsx - FIXED DATE QUERY
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
@@ -46,8 +46,8 @@ interface Bus {
   to: string;
   fromCode: string;
   toCode: string;
-  startDate: string;
-  endDate: string;
+  startDate: string; // Changed to string
+  endDate: string;   // Changed to string
   days: string[];
   repeatType: string;
   status: string;
@@ -59,12 +59,12 @@ const SearchResultsScreen = () => {
   const user = auth().currentUser;
 
   const params = route.params ?? {};
-  const from = params.from ?? '';
-  const to = params.to ?? '';
-  const fromCode = params.fromCode;
-  const toCode = params.toCode;
+  const from = params.fromCityName ?? '';
+  const to = params.toCityName ?? '';
+  const fromCode = params.fromCode ?? '';
+  const toCode = params.toCode ?? '';
   const date = params.date ?? '';
-  const time = params.time ?? 'Anytime';
+  const time = params.timeSlot ?? 'Anytime';
   const routeId = params.routeId;
 
   const [loading, setLoading] = useState(true);
@@ -73,37 +73,50 @@ const SearchResultsScreen = () => {
   const [filteredBuses, setFilteredBuses] = useState<Bus[]>([]);
   const [sortBy, setSortBy] = useState<'departure' | 'price' | 'rating'>('departure');
   const [filterType, setFilterType] = useState<string>('all');
+  const [selectingId, setSelectingId] = useState<string | null>(null);
 
-  // Helper function to check if trip runs on selected date
-  const isTripRunningOnDate = useCallback((trip: any, selectedDate: string): boolean => {
+  // ✅ FIXED: Check if trip runs on selected date (works with string dates)
+  const isTripRunningOnDate = useCallback((trip: Bus, selectedDate: string): boolean => {
     if (!selectedDate || selectedDate === 'Anytime') return true;
 
     const dateObj = new Date(selectedDate);
     const dayOfWeek = dateObj.toLocaleDateString('en-US', { weekday: 'short' }).substring(0, 3);
 
-    // Check if date is within trip's date range
-    if (trip.startDate) {
-      const startDate = new Date(trip.startDate);
-      if (dateObj < startDate) return false;
-    }
+    // Get the date string in YYYY-MM-DD format
+    const dateString = selectedDate;
 
-    if (trip.endDate) {
-      const endDate = new Date(trip.endDate);
-      if (dateObj > endDate) return false;
+    // Check if trip has specific date range
+    if (trip.startDate && trip.endDate) {
+      // Compare strings directly (YYYY-MM-DD format works with string comparison)
+      if (dateString < trip.startDate) return false;
+      if (dateString > trip.endDate) return false;
     }
 
     // Check if day is in trip's days array
-    if (trip.days && Array.isArray(trip.days)) {
+    if (trip.days && Array.isArray(trip.days) && trip.days.length > 0) {
       return trip.days.includes(dayOfWeek);
     }
 
     return true;
   }, []);
 
-  // Fetch buses from Firebase using fromCode and toCode
-  useEffect(() => {
-    fetchBuses();
-  }, [fromCode, toCode, from, to, date, routeId]);
+  const calculateDuration = (departure: string, arrival: string): string => {
+    if (!departure || !arrival) return 'N/A';
+    if (!departure.includes(':') || !arrival.includes(':')) return 'N/A';
+
+    const [depHour, depMin] = departure.split(':').map(Number);
+    const [arrHour, arrMin] = arrival.split(':').map(Number);
+
+    if (isNaN(depHour) || isNaN(depMin) || isNaN(arrHour) || isNaN(arrMin)) return 'N/A';
+
+    let diffMinutes = (arrHour * 60 + arrMin) - (depHour * 60 + depMin);
+    if (diffMinutes < 0) diffMinutes += 24 * 60;
+
+    const hours = Math.floor(diffMinutes / 60);
+    const minutes = diffMinutes % 60;
+
+    return `${hours}h ${minutes}m`;
+  };
 
   const fetchBuses = async () => {
     try {
@@ -111,15 +124,12 @@ const SearchResultsScreen = () => {
 
       let query: any = firestore().collection('trips');
 
-      // ✅ UPDATED: Use fromCode and toCode for query
       if (routeId) {
         query = query.where('routeId', '==', routeId);
       } else if (fromCode && toCode) {
-        // Primary search by codes (more accurate)
         query = query.where('fromCode', '==', fromCode)
                      .where('toCode', '==', toCode);
       } else if (from && to) {
-        // Fallback to city names if codes not available
         query = query.where('from', '==', from)
                      .where('to', '==', to);
       } else {
@@ -129,13 +139,16 @@ const SearchResultsScreen = () => {
         return;
       }
 
-      // Only show trips with available seats AND active/upcoming status
-      query = query.where('availableSeats', '>', 0)
-                   .where('status', 'in', ['active', 'upcoming']);
+      // ✅ FIXED: Only filter by status, no date filtering in query
+      query = query.where('status', 'in', ['active', 'upcoming']);
+
+      console.log('🔍 Fetching trips with:', { fromCode, toCode, date });
 
       const snapshot = await query.get();
 
-      const tripsList: Bus[] = snapshot.docs.map(doc => {
+      console.log(`📦 Found ${snapshot.docs.length} trips in Firestore`);
+
+      let tripsList: Bus[] = snapshot.docs.map(doc => {
         const data = doc.data();
         return {
           id: doc.id,
@@ -151,7 +164,7 @@ const SearchResultsScreen = () => {
           driver: {
             id: data.driverId || '',
             name: data.driverName || 'Not assigned',
-            rating: 4.0, // Default rating if not available
+            rating: data.driverRating || 4.0,
           },
           amenities: data.amenities ?? ['AC', 'WiFi'],
           busId: data.busId || doc.id,
@@ -160,29 +173,45 @@ const SearchResultsScreen = () => {
           distance: data.distance || '45 km',
           from: data.from || from,
           to: data.to || to,
-          fromCode: data.fromCode || fromCode || '',
-          toCode: data.toCode || toCode || '',
-          startDate: data.startDate,
-          endDate: data.endDate,
-          days: data.days,
+          fromCode: data.fromCode || fromCode,
+          toCode: data.toCode || toCode,
+          startDate: data.startDate || '', // Store as string
+          endDate: data.endDate || '',     // Store as string
+          days: data.days || [],
           repeatType: data.repeatType,
           status: data.status || 'upcoming',
         };
       });
 
-      // Apply date filtering in JavaScript
-      let filteredByDate = tripsList;
+      console.log(`📋 Before filters: ${tripsList.length} trips`);
+
+      // ✅ FIXED: Filter available seats in JavaScript
+      tripsList = tripsList.filter(trip => trip.availableSeats > 0);
+      console.log(`✅ After seat filter: ${tripsList.length} trips`);
+
+      // ✅ FIXED: Apply date filtering in JavaScript with string comparison
       if (date && date !== 'Anytime') {
-        filteredByDate = tripsList.filter(trip => isTripRunningOnDate(trip, date));
+        const beforeFilter = tripsList.length;
+        tripsList = tripsList.filter(trip => isTripRunningOnDate(trip, date));
+        console.log(`📅 After date filter (${date}): ${beforeFilter} -> ${tripsList.length} trips`);
+
+        // Log each trip's date range for debugging
+        tripsList.forEach(trip => {
+          console.log(`  - Trip: ${trip.busNumber}, dates: ${trip.startDate} - ${trip.endDate}, days: ${trip.days?.length || 0}`);
+        });
       }
 
       // Sort by departure time
-      const sorted = filteredByDate.sort((a, b) =>
+      const sorted = [...tripsList].sort((a, b) =>
         a.departureTime.localeCompare(b.departureTime)
       );
 
-      setAllTrips(filteredByDate);
+      setAllTrips(tripsList);
       setFilteredBuses(sorted);
+
+      if (tripsList.length === 0) {
+        console.log('⚠️ No trips found after filtering');
+      }
     } catch (error) {
       console.error('Error fetching buses:', error);
       Alert.alert('Error', 'Failed to load bus schedules. Please try again.');
@@ -194,20 +223,43 @@ const SearchResultsScreen = () => {
     }
   };
 
-  // Helper to calculate duration if not provided
-  const calculateDuration = (departure: string, arrival: string): string => {
-    if (!departure || !arrival) return '1h 30m';
+  const validateAndNavigate = async (bus: Bus) => {
+    if (!bus) return;
 
-    const [depHour, depMin] = departure.split(':').map(Number);
-    const [arrHour, arrMin] = arrival.split(':').map(Number);
+    setSelectingId(bus.id);
 
-    let diffMinutes = (arrHour * 60 + arrMin) - (depHour * 60 + depMin);
-    if (diffMinutes < 0) diffMinutes += 24 * 60; // Handle next day
+    try {
+      const doc = await firestore().collection('trips').doc(bus.id).get();
+      const freshData = doc.data();
 
-    const hours = Math.floor(diffMinutes / 60);
-    const minutes = diffMinutes % 60;
+      if (!freshData || freshData.availableSeats <= 0) {
+        Alert.alert(
+          'Seats Full',
+          'Sorry, seats on this bus just got booked. Please try another bus.',
+          [{ text: 'OK', onPress: () => fetchBuses() }]
+        );
+        setSelectingId(null);
+        return;
+      }
 
-    return `${hours}h ${minutes}m`;
+      navigation.navigate('SeatSelection', {
+        tripId: bus.id,
+        busId: bus.busId || bus.id,
+        from,
+        to,
+        date,
+        time: bus.departureTime,
+        fare: bus.fare,
+        busNumber: bus.busNumber,
+        fromCode: bus.fromCode || fromCode,
+        toCode: bus.toCode || toCode,
+      });
+    } catch (error) {
+      console.error('Error validating seats:', error);
+      Alert.alert('Error', 'Failed to verify seat availability. Please try again.');
+    } finally {
+      setSelectingId(null);
+    }
   };
 
   const handleSelectBus = (tripDocId: string) => {
@@ -219,24 +271,13 @@ const SearchResultsScreen = () => {
       return;
     }
 
-    navigation.navigate('SeatSelection', {
-      tripId: tripDocId,
-      busId: selectedBus.busId || tripDocId,
-      from,
-      to,
-      date,
-      time: selectedBus.departureTime,
-      fare: selectedBus.fare,
-      busNumber: selectedBus.busNumber,
-      fromCode: selectedBus.fromCode || fromCode,
-      toCode: selectedBus.toCode || toCode,
-    });
+    validateAndNavigate(selectedBus);
   };
 
   const handleSort = (type: 'departure' | 'price' | 'rating') => {
     setSortBy(type);
 
-    let sortedBuses = [...filteredBuses];
+    const sortedBuses = [...filteredBuses];
 
     switch (type) {
       case 'departure':
@@ -257,21 +298,19 @@ const SearchResultsScreen = () => {
     setFilterType(type);
 
     if (type === 'all') {
-      setFilteredBuses(allTrips);
-      // Re-apply current sort
+      setFilteredBuses([...allTrips]);
       handleSort(sortBy);
       return;
     }
 
     const filtered = allTrips.filter(bus => {
-      if (type === 'ac' && bus.amenities.includes('AC')) return true;
-      if (type === 'luxury' && bus.busType === 'Luxury') return true;
-      if (type === 'economy' && bus.fare < 15) return true;
+      if (type === 'ac') return bus.amenities.includes('AC');
+      if (type === 'luxury') return bus.busType === 'Luxury';
+      if (type === 'economy') return bus.fare <= 1000;
       return false;
     });
 
     setFilteredBuses(filtered);
-    // Re-apply current sort
     setTimeout(() => handleSort(sortBy), 0);
   };
 
@@ -284,8 +323,11 @@ const SearchResultsScreen = () => {
     return `PKR ${amount.toLocaleString()}`;
   };
 
-  // Memoized results count
   const resultsCount = useMemo(() => filteredBuses.length, [filteredBuses]);
+
+  useEffect(() => {
+    fetchBuses();
+  }, [fromCode, toCode, from, to, date, routeId]);
 
   if (loading) {
     return (
@@ -306,7 +348,6 @@ const SearchResultsScreen = () => {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
       >
-        {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity
             style={styles.backButton}
@@ -317,26 +358,25 @@ const SearchResultsScreen = () => {
           <Text style={styles.headerTitle}>SEARCH RESULTS</Text>
         </View>
 
-        {/* Search Summary */}
         <View style={styles.searchSummaryCard}>
           <View style={styles.searchSummaryRow}>
             <View style={styles.locationContainer}>
               <Icon name="location-on" size={20} color="#4A90E2" />
-              <Text style={styles.locationText}>{from}</Text>
-              {fromCode && <Text style={styles.locationCode}>({fromCode})</Text>}
+              <Text style={styles.locationText}>{from || '?'}</Text>
+              {fromCode ? <Text style={styles.locationCode}>({fromCode})</Text> : null}
             </View>
             <Icon name="arrow-forward" size={20} color="#666" />
             <View style={styles.locationContainer}>
               <Icon name="location-on" size={20} color="#4A90E2" />
-              <Text style={styles.locationText}>{to}</Text>
-              {toCode && <Text style={styles.locationCode}>({toCode})</Text>}
+              <Text style={styles.locationText}>{to || '?'}</Text>
+              {toCode ? <Text style={styles.locationCode}>({toCode})</Text> : null}
             </View>
           </View>
 
           <View style={styles.detailsRow}>
             <View style={styles.detailItem}>
               <Icon name="calendar-today" size={16} color="#666" />
-              <Text style={styles.detailText}>{date}</Text>
+              <Text style={styles.detailText}>{date || 'Any date'}</Text>
             </View>
             <View style={styles.detailItem}>
               <Icon name="access-time" size={16} color="#666" />
@@ -345,18 +385,13 @@ const SearchResultsScreen = () => {
           </View>
         </View>
 
-        {/* Filter Chips */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.filterScroll}
-        >
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll}>
           <TouchableOpacity
             style={[styles.filterChip, filterType === 'all' && styles.filterChipActive]}
             onPress={() => handleFilter('all')}
           >
             <Text style={[styles.filterChipText, filterType === 'all' && styles.filterChipTextActive]}>
-              All
+              All ({resultsCount})
             </Text>
           </TouchableOpacity>
 
@@ -391,7 +426,6 @@ const SearchResultsScreen = () => {
           </TouchableOpacity>
         </ScrollView>
 
-        {/* Sort Options */}
         <View style={styles.sortSection}>
           <Text style={styles.sortTitle}>Sort by:</Text>
           <View style={styles.sortButtons}>
@@ -399,11 +433,7 @@ const SearchResultsScreen = () => {
               style={[styles.sortButton, sortBy === 'departure' && styles.sortButtonActive]}
               onPress={() => handleSort('departure')}
             >
-              <Icon
-                name="schedule"
-                size={16}
-                color={sortBy === 'departure' ? '#FFF' : '#666'}
-              />
+              <Icon name="schedule" size={16} color={sortBy === 'departure' ? '#FFF' : '#666'} />
               <Text style={[styles.sortButtonText, sortBy === 'departure' && styles.sortButtonTextActive]}>
                 Departure
               </Text>
@@ -413,11 +443,7 @@ const SearchResultsScreen = () => {
               style={[styles.sortButton, sortBy === 'price' && styles.sortButtonActive]}
               onPress={() => handleSort('price')}
             >
-              <Icon
-                name="attach-money"
-                size={16}
-                color={sortBy === 'price' ? '#FFF' : '#666'}
-              />
+              <Icon name="attach-money" size={16} color={sortBy === 'price' ? '#FFF' : '#666'} />
               <Text style={[styles.sortButtonText, sortBy === 'price' && styles.sortButtonTextActive]}>
                 Price
               </Text>
@@ -427,11 +453,7 @@ const SearchResultsScreen = () => {
               style={[styles.sortButton, sortBy === 'rating' && styles.sortButtonActive]}
               onPress={() => handleSort('rating')}
             >
-              <Icon
-                name="star"
-                size={16}
-                color={sortBy === 'rating' ? '#FFF' : '#666'}
-              />
+              <Icon name="star" size={16} color={sortBy === 'rating' ? '#FFF' : '#666'} />
               <Text style={[styles.sortButtonText, sortBy === 'rating' && styles.sortButtonTextActive]}>
                 Rating
               </Text>
@@ -439,20 +461,18 @@ const SearchResultsScreen = () => {
           </View>
         </View>
 
-        {/* Results Count */}
         <Text style={styles.resultsCount}>
           {resultsCount} {resultsCount === 1 ? 'bus' : 'buses'} found
         </Text>
 
-        {/* Bus Results */}
         {filteredBuses.map((bus) => (
           <TouchableOpacity
             key={bus.id}
             style={styles.busCard}
             onPress={() => handleSelectBus(bus.id)}
             activeOpacity={0.7}
+            disabled={selectingId === bus.id}
           >
-            {/* Time Header */}
             <View style={styles.timeHeader}>
               <View style={styles.timeContainer}>
                 <Icon name="schedule" size={18} color="#4A90E2" />
@@ -472,7 +492,6 @@ const SearchResultsScreen = () => {
               </View>
             </View>
 
-            {/* Bus Details */}
             <View style={styles.busDetails}>
               <View style={styles.busInfo}>
                 <View style={styles.busNumberContainer}>
@@ -515,13 +534,12 @@ const SearchResultsScreen = () => {
                   </View>
                   <View style={styles.tripInfoItem}>
                     <Icon name="straighten" size={14} color="#666" />
-                    <Text style={styles.tripInfoText}>{bus.distance}</Text>
+                    <Text style={styles.tripInfoText}>{bus.distance} km</Text>
                   </View>
                 </View>
               </View>
             </View>
 
-            {/* Fare and Action */}
             <View style={styles.footer}>
               <View style={styles.fareContainer}>
                 <Text style={styles.fareLabel}>Fare:</Text>
@@ -532,29 +550,36 @@ const SearchResultsScreen = () => {
               <TouchableOpacity
                 style={[
                   styles.selectButton,
-                  bus.availableSeats === 0 && styles.selectButtonDisabled
+                  (bus.availableSeats === 0 || selectingId === bus.id) && styles.selectButtonDisabled
                 ]}
                 onPress={() => handleSelectBus(bus.id)}
-                disabled={bus.availableSeats === 0}
+                disabled={bus.availableSeats === 0 || selectingId === bus.id}
               >
-                <Text style={styles.selectButtonText}>
-                  {bus.availableSeats === 0 ? 'SOLD OUT' : 'SELECT SEATS'}
-                </Text>
-                {bus.availableSeats > 0 && (
-                  <Icon name="arrow-forward" size={18} color="#FFF" />
+                {selectingId === bus.id ? (
+                  <ActivityIndicator size="small" color="#FFF" />
+                ) : (
+                  <>
+                    <Text style={styles.selectButtonText}>
+                      {bus.availableSeats === 0 ? 'SOLD OUT' : 'SELECT SEATS'}
+                    </Text>
+                    {bus.availableSeats > 0 && (
+                      <Icon name="arrow-forward" size={18} color="#FFF" />
+                    )}
+                  </>
                 )}
               </TouchableOpacity>
             </View>
           </TouchableOpacity>
         ))}
 
-        {/* No Results Message */}
         {filteredBuses.length === 0 && (
           <View style={styles.noResultsContainer}>
             <Icon name="search-off" size={60} color="#CCC" />
             <Text style={styles.noResultsText}>No buses found</Text>
             <Text style={styles.noResultsSubtext}>
-              Try different search criteria
+              {date && date !== 'Anytime'
+                ? `No buses available for ${date}. Try another date.`
+                : 'Try different search criteria or check back later.'}
             </Text>
           </View>
         )}
@@ -565,370 +590,71 @@ const SearchResultsScreen = () => {
 
 // Styles remain the same as your original
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#F8F9FA',
-  },
-  container: {
-    flex: 1,
-    padding: 16,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#F8F9FA',
-  },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 16,
-    color: '#4A90E2',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 20,
-    marginTop: 10,
-  },
-  backButton: {
-    padding: 8,
-    marginRight: 16,
-  },
-  headerTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#1A237E',
-    flex: 1,
-  },
-  searchSummaryCard: {
-    backgroundColor: '#FFF',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-  searchSummaryRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-  },
-  locationContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  locationText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#1A1A1A',
-    marginLeft: 8,
-  },
-  locationCode: {
-    fontSize: 12,
-    color: '#4A90E2',
-    marginLeft: 4,
-  },
-  detailsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-  },
-  detailItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  detailText: {
-    fontSize: 14,
-    color: '#666',
-    marginLeft: 8,
-  },
-  filterScroll: {
-    marginBottom: 16,
-  },
-  filterChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFF',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#E3E8EF',
-    marginRight: 12,
-  },
-  filterChipActive: {
-    backgroundColor: '#4A90E2',
-    borderColor: '#4A90E2',
-  },
-  filterChipText: {
-    fontSize: 14,
-    color: '#666',
-    marginLeft: 6,
-  },
-  filterChipTextActive: {
-    color: '#FFF',
-  },
-  sortSection: {
-    marginBottom: 20,
-  },
-  sortTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1A1A1A',
-    marginBottom: 12,
-  },
-  sortButtons: {
-    flexDirection: 'row',
-  },
-  sortButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFF',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#E3E8EF',
-    marginRight: 12,
-  },
-  sortButtonActive: {
-    backgroundColor: '#4A90E2',
-    borderColor: '#4A90E2',
-  },
-  sortButtonText: {
-    fontSize: 14,
-    color: '#666',
-    marginLeft: 6,
-  },
-  sortButtonTextActive: {
-    color: '#FFF',
-  },
-  resultsCount: {
-    fontSize: 16,
-    color: '#666',
-    marginBottom: 16,
-    fontStyle: 'italic',
-  },
-  busCard: {
-    backgroundColor: '#FFF',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-  timeHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-    paddingBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
-  },
-  timeContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  timeText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#1A237E',
-    marginLeft: 8,
-  },
-  seatBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#4CAF50',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-  },
-  seatBadgeWarning: {
-    backgroundColor: '#FF9800',
-  },
-  seatBadgeSoldOut: {
-    backgroundColor: '#F44336',
-  },
-  seatBadgeText: {
-    color: '#FFF',
-    fontSize: 14,
-    fontWeight: '600',
-    marginLeft: 6,
-  },
-  busDetails: {
-    flexDirection: 'row',
-    marginBottom: 20,
-  },
-  busInfo: {
-    alignItems: 'center',
-    marginRight: 20,
-  },
-  busNumberContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#4A90E2',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 12,
-    marginBottom: 8,
-  },
-  busNumber: {
-    color: '#FFF',
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginLeft: 8,
-  },
-  busType: {
-    fontSize: 14,
-    color: '#666',
-    fontStyle: 'italic',
-  },
-  detailsColumn: {
-    flex: 1,
-  },
-  routeText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1A1A1A',
-    marginBottom: 4,
-  },
-  routeCode: {
-    fontSize: 14,
-    color: '#4A90E2',
-    marginBottom: 12,
-  },
-  driverRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  driverText: {
-    fontSize: 14,
-    color: '#666',
-    marginLeft: 8,
-    marginRight: 12,
-  },
-  ratingContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFF3CD',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  ratingText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#856404',
-    marginLeft: 4,
-  },
-  amenitiesRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginBottom: 8,
-  },
-  amenityBadge: {
-    backgroundColor: '#E8F4FD',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 12,
-    marginRight: 8,
-    marginBottom: 8,
-  },
-  amenityText: {
-    fontSize: 12,
-    color: '#4A90E2',
-    fontWeight: '500',
-  },
-  tripInfoRow: {
-    flexDirection: 'row',
-    marginTop: 4,
-  },
-  tripInfoItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginRight: 16,
-  },
-  tripInfoText: {
-    fontSize: 12,
-    color: '#666',
-    marginLeft: 4,
-  },
-  footer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: '#F0F0F0',
-  },
-  fareContainer: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-  },
-  fareLabel: {
-    fontSize: 14,
-    color: '#666',
-    marginRight: 6,
-  },
-  fareAmount: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#4CAF50',
-  },
-  perPerson: {
-    fontSize: 12,
-    color: '#999',
-    marginLeft: 4,
-  },
-  selectButton: {
-    backgroundColor: '#4A90E2',
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingVertical: 14,
-    borderRadius: 12,
-    shadowColor: '#4A90E2',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  selectButtonDisabled: {
-    backgroundColor: '#CCC',
-    shadowColor: '#999',
-  },
-  selectButtonText: {
-    color: '#FFF',
-    fontSize: 16,
-    fontWeight: '600',
-    marginRight: 8,
-  },
-  noResultsContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 40,
-  },
-  noResultsText: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#666',
-    marginTop: 20,
-    marginBottom: 8,
-  },
-  noResultsSubtext: {
-    fontSize: 16,
-    color: '#999',
-    textAlign: 'center',
-  },
+  safeArea: { flex: 1, backgroundColor: '#F8F9FA' },
+  container: { flex: 1, padding: 16 },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F8F9FA' },
+  loadingText: { marginTop: 12, fontSize: 16, color: '#4A90E2' },
+  header: { flexDirection: 'row', alignItems: 'center', marginBottom: 20, marginTop: 10 },
+  backButton: { padding: 8, marginRight: 16 },
+  headerTitle: { fontSize: 24, fontWeight: 'bold', color: '#1A237E', flex: 1 },
+  searchSummaryCard: { backgroundColor: '#FFF', borderRadius: 16, padding: 20, marginBottom: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 5 },
+  searchSummaryRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
+  locationContainer: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+  locationText: { fontSize: 18, fontWeight: '600', color: '#1A1A1A', marginLeft: 8 },
+  locationCode: { fontSize: 12, color: '#4A90E2', marginLeft: 4 },
+  detailsRow: { flexDirection: 'row', justifyContent: 'space-around' },
+  detailItem: { flexDirection: 'row', alignItems: 'center' },
+  detailText: { fontSize: 14, color: '#666', marginLeft: 8 },
+  filterScroll: { marginBottom: 16 },
+  filterChip: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, borderWidth: 1, borderColor: '#E3E8EF', marginRight: 12 },
+  filterChipActive: { backgroundColor: '#4A90E2', borderColor: '#4A90E2' },
+  filterChipText: { fontSize: 14, color: '#666', marginLeft: 6 },
+  filterChipTextActive: { color: '#FFF' },
+  sortSection: { marginBottom: 20 },
+  sortTitle: { fontSize: 16, fontWeight: '600', color: '#1A1A1A', marginBottom: 12 },
+  sortButtons: { flexDirection: 'row' },
+  sortButton: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, borderWidth: 1, borderColor: '#E3E8EF', marginRight: 12 },
+  sortButtonActive: { backgroundColor: '#4A90E2', borderColor: '#4A90E2' },
+  sortButtonText: { fontSize: 14, color: '#666', marginLeft: 6 },
+  sortButtonTextActive: { color: '#FFF' },
+  resultsCount: { fontSize: 16, color: '#666', marginBottom: 16, fontStyle: 'italic' },
+  busCard: { backgroundColor: '#FFF', borderRadius: 16, padding: 20, marginBottom: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 5 },
+  timeHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
+  timeContainer: { flexDirection: 'row', alignItems: 'center' },
+  timeText: { fontSize: 18, fontWeight: '600', color: '#1A237E', marginLeft: 8 },
+  seatBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#4CAF50', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
+  seatBadgeWarning: { backgroundColor: '#FF9800' },
+  seatBadgeSoldOut: { backgroundColor: '#F44336' },
+  seatBadgeText: { color: '#FFF', fontSize: 14, fontWeight: '600', marginLeft: 6 },
+  busDetails: { flexDirection: 'row', marginBottom: 20 },
+  busInfo: { alignItems: 'center', marginRight: 20 },
+  busNumberContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#4A90E2', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 12, marginBottom: 8 },
+  busNumber: { color: '#FFF', fontSize: 18, fontWeight: 'bold', marginLeft: 8 },
+  busType: { fontSize: 14, color: '#666', fontStyle: 'italic' },
+  detailsColumn: { flex: 1 },
+  routeText: { fontSize: 16, fontWeight: '600', color: '#1A1A1A', marginBottom: 4 },
+  routeCode: { fontSize: 14, color: '#4A90E2', marginBottom: 12 },
+  driverRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+  driverText: { fontSize: 14, color: '#666', marginLeft: 8, marginRight: 12 },
+  ratingContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF3CD', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12 },
+  ratingText: { fontSize: 12, fontWeight: '600', color: '#856404', marginLeft: 4 },
+  amenitiesRow: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 8 },
+  amenityBadge: { backgroundColor: '#E8F4FD', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, marginRight: 8, marginBottom: 8 },
+  amenityText: { fontSize: 12, color: '#4A90E2', fontWeight: '500' },
+  tripInfoRow: { flexDirection: 'row', marginTop: 4 },
+  tripInfoItem: { flexDirection: 'row', alignItems: 'center', marginRight: 16 },
+  tripInfoText: { fontSize: 12, color: '#666', marginLeft: 4 },
+  footer: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 16, borderTopWidth: 1, borderTopColor: '#F0F0F0' },
+  fareContainer: { flexDirection: 'row', alignItems: 'baseline' },
+  fareLabel: { fontSize: 14, color: '#666', marginRight: 6 },
+  fareAmount: { fontSize: 24, fontWeight: 'bold', color: '#4CAF50' },
+  perPerson: { fontSize: 12, color: '#999', marginLeft: 4 },
+  selectButton: { backgroundColor: '#4A90E2', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 24, paddingVertical: 14, borderRadius: 12, shadowColor: '#4A90E2', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
+  selectButtonDisabled: { backgroundColor: '#CCC', shadowColor: '#999' },
+  selectButtonText: { color: '#FFF', fontSize: 16, fontWeight: '600', marginRight: 8 },
+  noResultsContainer: { alignItems: 'center', justifyContent: 'center', padding: 40 },
+  noResultsText: { fontSize: 24, fontWeight: 'bold', color: '#666', marginTop: 20, marginBottom: 8 },
+  noResultsSubtext: { fontSize: 16, color: '#999', textAlign: 'center' },
 });
 
 export default SearchResultsScreen;
