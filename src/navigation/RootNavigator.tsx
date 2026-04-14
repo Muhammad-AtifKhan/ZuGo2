@@ -49,7 +49,6 @@ export default function RootNavigator() {
 
           const userType = doc.data()?.userType?.toLowerCase?.() ?? null;
           if (!userType || !['passenger', 'driver', 'transporter'].includes(userType)) {
-            await auth().signOut();
             setUserRole(null);
           } else {
             setUserRole(userType);

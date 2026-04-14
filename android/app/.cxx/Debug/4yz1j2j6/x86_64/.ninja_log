@@ -1,5 +1,5 @@
 # ninja log v5
-2	37	0	D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/CMakeFiles/cmake.verify_globs	9a2fdf29656f99b8
+2	53	0	D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/CMakeFiles/cmake.verify_globs	9a2fdf29656f99b8
 24584	34788	7930981404499912	safeareacontext_autolinked_build/CMakeFiles/react_codegen_safeareacontext.dir/be0954b109027e3aafd0eaee6891f5e0/source/codegen/jni/react/renderer/components/safeareacontext/States.cpp.o	d7decb6717c4afca
 47	7874	7930981135456763	RNDateTimePickerCGen_autolinked_build/CMakeFiles/react_codegen_RNDateTimePickerCGen.dir/react/renderer/components/RNDateTimePickerCGen/States.cpp.o	705835f580322a98
 38042	51822	7930981574929431	rnscreens_autolinked_build/CMakeFiles/react_codegen_rnscreens.dir/d1b21aba2120e093dec9a7fcc15fb5d7/common/cpp/react/renderer/components/rnscreens/RNSScreenStackHeaderSubviewState.cpp.o	44e64ce25ceec002
@@ -104,4 +104,4 @@
 55	8366	7963379728922960	RNCWebViewSpec_autolinked_build/CMakeFiles/react_codegen_RNCWebViewSpec.dir/react/renderer/components/RNCWebViewSpec/ShadowNodes.cpp.o	bb717865daff1d5b
 37	9191	7963379737065791	RNCWebViewSpec_autolinked_build/CMakeFiles/react_codegen_RNCWebViewSpec.dir/react/renderer/components/RNCWebViewSpec/Props.cpp.o	b46b6e014ae61bab
 61	9332	7963379738566212	RNCWebViewSpec_autolinked_build/CMakeFiles/react_codegen_RNCWebViewSpec.dir/react/renderer/components/RNCWebViewSpec/ComponentDescriptors.cpp.o	85ad216552361dd2
-2	35	0	D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/CMakeFiles/cmake.verify_globs	9a2fdf29656f99b8
+1	25	0	D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/CMakeFiles/cmake.verify_globs	9a2fdf29656f99b8

@@ -2,7 +2,7 @@
 	"artifacts" : 
 	[
 		{
-			"path" : "D:/MyProjects/ZuGo2/android/app/build/intermediates/cxx/Debug/4yz1j2j6/obj/armeabi-v7a/libappmodules.so"
+			"path" : "D:/MyProjects/ZuGo2/android/app/build/intermediates/cxx/Debug/4yz1j2j6/obj/x86_64/libappmodules.so"
 		}
 	],
 	"backtrace" : 3,
@@ -109,7 +109,7 @@
 			"compileCommandFragments" : 
 			[
 				{
-					"fragment" : "-g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D__BIONIC_NO_PAGE_SIZE_MACRO -D_FORTIFY_SOURCE=2 -march=armv7-a -mthumb -Wformat -Werror=format-security   -fno-limit-debug-info  -fPIC"
+					"fragment" : "-g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D__BIONIC_NO_PAGE_SIZE_MACRO -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security   -fno-limit-debug-info  -fPIC"
 				},
 				{
 					"backtrace" : 7,
@@ -360,19 +360,19 @@
 		},
 		{
 			"backtrace" : 4,
-			"id" : "react_codegen_RNDateTimePickerCGen::@59b70ddc31ba2f8ef1d2"
-		},
-		{
-			"backtrace" : 4,
 			"id" : "react_codegen_rnclipboard::@6385240493dfcaf22ab7"
 		},
 		{
 			"backtrace" : 4,
-			"id" : "react_codegen_rngesturehandler_codegen::@39f233abcd2c728bc6ec"
+			"id" : "react_codegen_RNDateTimePickerCGen::@59b70ddc31ba2f8ef1d2"
 		},
 		{
 			"backtrace" : 4,
 			"id" : "react_codegen_RNCNetInfoSpec::@c36c96bfd5b5770618a5"
+		},
+		{
+			"backtrace" : 4,
+			"id" : "react_codegen_rngesturehandler_codegen::@39f233abcd2c728bc6ec"
 		},
 		{
 			"backtrace" : 4,
@@ -384,15 +384,7 @@
 		},
 		{
 			"backtrace" : 4,
-			"id" : "react_codegen_safeareacontext::@7984cd80db47aa7b952a"
-		},
-		{
-			"backtrace" : 4,
-			"id" : "react_codegen_rnscreens::@25bcbd507e98d3a854ad"
-		},
-		{
-			"backtrace" : 4,
-			"id" : "react_codegen_rnworklets::@68f58d84d4754f193387"
+			"id" : "react_codegen_RNSoundSpec::@a7dfabff99aa762d23e8"
 		},
 		{
 			"backtrace" : 4,
@@ -400,11 +392,19 @@
 		},
 		{
 			"backtrace" : 4,
-			"id" : "react_codegen_RNSoundSpec::@a7dfabff99aa762d23e8"
+			"id" : "react_codegen_rnscreens::@25bcbd507e98d3a854ad"
+		},
+		{
+			"backtrace" : 4,
+			"id" : "react_codegen_safeareacontext::@7984cd80db47aa7b952a"
 		},
 		{
 			"backtrace" : 4,
 			"id" : "react_codegen_RNVectorIconsSpec::@479809fae146501fd34d"
+		},
+		{
+			"backtrace" : 4,
+			"id" : "react_codegen_rnworklets::@68f58d84d4754f193387"
 		},
 		{
 			"backtrace" : 4,
@@ -417,32 +417,32 @@
 		"commandFragments" : 
 		[
 			{
-				"fragment" : "-Wl,--build-id=sha1 -Wl,--no-rosegment -Wl,--no-undefined-version -Wl,--fatal-warnings -Wl,--no-undefined -Qunused-arguments",
+				"fragment" : "-Wl,-z,max-page-size=16384 -Wl,--build-id=sha1 -Wl,--no-rosegment -Wl,--no-undefined-version -Wl,--fatal-warnings -Wl,--no-undefined -Qunused-arguments",
 				"role" : "flags"
 			},
 			{
 				"backtrace" : 4,
-				"fragment" : "D:\\MyProjects\\ZuGo2\\android\\app\\build\\intermediates\\cxx\\Debug\\4yz1j2j6\\obj\\armeabi-v7a\\libreact_codegen_safeareacontext.so",
+				"fragment" : "D:\\MyProjects\\ZuGo2\\android\\app\\build\\intermediates\\cxx\\Debug\\4yz1j2j6\\obj\\x86_64\\libreact_codegen_safeareacontext.so",
 				"role" : "libraries"
 			},
 			{
 				"backtrace" : 4,
-				"fragment" : "D:\\MyProjects\\ZuGo2\\android\\app\\build\\intermediates\\cxx\\Debug\\4yz1j2j6\\obj\\armeabi-v7a\\libreact_codegen_rnscreens.so",
+				"fragment" : "D:\\MyProjects\\ZuGo2\\android\\app\\build\\intermediates\\cxx\\Debug\\4yz1j2j6\\obj\\x86_64\\libreact_codegen_rnscreens.so",
 				"role" : "libraries"
 			},
 			{
 				"backtrace" : 5,
-				"fragment" : "C:\\Users\\Muhammad_Atif_Khan\\.gradle\\caches\\8.13\\transforms\\b7dce72bff7fdb5c13643e891a8a1b5d\\transformed\\fbjni-0.7.0\\prefab\\modules\\fbjni\\libs\\android.armeabi-v7a\\libfbjni.so",
+				"fragment" : "C:\\Users\\Muhammad_Atif_Khan\\.gradle\\caches\\8.13\\transforms\\b7dce72bff7fdb5c13643e891a8a1b5d\\transformed\\fbjni-0.7.0\\prefab\\modules\\fbjni\\libs\\android.x86_64\\libfbjni.so",
 				"role" : "libraries"
 			},
 			{
 				"backtrace" : 5,
-				"fragment" : "C:\\Users\\Muhammad_Atif_Khan\\.gradle\\caches\\8.13\\transforms\\a23ed67b2edeb9ce0dd199ade731b727\\transformed\\react-android-0.83.0-debug\\prefab\\modules\\jsi\\libs\\android.armeabi-v7a\\libjsi.so",
+				"fragment" : "C:\\Users\\Muhammad_Atif_Khan\\.gradle\\caches\\8.13\\transforms\\a23ed67b2edeb9ce0dd199ade731b727\\transformed\\react-android-0.83.0-debug\\prefab\\modules\\jsi\\libs\\android.x86_64\\libjsi.so",
 				"role" : "libraries"
 			},
 			{
 				"backtrace" : 5,
-				"fragment" : "C:\\Users\\Muhammad_Atif_Khan\\.gradle\\caches\\8.13\\transforms\\a23ed67b2edeb9ce0dd199ade731b727\\transformed\\react-android-0.83.0-debug\\prefab\\modules\\reactnative\\libs\\android.armeabi-v7a\\libreactnative.so",
+				"fragment" : "C:\\Users\\Muhammad_Atif_Khan\\.gradle\\caches\\8.13\\transforms\\a23ed67b2edeb9ce0dd199ade731b727\\transformed\\react-android-0.83.0-debug\\prefab\\modules\\reactnative\\libs\\android.x86_64\\libreactnative.so",
 				"role" : "libraries"
 			},
 			{
@@ -569,433 +569,433 @@
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/rnasyncstorage_autolinked_build/CMakeFiles/react_codegen_rnasyncstorage.dir/react/renderer/components/rnasyncstorage/ComponentDescriptors.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/rnasyncstorage_autolinked_build/CMakeFiles/react_codegen_rnasyncstorage.dir/react/renderer/components/rnasyncstorage/ComponentDescriptors.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/rnasyncstorage_autolinked_build/CMakeFiles/react_codegen_rnasyncstorage.dir/react/renderer/components/rnasyncstorage/EventEmitters.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/rnasyncstorage_autolinked_build/CMakeFiles/react_codegen_rnasyncstorage.dir/react/renderer/components/rnasyncstorage/EventEmitters.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/rnasyncstorage_autolinked_build/CMakeFiles/react_codegen_rnasyncstorage.dir/react/renderer/components/rnasyncstorage/Props.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/rnasyncstorage_autolinked_build/CMakeFiles/react_codegen_rnasyncstorage.dir/react/renderer/components/rnasyncstorage/Props.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/rnasyncstorage_autolinked_build/CMakeFiles/react_codegen_rnasyncstorage.dir/react/renderer/components/rnasyncstorage/ShadowNodes.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/rnasyncstorage_autolinked_build/CMakeFiles/react_codegen_rnasyncstorage.dir/react/renderer/components/rnasyncstorage/ShadowNodes.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/rnasyncstorage_autolinked_build/CMakeFiles/react_codegen_rnasyncstorage.dir/react/renderer/components/rnasyncstorage/States.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/rnasyncstorage_autolinked_build/CMakeFiles/react_codegen_rnasyncstorage.dir/react/renderer/components/rnasyncstorage/States.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/rnasyncstorage_autolinked_build/CMakeFiles/react_codegen_rnasyncstorage.dir/rnasyncstorage-generated.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/rnasyncstorage_autolinked_build/CMakeFiles/react_codegen_rnasyncstorage.dir/rnasyncstorage-generated.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/rnclipboard_autolinked_build/CMakeFiles/react_codegen_rnclipboard.dir/react/renderer/components/rnclipboard/ComponentDescriptors.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/rnclipboard_autolinked_build/CMakeFiles/react_codegen_rnclipboard.dir/react/renderer/components/rnclipboard/ComponentDescriptors.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/rnclipboard_autolinked_build/CMakeFiles/react_codegen_rnclipboard.dir/react/renderer/components/rnclipboard/EventEmitters.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/rnclipboard_autolinked_build/CMakeFiles/react_codegen_rnclipboard.dir/react/renderer/components/rnclipboard/EventEmitters.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/rnclipboard_autolinked_build/CMakeFiles/react_codegen_rnclipboard.dir/react/renderer/components/rnclipboard/Props.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/rnclipboard_autolinked_build/CMakeFiles/react_codegen_rnclipboard.dir/react/renderer/components/rnclipboard/Props.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/rnclipboard_autolinked_build/CMakeFiles/react_codegen_rnclipboard.dir/react/renderer/components/rnclipboard/ShadowNodes.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/rnclipboard_autolinked_build/CMakeFiles/react_codegen_rnclipboard.dir/react/renderer/components/rnclipboard/ShadowNodes.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/rnclipboard_autolinked_build/CMakeFiles/react_codegen_rnclipboard.dir/react/renderer/components/rnclipboard/States.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/rnclipboard_autolinked_build/CMakeFiles/react_codegen_rnclipboard.dir/react/renderer/components/rnclipboard/States.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/rnclipboard_autolinked_build/CMakeFiles/react_codegen_rnclipboard.dir/rnclipboard-generated.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/rnclipboard_autolinked_build/CMakeFiles/react_codegen_rnclipboard.dir/rnclipboard-generated.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/RNDateTimePickerCGen_autolinked_build/CMakeFiles/react_codegen_RNDateTimePickerCGen.dir/RNDateTimePickerCGen-generated.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNDateTimePickerCGen_autolinked_build/CMakeFiles/react_codegen_RNDateTimePickerCGen.dir/RNDateTimePickerCGen-generated.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/RNDateTimePickerCGen_autolinked_build/CMakeFiles/react_codegen_RNDateTimePickerCGen.dir/react/renderer/components/RNDateTimePickerCGen/ComponentDescriptors.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNDateTimePickerCGen_autolinked_build/CMakeFiles/react_codegen_RNDateTimePickerCGen.dir/react/renderer/components/RNDateTimePickerCGen/ComponentDescriptors.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/RNDateTimePickerCGen_autolinked_build/CMakeFiles/react_codegen_RNDateTimePickerCGen.dir/react/renderer/components/RNDateTimePickerCGen/EventEmitters.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNDateTimePickerCGen_autolinked_build/CMakeFiles/react_codegen_RNDateTimePickerCGen.dir/react/renderer/components/RNDateTimePickerCGen/EventEmitters.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/RNDateTimePickerCGen_autolinked_build/CMakeFiles/react_codegen_RNDateTimePickerCGen.dir/react/renderer/components/RNDateTimePickerCGen/Props.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNDateTimePickerCGen_autolinked_build/CMakeFiles/react_codegen_RNDateTimePickerCGen.dir/react/renderer/components/RNDateTimePickerCGen/Props.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/RNDateTimePickerCGen_autolinked_build/CMakeFiles/react_codegen_RNDateTimePickerCGen.dir/react/renderer/components/RNDateTimePickerCGen/ShadowNodes.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNDateTimePickerCGen_autolinked_build/CMakeFiles/react_codegen_RNDateTimePickerCGen.dir/react/renderer/components/RNDateTimePickerCGen/ShadowNodes.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/RNDateTimePickerCGen_autolinked_build/CMakeFiles/react_codegen_RNDateTimePickerCGen.dir/react/renderer/components/RNDateTimePickerCGen/States.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNDateTimePickerCGen_autolinked_build/CMakeFiles/react_codegen_RNDateTimePickerCGen.dir/react/renderer/components/RNDateTimePickerCGen/States.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/RNCGeolocationSpec_autolinked_build/CMakeFiles/react_codegen_RNCGeolocationSpec.dir/RNCGeolocationSpec-generated.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNCGeolocationSpec_autolinked_build/CMakeFiles/react_codegen_RNCGeolocationSpec.dir/RNCGeolocationSpec-generated.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/RNCGeolocationSpec_autolinked_build/CMakeFiles/react_codegen_RNCGeolocationSpec.dir/react/renderer/components/RNCGeolocationSpec/ComponentDescriptors.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNCGeolocationSpec_autolinked_build/CMakeFiles/react_codegen_RNCGeolocationSpec.dir/react/renderer/components/RNCGeolocationSpec/ComponentDescriptors.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/RNCGeolocationSpec_autolinked_build/CMakeFiles/react_codegen_RNCGeolocationSpec.dir/react/renderer/components/RNCGeolocationSpec/EventEmitters.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNCGeolocationSpec_autolinked_build/CMakeFiles/react_codegen_RNCGeolocationSpec.dir/react/renderer/components/RNCGeolocationSpec/EventEmitters.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/RNCGeolocationSpec_autolinked_build/CMakeFiles/react_codegen_RNCGeolocationSpec.dir/react/renderer/components/RNCGeolocationSpec/Props.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNCGeolocationSpec_autolinked_build/CMakeFiles/react_codegen_RNCGeolocationSpec.dir/react/renderer/components/RNCGeolocationSpec/Props.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/RNCGeolocationSpec_autolinked_build/CMakeFiles/react_codegen_RNCGeolocationSpec.dir/react/renderer/components/RNCGeolocationSpec/ShadowNodes.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNCGeolocationSpec_autolinked_build/CMakeFiles/react_codegen_RNCGeolocationSpec.dir/react/renderer/components/RNCGeolocationSpec/ShadowNodes.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/RNCGeolocationSpec_autolinked_build/CMakeFiles/react_codegen_RNCGeolocationSpec.dir/react/renderer/components/RNCGeolocationSpec/States.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNCGeolocationSpec_autolinked_build/CMakeFiles/react_codegen_RNCGeolocationSpec.dir/react/renderer/components/RNCGeolocationSpec/States.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/RNCNetInfoSpec_autolinked_build/CMakeFiles/react_codegen_RNCNetInfoSpec.dir/RNCNetInfoSpec-generated.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNCNetInfoSpec_autolinked_build/CMakeFiles/react_codegen_RNCNetInfoSpec.dir/RNCNetInfoSpec-generated.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/RNCNetInfoSpec_autolinked_build/CMakeFiles/react_codegen_RNCNetInfoSpec.dir/react/renderer/components/RNCNetInfoSpec/ComponentDescriptors.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNCNetInfoSpec_autolinked_build/CMakeFiles/react_codegen_RNCNetInfoSpec.dir/react/renderer/components/RNCNetInfoSpec/ComponentDescriptors.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/RNCNetInfoSpec_autolinked_build/CMakeFiles/react_codegen_RNCNetInfoSpec.dir/react/renderer/components/RNCNetInfoSpec/EventEmitters.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNCNetInfoSpec_autolinked_build/CMakeFiles/react_codegen_RNCNetInfoSpec.dir/react/renderer/components/RNCNetInfoSpec/EventEmitters.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/RNCNetInfoSpec_autolinked_build/CMakeFiles/react_codegen_RNCNetInfoSpec.dir/react/renderer/components/RNCNetInfoSpec/Props.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNCNetInfoSpec_autolinked_build/CMakeFiles/react_codegen_RNCNetInfoSpec.dir/react/renderer/components/RNCNetInfoSpec/Props.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/RNCNetInfoSpec_autolinked_build/CMakeFiles/react_codegen_RNCNetInfoSpec.dir/react/renderer/components/RNCNetInfoSpec/ShadowNodes.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNCNetInfoSpec_autolinked_build/CMakeFiles/react_codegen_RNCNetInfoSpec.dir/react/renderer/components/RNCNetInfoSpec/ShadowNodes.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/RNCNetInfoSpec_autolinked_build/CMakeFiles/react_codegen_RNCNetInfoSpec.dir/react/renderer/components/RNCNetInfoSpec/States.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNCNetInfoSpec_autolinked_build/CMakeFiles/react_codegen_RNCNetInfoSpec.dir/react/renderer/components/RNCNetInfoSpec/States.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/rngesturehandler_codegen_autolinked_build/CMakeFiles/react_codegen_rngesturehandler_codegen.dir/react/renderer/components/rngesturehandler_codegen/ComponentDescriptors.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/rngesturehandler_codegen_autolinked_build/CMakeFiles/react_codegen_rngesturehandler_codegen.dir/react/renderer/components/rngesturehandler_codegen/ComponentDescriptors.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/rngesturehandler_codegen_autolinked_build/CMakeFiles/react_codegen_rngesturehandler_codegen.dir/react/renderer/components/rngesturehandler_codegen/EventEmitters.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/rngesturehandler_codegen_autolinked_build/CMakeFiles/react_codegen_rngesturehandler_codegen.dir/react/renderer/components/rngesturehandler_codegen/EventEmitters.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/rngesturehandler_codegen_autolinked_build/CMakeFiles/react_codegen_rngesturehandler_codegen.dir/react/renderer/components/rngesturehandler_codegen/Props.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/rngesturehandler_codegen_autolinked_build/CMakeFiles/react_codegen_rngesturehandler_codegen.dir/react/renderer/components/rngesturehandler_codegen/Props.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/rngesturehandler_codegen_autolinked_build/CMakeFiles/react_codegen_rngesturehandler_codegen.dir/react/renderer/components/rngesturehandler_codegen/ShadowNodes.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/rngesturehandler_codegen_autolinked_build/CMakeFiles/react_codegen_rngesturehandler_codegen.dir/react/renderer/components/rngesturehandler_codegen/ShadowNodes.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/rngesturehandler_codegen_autolinked_build/CMakeFiles/react_codegen_rngesturehandler_codegen.dir/react/renderer/components/rngesturehandler_codegen/States.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/rngesturehandler_codegen_autolinked_build/CMakeFiles/react_codegen_rngesturehandler_codegen.dir/react/renderer/components/rngesturehandler_codegen/States.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/rngesturehandler_codegen_autolinked_build/CMakeFiles/react_codegen_rngesturehandler_codegen.dir/rngesturehandler_codegen-generated.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/rngesturehandler_codegen_autolinked_build/CMakeFiles/react_codegen_rngesturehandler_codegen.dir/rngesturehandler_codegen-generated.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/RNImagePickerSpec_autolinked_build/CMakeFiles/react_codegen_RNImagePickerSpec.dir/RNImagePickerSpec-generated.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNImagePickerSpec_autolinked_build/CMakeFiles/react_codegen_RNImagePickerSpec.dir/RNImagePickerSpec-generated.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/RNImagePickerSpec_autolinked_build/CMakeFiles/react_codegen_RNImagePickerSpec.dir/react/renderer/components/RNImagePickerSpec/ComponentDescriptors.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNImagePickerSpec_autolinked_build/CMakeFiles/react_codegen_RNImagePickerSpec.dir/react/renderer/components/RNImagePickerSpec/ComponentDescriptors.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/RNImagePickerSpec_autolinked_build/CMakeFiles/react_codegen_RNImagePickerSpec.dir/react/renderer/components/RNImagePickerSpec/EventEmitters.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNImagePickerSpec_autolinked_build/CMakeFiles/react_codegen_RNImagePickerSpec.dir/react/renderer/components/RNImagePickerSpec/EventEmitters.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/RNImagePickerSpec_autolinked_build/CMakeFiles/react_codegen_RNImagePickerSpec.dir/react/renderer/components/RNImagePickerSpec/Props.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNImagePickerSpec_autolinked_build/CMakeFiles/react_codegen_RNImagePickerSpec.dir/react/renderer/components/RNImagePickerSpec/Props.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/RNImagePickerSpec_autolinked_build/CMakeFiles/react_codegen_RNImagePickerSpec.dir/react/renderer/components/RNImagePickerSpec/ShadowNodes.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNImagePickerSpec_autolinked_build/CMakeFiles/react_codegen_RNImagePickerSpec.dir/react/renderer/components/RNImagePickerSpec/ShadowNodes.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/RNImagePickerSpec_autolinked_build/CMakeFiles/react_codegen_RNImagePickerSpec.dir/react/renderer/components/RNImagePickerSpec/States.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNImagePickerSpec_autolinked_build/CMakeFiles/react_codegen_RNImagePickerSpec.dir/react/renderer/components/RNImagePickerSpec/States.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/rnreanimated_autolinked_build/CMakeFiles/react_codegen_rnreanimated.dir/react/renderer/components/rnreanimated/ComponentDescriptors.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/rnreanimated_autolinked_build/CMakeFiles/react_codegen_rnreanimated.dir/react/renderer/components/rnreanimated/ComponentDescriptors.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/rnreanimated_autolinked_build/CMakeFiles/react_codegen_rnreanimated.dir/react/renderer/components/rnreanimated/EventEmitters.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/rnreanimated_autolinked_build/CMakeFiles/react_codegen_rnreanimated.dir/react/renderer/components/rnreanimated/EventEmitters.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/rnreanimated_autolinked_build/CMakeFiles/react_codegen_rnreanimated.dir/react/renderer/components/rnreanimated/Props.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/rnreanimated_autolinked_build/CMakeFiles/react_codegen_rnreanimated.dir/react/renderer/components/rnreanimated/Props.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/rnreanimated_autolinked_build/CMakeFiles/react_codegen_rnreanimated.dir/react/renderer/components/rnreanimated/ShadowNodes.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/rnreanimated_autolinked_build/CMakeFiles/react_codegen_rnreanimated.dir/react/renderer/components/rnreanimated/ShadowNodes.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/rnreanimated_autolinked_build/CMakeFiles/react_codegen_rnreanimated.dir/react/renderer/components/rnreanimated/States.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/rnreanimated_autolinked_build/CMakeFiles/react_codegen_rnreanimated.dir/react/renderer/components/rnreanimated/States.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/rnreanimated_autolinked_build/CMakeFiles/react_codegen_rnreanimated.dir/rnreanimated-generated.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/rnreanimated_autolinked_build/CMakeFiles/react_codegen_rnreanimated.dir/rnreanimated-generated.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/RNSoundSpec_autolinked_build/CMakeFiles/react_codegen_RNSoundSpec.dir/RNSoundSpec-generated.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNSoundSpec_autolinked_build/CMakeFiles/react_codegen_RNSoundSpec.dir/RNSoundSpec-generated.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/RNSoundSpec_autolinked_build/CMakeFiles/react_codegen_RNSoundSpec.dir/react/renderer/components/RNSoundSpec/ComponentDescriptors.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNSoundSpec_autolinked_build/CMakeFiles/react_codegen_RNSoundSpec.dir/react/renderer/components/RNSoundSpec/ComponentDescriptors.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/RNSoundSpec_autolinked_build/CMakeFiles/react_codegen_RNSoundSpec.dir/react/renderer/components/RNSoundSpec/EventEmitters.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNSoundSpec_autolinked_build/CMakeFiles/react_codegen_RNSoundSpec.dir/react/renderer/components/RNSoundSpec/EventEmitters.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/RNSoundSpec_autolinked_build/CMakeFiles/react_codegen_RNSoundSpec.dir/react/renderer/components/RNSoundSpec/Props.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNSoundSpec_autolinked_build/CMakeFiles/react_codegen_RNSoundSpec.dir/react/renderer/components/RNSoundSpec/Props.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/RNSoundSpec_autolinked_build/CMakeFiles/react_codegen_RNSoundSpec.dir/react/renderer/components/RNSoundSpec/ShadowNodes.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNSoundSpec_autolinked_build/CMakeFiles/react_codegen_RNSoundSpec.dir/react/renderer/components/RNSoundSpec/ShadowNodes.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/RNSoundSpec_autolinked_build/CMakeFiles/react_codegen_RNSoundSpec.dir/react/renderer/components/RNSoundSpec/States.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNSoundSpec_autolinked_build/CMakeFiles/react_codegen_RNSoundSpec.dir/react/renderer/components/RNSoundSpec/States.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/RNVectorIconsSpec_autolinked_build/CMakeFiles/react_codegen_RNVectorIconsSpec.dir/RNVectorIconsSpec-generated.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNVectorIconsSpec_autolinked_build/CMakeFiles/react_codegen_RNVectorIconsSpec.dir/RNVectorIconsSpec-generated.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/RNVectorIconsSpec_autolinked_build/CMakeFiles/react_codegen_RNVectorIconsSpec.dir/react/renderer/components/RNVectorIconsSpec/ComponentDescriptors.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNVectorIconsSpec_autolinked_build/CMakeFiles/react_codegen_RNVectorIconsSpec.dir/react/renderer/components/RNVectorIconsSpec/ComponentDescriptors.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/RNVectorIconsSpec_autolinked_build/CMakeFiles/react_codegen_RNVectorIconsSpec.dir/react/renderer/components/RNVectorIconsSpec/EventEmitters.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNVectorIconsSpec_autolinked_build/CMakeFiles/react_codegen_RNVectorIconsSpec.dir/react/renderer/components/RNVectorIconsSpec/EventEmitters.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/RNVectorIconsSpec_autolinked_build/CMakeFiles/react_codegen_RNVectorIconsSpec.dir/react/renderer/components/RNVectorIconsSpec/Props.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNVectorIconsSpec_autolinked_build/CMakeFiles/react_codegen_RNVectorIconsSpec.dir/react/renderer/components/RNVectorIconsSpec/Props.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/RNVectorIconsSpec_autolinked_build/CMakeFiles/react_codegen_RNVectorIconsSpec.dir/react/renderer/components/RNVectorIconsSpec/ShadowNodes.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNVectorIconsSpec_autolinked_build/CMakeFiles/react_codegen_RNVectorIconsSpec.dir/react/renderer/components/RNVectorIconsSpec/ShadowNodes.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/RNVectorIconsSpec_autolinked_build/CMakeFiles/react_codegen_RNVectorIconsSpec.dir/react/renderer/components/RNVectorIconsSpec/States.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNVectorIconsSpec_autolinked_build/CMakeFiles/react_codegen_RNVectorIconsSpec.dir/react/renderer/components/RNVectorIconsSpec/States.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/RNCWebViewSpec_autolinked_build/CMakeFiles/react_codegen_RNCWebViewSpec.dir/RNCWebViewSpec-generated.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNCWebViewSpec_autolinked_build/CMakeFiles/react_codegen_RNCWebViewSpec.dir/RNCWebViewSpec-generated.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/RNCWebViewSpec_autolinked_build/CMakeFiles/react_codegen_RNCWebViewSpec.dir/react/renderer/components/RNCWebViewSpec/ComponentDescriptors.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNCWebViewSpec_autolinked_build/CMakeFiles/react_codegen_RNCWebViewSpec.dir/react/renderer/components/RNCWebViewSpec/ComponentDescriptors.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/RNCWebViewSpec_autolinked_build/CMakeFiles/react_codegen_RNCWebViewSpec.dir/react/renderer/components/RNCWebViewSpec/EventEmitters.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNCWebViewSpec_autolinked_build/CMakeFiles/react_codegen_RNCWebViewSpec.dir/react/renderer/components/RNCWebViewSpec/EventEmitters.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/RNCWebViewSpec_autolinked_build/CMakeFiles/react_codegen_RNCWebViewSpec.dir/react/renderer/components/RNCWebViewSpec/Props.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNCWebViewSpec_autolinked_build/CMakeFiles/react_codegen_RNCWebViewSpec.dir/react/renderer/components/RNCWebViewSpec/Props.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/RNCWebViewSpec_autolinked_build/CMakeFiles/react_codegen_RNCWebViewSpec.dir/react/renderer/components/RNCWebViewSpec/ShadowNodes.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNCWebViewSpec_autolinked_build/CMakeFiles/react_codegen_RNCWebViewSpec.dir/react/renderer/components/RNCWebViewSpec/ShadowNodes.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/RNCWebViewSpec_autolinked_build/CMakeFiles/react_codegen_RNCWebViewSpec.dir/react/renderer/components/RNCWebViewSpec/States.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/RNCWebViewSpec_autolinked_build/CMakeFiles/react_codegen_RNCWebViewSpec.dir/react/renderer/components/RNCWebViewSpec/States.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/rnworklets_autolinked_build/CMakeFiles/react_codegen_rnworklets.dir/react/renderer/components/rnworklets/ComponentDescriptors.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/rnworklets_autolinked_build/CMakeFiles/react_codegen_rnworklets.dir/react/renderer/components/rnworklets/ComponentDescriptors.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/rnworklets_autolinked_build/CMakeFiles/react_codegen_rnworklets.dir/react/renderer/components/rnworklets/EventEmitters.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/rnworklets_autolinked_build/CMakeFiles/react_codegen_rnworklets.dir/react/renderer/components/rnworklets/EventEmitters.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/rnworklets_autolinked_build/CMakeFiles/react_codegen_rnworklets.dir/react/renderer/components/rnworklets/Props.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/rnworklets_autolinked_build/CMakeFiles/react_codegen_rnworklets.dir/react/renderer/components/rnworklets/Props.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/rnworklets_autolinked_build/CMakeFiles/react_codegen_rnworklets.dir/react/renderer/components/rnworklets/ShadowNodes.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/rnworklets_autolinked_build/CMakeFiles/react_codegen_rnworklets.dir/react/renderer/components/rnworklets/ShadowNodes.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/rnworklets_autolinked_build/CMakeFiles/react_codegen_rnworklets.dir/react/renderer/components/rnworklets/States.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/rnworklets_autolinked_build/CMakeFiles/react_codegen_rnworklets.dir/react/renderer/components/rnworklets/States.cpp.o",
 			"sourceGroupIndex" : 1
 		},
 		{
 			"backtrace" : 4,
 			"isGenerated" : true,
-			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/rnworklets_autolinked_build/CMakeFiles/react_codegen_rnworklets.dir/rnworklets-generated.cpp.o",
+			"path" : "D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86_64/rnworklets_autolinked_build/CMakeFiles/react_codegen_rnworklets.dir/rnworklets-generated.cpp.o",
 			"sourceGroupIndex" : 1
 		}
 	],

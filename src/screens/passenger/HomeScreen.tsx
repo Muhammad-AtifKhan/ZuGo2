@@ -1,4 +1,4 @@
-// src/screens/passenger/HomeScreen.tsx - STANDARDIZED STATUSES
+// src/screens/passenger/HomeScreen.tsx - FIXED FIELD NAMES
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
@@ -66,7 +66,11 @@ interface Trip {
   availableSeats: number;
   fare: number;
   busType: string;
-  status?: string; // ✅ Added status field
+  status?: string;
+  from: string;
+  to: string;
+  fromCode: string;
+  toCode: string;
 }
 
 interface QuickBooking {
@@ -231,7 +235,8 @@ const HomeScreen = () => {
   const fetchPopularRoutes = useCallback(async () => {
     setLoadingRoutes(true);
     try {
-      const snapshot = await firestore()
+      // First, fetch popular routes
+      const routesSnapshot = await firestore()
         .collection('routes')
         .where('popular', '==', true)
         .orderBy('bookingCount', 'desc')
@@ -241,7 +246,7 @@ const HomeScreen = () => {
       const routes: Route[] = [];
       const routeIds: string[] = [];
 
-      snapshot.forEach(doc => {
+      routesSnapshot.forEach(doc => {
         const data = doc.data();
         const route: Route = {
           id: doc.id,
@@ -266,19 +271,23 @@ const HomeScreen = () => {
 
       setPopularRoutes(routes);
 
-      const safeRouteIds = routeIds.slice(0, 10);
-
-      if (safeRouteIds.length > 0) {
+      // Then, fetch trips for these routes
+      if (routeIds.length > 0) {
         const dateString = travelDate.toISOString().split('T')[0];
+        console.log('🔍 Fetching trips for date:', dateString);
+        console.log('📍 Route IDs:', routeIds);
 
-        // ✅ Updated: Use standardized statuses for filtering available trips
+        // ✅ FIXED: Query trips using correct field names
+        // Trips collection uses: routeId, date, status
         const tripsSnapshot = await firestore()
           .collection('trips')
-          .where('routeId', 'in', safeRouteIds)
+          .where('routeId', 'in', routeIds)
           .where('status', 'in', [TRIP_STATUS.SCHEDULED, TRIP_STATUS.IN_PROGRESS])
           .where('date', '==', dateString)
           .orderBy('departureTime')
           .get();
+
+        console.log('📊 Found trips:', tripsSnapshot.size);
 
         const tripsByRoute: { [key: string]: Trip[] } = {};
         tripsSnapshot.forEach(doc => {
@@ -289,10 +298,14 @@ const HomeScreen = () => {
             busNumber: data.busNumber || '',
             departureTime: data.departureTime || '',
             arrivalTime: data.arrivalTime || '',
-            availableSeats: data.availableSeats || 0,
+            availableSeats: data.availableSeats || data.totalSeats || 0,
             fare: data.fare || 0,
             busType: data.busType || 'Standard',
-            status: data.status, // ✅ Include status
+            status: data.status,
+            from: data.from || '',
+            to: data.to || '',
+            fromCode: data.fromCode || '',
+            toCode: data.toCode || '',
           };
 
           if (!tripsByRoute[data.routeId]) {
@@ -301,10 +314,11 @@ const HomeScreen = () => {
           tripsByRoute[data.routeId].push(trip);
         });
 
+        console.log('📦 Trips by route:', Object.keys(tripsByRoute).length);
         setRouteTrips(tripsByRoute);
       }
     } catch (error) {
-      console.error('Error fetching popular routes:', error);
+      console.error('❌ Error fetching popular routes:', error);
       Alert.alert('Error', 'Failed to load popular routes. Please try again.');
     } finally {
       setLoadingRoutes(false);
@@ -406,7 +420,14 @@ const HomeScreen = () => {
     return () => {
       isMounted = false;
     };
-  }, [fetchCities, fetchPopularRoutes, fetchQuickBookings, loadRecentSearches, loadCitiesFromCache]);
+  }, []);
+
+  // ✅ Refetch trips when date changes
+  useEffect(() => {
+    if (popularRoutes.length > 0) {
+      fetchPopularRoutes();
+    }
+  }, [travelDate]);
 
   useFocusEffect(
     useCallback(() => {
@@ -620,7 +641,7 @@ const HomeScreen = () => {
     if (!routeTrips[route.id]?.length) {
       Alert.alert(
         'No Trips Available',
-        `Sorry, no active trips found for ${route.fromCityName} → ${route.toCityName}. Please try another date.`,
+        `Sorry, no active trips found for ${route.fromCityName} → ${route.toCityName} on ${travelDate.toLocaleDateString()}. Please try another date.`,
         [{ text: 'OK' }]
       );
       return;
@@ -1014,7 +1035,7 @@ const HomeScreen = () => {
                       <View style={styles.infoItem}>
                         <Icon name="schedule" size={16} color="#666" />
                         <Text style={styles.infoText}>
-                          {trip?.departureTime || 'Multiple times'} - {trip?.arrivalTime || ''}
+                          {trip?.departureTime || 'Multiple times'} {trip?.arrivalTime ? `- ${trip.arrivalTime}` : ''}
                         </Text>
                       </View>
                       <View style={styles.infoItem}>
@@ -1026,7 +1047,7 @@ const HomeScreen = () => {
                     <View style={styles.routeInfoRow}>
                       <View style={styles.infoItem}>
                         <Icon name="attach-money" size={16} color="#666" />
-                        <Text style={styles.infoText}>From {formatFare(route.baseFare)}</Text>
+                        <Text style={styles.infoText}>From {formatFare(trip?.fare || route.baseFare)}</Text>
                       </View>
                       <View style={styles.infoItem}>
                         <Icon name="star" size={16} color="#FFD700" />

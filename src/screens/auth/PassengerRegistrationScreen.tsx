@@ -81,15 +81,7 @@ export default function PassengerRegistrationScreen() {
 
       const user = userCredential.user;
 
-      // Update profile with name
-      await user.updateProfile({
-        displayName: formData.name.trim(),
-      });
-
-      // Send email verification
-      await user.sendEmailVerification();
-
-      // Store user data in Firestore
+      // Store user data in Firestore FIRST so that RootNavigator doesn't immediately sign user out
       await firestore()
         .collection('users')
         .doc(user.uid)
@@ -105,6 +97,14 @@ export default function PassengerRegistrationScreen() {
           updatedAt: firestore.FieldValue.serverTimestamp(),
           status: 'pending_verification',
         });
+
+      // Update profile with name
+      await user.updateProfile({
+        displayName: formData.name.trim(),
+      });
+
+      // Send email verification
+      await user.sendEmailVerification();
 
       // Sign out immediately so user must verify email before login
       await auth().signOut();

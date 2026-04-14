@@ -1,5 +1,5 @@
 # ninja log v5
-1	31	0	D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/CMakeFiles/cmake.verify_globs	bc02b793f885ac62
+2	40	0	D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/CMakeFiles/cmake.verify_globs	bc02b793f885ac62
 41659	55029	7930980137826423	rnscreens_autolinked_build/CMakeFiles/react_codegen_rnscreens.dir/d1b21aba2120e093dec9a7fcc15fb5d7/common/cpp/react/renderer/components/rnscreens/RNSScreenStackHeaderSubviewState.cpp.o	232cd76fe7efa430
 10865	24432	7930979832336285	RNImagePickerSpec_autolinked_build/CMakeFiles/react_codegen_RNImagePickerSpec.dir/react/renderer/components/RNImagePickerSpec/ComponentDescriptors.cpp.o	ed4ef6293937ec3f
 121	9549	7930979682964966	rngesturehandler_codegen_autolinked_build/CMakeFiles/react_codegen_rngesturehandler_codegen.dir/react/renderer/components/rngesturehandler_codegen/States.cpp.o	8c33f517cbf3feea
@@ -104,4 +104,4 @@
 40	8285	7963379388754802	RNCWebViewSpec_autolinked_build/CMakeFiles/react_codegen_RNCWebViewSpec.dir/react/renderer/components/RNCWebViewSpec/ShadowNodes.cpp.o	d7a1c251899dba6f
 52	9350	7963379399313233	RNCWebViewSpec_autolinked_build/CMakeFiles/react_codegen_RNCWebViewSpec.dir/react/renderer/components/RNCWebViewSpec/ComponentDescriptors.cpp.o	ba9c2c54171a5cad
 58	9408	7963379399903187	RNCWebViewSpec_autolinked_build/CMakeFiles/react_codegen_RNCWebViewSpec.dir/react/renderer/components/RNCWebViewSpec/Props.cpp.o	5998016e8c381f96
-1	31	0	D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/CMakeFiles/cmake.verify_globs	bc02b793f885ac62
+1	30	0	D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/armeabi-v7a/CMakeFiles/cmake.verify_globs	bc02b793f885ac62

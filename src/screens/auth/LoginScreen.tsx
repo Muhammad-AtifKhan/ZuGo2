@@ -49,24 +49,19 @@ export default function LoginScreen() {
 
       // 🔥 CHECK EMAIL VERIFICATION
       if (!user.emailVerified) {
-        await auth().signOut(); // Sign out immediately
+        try {
+          // Sign out se PEHLE verification email bhejo
+          await user.sendEmailVerification();
+        } catch (e) {
+          // ignore karo agar already sent tha
+        }
+
+        await auth().signOut();
+
         Alert.alert(
           'Email Not Verified',
-          'Please verify your email address before logging in. Check your inbox for the verification link.',
-          [
-            {
-              text: 'Resend Email',
-              onPress: async () => {
-                try {
-                  await user.sendEmailVerification();
-                  Alert.alert('Success', 'Verification email sent!');
-                } catch (error) {
-                  Alert.alert('Error', 'Failed to send verification email');
-                }
-              }
-            },
-            { text: 'OK' }
-          ]
+          'Please verify your email before logging in.\n\nA verification email has been sent to your inbox.',
+          [{ text: 'OK' }]
         );
         return;
       }
@@ -82,6 +77,15 @@ export default function LoginScreen() {
         return Alert.alert(
           'Account Error',
           'Your account is not properly set up. Please register again.'
+        );
+      }
+
+      const userType = userDoc.data()?.userType?.toLowerCase?.();
+      if (!userType || !['passenger', 'driver', 'transporter'].includes(userType)) {
+        await auth().signOut();
+        return Alert.alert(
+          'Account Error',
+          'Invalid account type. Please contact support.'
         );
       }
 

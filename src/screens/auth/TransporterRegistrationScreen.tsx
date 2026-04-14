@@ -55,7 +55,7 @@ export default function TransporterRegistrationScreen() {
   };
 
   const handleSubmit = async () => {
-    // Validation
+    // ========== VALIDATION ==========
     if (!formData.companyName.trim()) {
       return Alert.alert('Error', 'Please enter company name');
     }
@@ -87,13 +87,62 @@ export default function TransporterRegistrationScreen() {
     setLoading(true);
 
     try {
-      // Create user in Firebase Authentication
+      // ========== 1. CREATE FIREBASE AUTH USER ==========
       const userCredential = await auth().createUserWithEmailAndPassword(
         formData.businessEmail.trim().toLowerCase(),
         formData.password
       );
 
       const user = userCredential.user;
+
+      // ========== 2. PREPARE DATA ==========
+      const normalizedEmail = formData.businessEmail.trim().toLowerCase();
+      const cleanedPhone = formData.contactPhone.replace(/\D/g, '');
+      const now = firestore.FieldValue.serverTimestamp();
+
+      const commonData = {
+        companyName: formData.companyName.trim(),
+        contactPerson: formData.contactPerson.trim(),
+        email: normalizedEmail,
+        phone: cleanedPhone,
+        businessAddress: formData.businessAddress.trim(),
+        taxNumber: formData.taxNumber.trim().toUpperCase(),
+      };
+
+      // ========== 3. BATCH WRITE TO BOTH COLLECTIONS BEFORE EMAIL VERIFICATION ==========
+      const batch = firestore().batch();
+
+      // 📁 Save to 'users' collection (for authentication & role checking)
+      const userRef = firestore().collection('users').doc(user.uid);
+      batch.set(userRef, {
+        uid: user.uid,
+        ...commonData,
+        userType: 'transporter',
+        emailVerified: false,
+        profileComplete: true,
+        status: 'pending_verification',
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      // 📁 Save to 'transporters' collection (for business-specific data)
+      const transporterRef = firestore().collection('transporters').doc(user.uid);
+      batch.set(transporterRef, {
+        uid: user.uid,
+        ...commonData,
+        driversCount: 0,              // Initial driver count
+        totalTrips: 0,                // Total trips completed
+        totalRevenue: 0,              // Total revenue generated
+        rating: 0,                    // Average rating (0-5)
+        totalRatings: 0,              // Number of ratings received
+        isVerified: false,            // Admin verification status
+        isActive: true,               // Account active status
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      // Commit batch - both succeed or both fail
+      await batch.commit();
 
       // Update profile with company name
       await user.updateProfile({
@@ -103,30 +152,9 @@ export default function TransporterRegistrationScreen() {
       // Send email verification
       await user.sendEmailVerification();
 
-      // Store transporter data in Firestore
-      await firestore()
-        .collection('users')
-        .doc(user.uid)
-        .set({
-          uid: user.uid,
-          companyName: formData.companyName.trim(),
-          contactPerson: formData.contactPerson.trim(),
-          email: formData.businessEmail.trim().toLowerCase(),
-          phone: formData.contactPhone.trim(),
-          businessAddress: formData.businessAddress.trim(),
-          taxNumber: formData.taxNumber.trim().toUpperCase(),
-          userType: 'transporter',
-          emailVerified: false,
-          profileComplete: true,
-          status: 'pending_verification',
-          createdAt: firestore.FieldValue.serverTimestamp(),
-          updatedAt: firestore.FieldValue.serverTimestamp(),
-        });
-
-      // Sign out immediately so user must verify email before login
+      // ========== 4. SIGN OUT & SHOW SUCCESS ==========
       await auth().signOut();
 
-      // Show success message
       Alert.alert(
         'Registration Successful! 🎉',
         `Business account created for ${formData.businessEmail}\n\n📧 A verification email has been sent.\n\nPlease verify your email before logging in.`,
