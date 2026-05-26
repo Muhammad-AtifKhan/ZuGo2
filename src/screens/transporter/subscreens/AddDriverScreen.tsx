@@ -21,6 +21,11 @@ import Clipboard from '@react-native-clipboard/clipboard';
 
 // Import driver auth service
 import { createDriverWithSecondaryApp } from '../../../services/driverAuthService';
+import {
+  addDriverToBatch,
+  updateDriverInBatch,
+  type DriverProfileInput,
+} from '../../../services/profileCollectionsService';
 
 // Types
 import { Driver, DriverStatus } from '../../../types/driver.types';
@@ -460,9 +465,7 @@ const AddDriverScreen = () => {
 
         const batch = firestore().batch();
 
-        // ✅ Driver document - NO isAvailable or onDuty fields
-        const driverRef = firestore().collection('drivers').doc(driverUID);
-        batch.set(driverRef, {
+        const driverProfile: DriverProfileInput = {
           fullName: normalizedFullName,
           contactNumber: cleanedPhone,
           email: normalizedEmail,
@@ -473,36 +476,17 @@ const AddDriverScreen = () => {
           licenseExpiry: formData.licenseExpiry || null,
           isLicenseExpired: licenseExpired,
           address: formData.address,
-          emergencyContact: formData.emergencyContact ? formData.emergencyContact.replace(/\D/g, '') : '',
+          emergencyContact: formData.emergencyContact
+            ? formData.emergencyContact.replace(/\D/g, '')
+            : '',
           joiningDate: formData.joiningDate || new Date().toISOString().split('T')[0],
           salary: parseInt(formData.salary) || 0,
           employmentType: formData.employmentType,
           experienceYears: parseInt(formData.experienceYears) || 0,
-          status: formData.status, // ✅ Single source of truth
-          currentTripId: null, // ✅ Initialize as null
-          uid: driverUID,
-          transporterId: transporterId,
-          role: 'driver',
-          isDeleted: false,
-          searchKeywords: searchKeywords,
-          createdAt: firestore.FieldValue.serverTimestamp(),
-          updatedAt: firestore.FieldValue.serverTimestamp(),
-        });
-
-        // User document
-        const userRef = firestore().collection('users').doc(driverUID);
-        batch.set(userRef, {
-          uid: driverUID,
-          fullName: normalizedFullName,
-          email: normalizedEmail,
-          phone: cleanedPhone,
-          userType: 'driver',
-          transporterId: transporterId,
           status: formData.status,
-          isDeleted: false,
-          createdAt: firestore.FieldValue.serverTimestamp(),
-          updatedAt: firestore.FieldValue.serverTimestamp(),
-        });
+          searchKeywords,
+        };
+        addDriverToBatch(batch, driverUID, transporterId, driverProfile);
 
         // Driver credentials
         const credRef = firestore().collection('driver_credentials').doc(driverUID);
@@ -542,9 +526,7 @@ const AddDriverScreen = () => {
 
         const batch = firestore().batch();
 
-        // ✅ Update driver - NO isAvailable or onDuty fields
-        const driverRef = firestore().collection('drivers').doc(driver.id);
-        batch.update(driverRef, {
+        updateDriverInBatch(batch, driver.id, transporterId, {
           fullName: normalizedFullName,
           contactNumber: cleanedPhone,
           email: normalizedEmail,
@@ -555,24 +537,15 @@ const AddDriverScreen = () => {
           licenseExpiry: formData.licenseExpiry || null,
           isLicenseExpired: licenseExpired,
           address: formData.address,
-          emergencyContact: formData.emergencyContact ? formData.emergencyContact.replace(/\D/g, '') : '',
+          emergencyContact: formData.emergencyContact
+            ? formData.emergencyContact.replace(/\D/g, '')
+            : '',
           joiningDate: formData.joiningDate,
           salary: parseInt(formData.salary) || 0,
           employmentType: formData.employmentType,
           experienceYears: parseInt(formData.experienceYears) || 0,
-          status: formData.status, // ✅ Single source of truth
-          searchKeywords: searchKeywords,
-          updatedAt: firestore.FieldValue.serverTimestamp(),
-        });
-
-        // Update user document
-        const userRef = firestore().collection('users').doc(driver.id);
-        batch.update(userRef, {
-          fullName: normalizedFullName,
-          email: normalizedEmail,
-          phone: cleanedPhone,
           status: formData.status,
-          updatedAt: firestore.FieldValue.serverTimestamp(),
+          searchKeywords,
         });
 
         await batch.commit();

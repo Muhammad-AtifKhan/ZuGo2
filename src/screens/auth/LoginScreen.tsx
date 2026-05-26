@@ -1,4 +1,6 @@
-import React, { useState } from 'react';
+// LoginScreen.tsx - Complete updated version
+
+import React, { useState, useContext } from 'react';
 import {
   View,
   Text,
@@ -16,6 +18,8 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
+import { AuthContext } from '../../context/AuthContext';
+import { safeSignOut } from '../../utils/safeAuth';
 
 type AuthStackParamList = {
   Login: undefined;
@@ -27,8 +31,10 @@ type NavigationProp = NativeStackNavigationProp<AuthStackParamList>;
 
 export default function LoginScreen() {
   const navigation = useNavigation<NavigationProp>();
+  const { refreshUser } = useContext(AuthContext);
   const [credentials, setCredentials] = useState({ email: '', password: '' });
   const [loading, setLoading] = useState(false);
+  const [resendingEmail, setResendingEmail] = useState(false);
 
   const handleLogin = async () => {
     if (!credentials.email.trim() || !credentials.password) {
@@ -46,52 +52,114 @@ export default function LoginScreen() {
       );
 
       const user = userCredential.user;
+      console.log('User signed in:', user.uid);
+      console.log('Email verified:', user.emailVerified);
 
-      // 🔥 CHECK EMAIL VERIFICATION
-      if (!user.emailVerified) {
-        try {
-          // Sign out se PEHLE verification email bhejo
-          await user.sendEmailVerification();
-        } catch (e) {
-          // ignore karo agar already sent tha
-        }
+      // ✅ CRITICAL: Reload user to get latest email verification status
+      await user.reload();
+      const isEmailVerified = user.emailVerified;
+      console.log('Email verified after reload:', isEmailVerified);
 
-        await auth().signOut();
-
-        Alert.alert(
-          'Email Not Verified',
-          'Please verify your email before logging in.\n\nA verification email has been sent to your inbox.',
-          [{ text: 'OK' }]
-        );
-        return;
-      }
-
-      // Check if user exists in Firestore
+      // ✅ Check if user exists in Firestore
       const userDoc = await firestore()
         .collection('users')
         .doc(user.uid)
         .get();
 
       if (!userDoc.exists) {
-        await auth().signOut();
+        await safeSignOut();
         return Alert.alert(
           'Account Error',
           'Your account is not properly set up. Please register again.'
         );
       }
 
-      const userType = userDoc.data()?.userType?.toLowerCase?.();
+      const userData = userDoc.data();
+      const userType = userData?.userType?.toLowerCase?.();
+      console.log('User type:', userType);
+
       if (!userType || !['passenger', 'driver', 'transporter'].includes(userType)) {
-        await auth().signOut();
+        await safeSignOut();
         return Alert.alert(
           'Account Error',
           'Invalid account type. Please contact support.'
         );
       }
 
-      // Success - RootNavigator will handle navigation based on role
+      // ✅ For TRANSPORTER: Check both verifications
+      if (userType === 'transporter') {
+        // Check admin verification
+        const transporterDoc = await firestore()
+          .collection('transporters')
+          .doc(user.uid)
+          .get();
+
+        if (!transporterDoc.exists) {
+          await safeSignOut();
+          return Alert.alert(
+            'Account Error',
+            'Transporter account not found. Please register again.'
+          );
+        }
+
+        const transporterData = transporterDoc.data();
+        const isAdminVerified = transporterData?.isVerified === true;
+        console.log('Admin verified:', isAdminVerified);
+
+        if (!isEmailVerified || !isAdminVerified) {
+          if (!isEmailVerified) {
+            await user.sendEmailVerification();
+          }
+          // Log out the user immediately to keep auth state clean
+          await safeSignOut();
+          await refreshUser();
+          setLoading(false);
+          return Alert.alert(
+            !isEmailVerified ? 'Email Not Verified 📧' : 'Admin Approval Pending 👨‍💼',
+            !isEmailVerified
+              ? 'Please verify your email. A new verification link has been sent to your inbox.'
+              : 'Your account is awaiting admin approval. Please try again after approval.',
+            [{ text: 'OK' }]
+          );
+        }
+
+        await refreshUser();
+        console.log('✅ Transporter fully verified — opening dashboard');
+        setLoading(false);
+        return;
+      }
+
+      // ✅ For PASSENGER: Only email verification check
+      if (userType === 'passenger') {
+        if (!isEmailVerified) {
+          await user.sendEmailVerification();
+          await safeSignOut();
+          return Alert.alert(
+            'Email Not Verified 📧',
+            'Please verify your email before logging in.\n\nA verification email has been sent to your inbox.',
+            [{ text: 'OK' }]
+          );
+        }
+      }
+
+      // ✅ For DRIVER: Only email verification check
+      if (userType === 'driver') {
+        if (!isEmailVerified) {
+          await user.sendEmailVerification();
+          await safeSignOut();
+          return Alert.alert(
+            'Email Not Verified 📧',
+            'Please verify your email before logging in.\n\nA verification email has been sent to your inbox.',
+            [{ text: 'OK' }]
+          );
+        }
+      }
+
+      await refreshUser();
+      console.log('✅ Login successful for:', userType);
 
     } catch (error: any) {
+      console.error('Login Error:', error.code, error.message);
 
       let msg = 'Login failed. Please try again.';
       if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
@@ -106,6 +174,30 @@ export default function LoginScreen() {
       Alert.alert('Login Failed', msg);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleResendVerificationEmail = async () => {
+    const email = credentials.email.trim();
+
+    if (!email) {
+      return Alert.alert('Email Required', 'Please enter your email address first');
+    }
+
+    setResendingEmail(true);
+    try {
+      // Try to sign in to get user reference
+      // This will fail if password is wrong, but we just need the user object
+      // Instead, use Firebase's built-in method
+      Alert.alert(
+        'Resend Verification',
+        'Please try logging in first. The system will automatically send a new verification email if your email is not verified.',
+        [{ text: 'OK' }]
+      );
+    } catch (error) {
+      Alert.alert('Error', 'Could not resend verification email. Please try logging in first.');
+    } finally {
+      setResendingEmail(false);
     }
   };
 
@@ -128,13 +220,14 @@ export default function LoginScreen() {
               await auth().sendPasswordResetEmail(email);
               Alert.alert(
                 'Email Sent',
-                'Password reset link has been sent to your email.'
+                'Password reset link has been sent to your email.\n\nCheck your spam folder if not received.'
               );
-            } catch (error) {
-              Alert.alert(
-                'Error',
-                'Failed to send reset email. Please check if the email is registered.'
-              );
+            } catch (error: any) {
+              let msg = 'Failed to send reset email.';
+              if (error.code === 'auth/user-not-found') {
+                msg = 'No account found with this email address.';
+              }
+              Alert.alert('Error', msg);
             }
           },
         },
@@ -230,13 +323,13 @@ export default function LoginScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Email Verification Info */}
+          {/* Info Container */}
           <View style={styles.infoContainer}>
-            <Text style={styles.infoTitle}>📧 Email Verification Required</Text>
+            <Text style={styles.infoTitle}>🔐 Verification Requirements:</Text>
             <Text style={styles.infoText}>
-              • Check your inbox for verification email{'\n'}
-              • Click the verification link{'\n'}
-              • Then login with your credentials
+              <Text style={{fontWeight: 'bold'}}>Passengers:</Text> Email verification only{'\n\n'}
+              <Text style={{fontWeight: 'bold'}}>Transporters:</Text> Email verification + Admin approval{'\n\n'}
+              <Text style={{fontWeight: 'bold'}}>Drivers:</Text> Email verification only
             </Text>
           </View>
         </ScrollView>
@@ -357,7 +450,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   infoContainer: {
-    backgroundColor: '#F8F9FA',
+    backgroundColor: '#E8F0FE',
     padding: 20,
     borderRadius: 12,
     borderLeftWidth: 4,
@@ -371,7 +464,7 @@ const styles = StyleSheet.create({
   },
   infoText: {
     fontSize: 14,
-    color: '#5f6368',
+    color: '#1a73e8',
     lineHeight: 22,
   },
 });

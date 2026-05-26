@@ -15,7 +15,7 @@ import {
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import auth from '@react-native-firebase/auth';
-import firestore from '@react-native-firebase/firestore';
+import { createPassengerInBothCollections } from '../../services/profileCollectionsService';
 
 type AuthStackParamList = {
   Login: undefined;
@@ -73,43 +73,38 @@ export default function PassengerRegistrationScreen() {
 
     setLoading(true);
     try {
-      // Create user in Firebase Authentication
+      // 1️⃣ Create user in Firebase Authentication
       const userCredential = await auth().createUserWithEmailAndPassword(
         formData.email.trim().toLowerCase(),
         formData.password
       );
 
       const user = userCredential.user;
+      const userId = user.uid;
+      const normalizedEmail = formData.email.trim().toLowerCase();
+      const cleanedPhone = formData.phone.trim();
 
-      // Store user data in Firestore FIRST so that RootNavigator doesn't immediately sign user out
-      await firestore()
-        .collection('users')
-        .doc(user.uid)
-        .set({
-          uid: user.uid,
-          fullName: formData.name.trim(),
-          email: formData.email.trim().toLowerCase(),
-          phone: formData.phone.trim(),
-          userType: 'passenger',
-          emailVerified: false,
-          profileComplete: true,
-          createdAt: firestore.FieldValue.serverTimestamp(),
-          updatedAt: firestore.FieldValue.serverTimestamp(),
-          status: 'pending_verification',
-        });
+      // 2️⃣ Save to both `users` and `passengers` (atomic batch)
+      await createPassengerInBothCollections(userId, {
+        fullName: formData.name.trim(),
+        email: normalizedEmail,
+        phone: cleanedPhone,
+      });
+      console.log('✅ Passenger data saved to users and passengers collections');
 
-      // Update profile with name
+      // 4️⃣ Update profile with name
       await user.updateProfile({
         displayName: formData.name.trim(),
       });
 
-      // Send email verification
+      // 5️⃣ Send email verification
       await user.sendEmailVerification();
+      console.log('✅ Verification email sent');
 
-      // Sign out immediately so user must verify email before login
+      // 6️⃣ Sign out immediately so user must verify email before login
       await auth().signOut();
 
-      // Show success message
+      // 7️⃣ Show success message
       Alert.alert(
         'Registration Successful! 🎉',
         `Account created for ${formData.email}\n\n📧 A verification email has been sent to your email address.\n\nPlease verify your email before logging in.`,
@@ -148,6 +143,8 @@ export default function PassengerRegistrationScreen() {
         message = 'Password is too weak. Use at least 6 characters.';
       } else if (error.code === 'auth/network-request-failed') {
         message = 'Network error. Check your internet connection.';
+      } else if (error.code === 'permission-denied') {
+        message = 'Permission denied. Please check your Firebase rules.';
       }
 
       Alert.alert('Registration Failed', message);

@@ -1,0 +1,198 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Passenger {
+  id               String    @id @default(uuid())
+  email            String    @unique
+  passwordHash     String
+  name             String
+  phone            String?
+  dateOfBirth      String?
+  profileImage     String?
+  cnic             String?
+  address          String?
+  city             String?
+  emergencyContact String?
+  specialNeeds     String?
+  isBlocked        Boolean   @default(false)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  bookings         Booking[]
+  tours            Tour[]
+}
+
+model Transporter {
+  id              String   @id @default(uuid())
+  email           String   @unique
+  passwordHash    String
+  companyName     String
+  contactPerson   String
+  phone           String?
+  businessAddress String?
+  taxNumber       String?
+  isBlocked       Boolean  @default(false)
+  isApproved      Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  buses           Bus[]    @relation("TransporterBuses")
+  drivers         Driver[] @relation("TransporterDrivers")
+}
+
+model Driver {
+  id               String       @id @default(uuid())
+  email            String       @unique
+  passwordHash     String
+  name             String
+  phone            String?
+  transporterId    String
+  cnic             String?
+  licenseNumber    String?
+  licenseType      String?      @default("heavy")
+  licenseExpiry    DateTime?
+  isLicenseExpired Boolean      @default(false)
+  address          String?
+  emergencyContact String?
+  joiningDate      DateTime?
+  salary           Float?       @default(0)
+  employmentType   String?      @default("fulltime")
+  experienceYears  Int?         @default(0)
+  status           String       @default("available")
+  isBlocked        Boolean      @default(false)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  transporter      Transporter  @relation("TransporterDrivers", fields: [transporterId], references: [id])
+  trips            Trip[]       @relation("DriverTrips")
+}
+
+model Admin {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  name         String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Bus {
+  id                 String   @id @default(uuid())
+  busNumber          String
+  registrationNumber String   @unique
+  make               String?
+  model              String?
+  year               Int?
+  capacity           Int
+  fuelType           String
+  color              String?
+  busType            String
+  status             String   @default("available")
+  transporterId      String
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  transporter        Transporter @relation("TransporterBuses", fields: [transporterId], references: [id])
+  trips              Trip[]
+}
+
+model City {
+  id             String   @id @default(uuid())
+  name           String   @unique
+  latitude       Float
+  longitude      Float
+  createdAt      DateTime @default(now())
+  routesAsDest   Route[]  @relation("DestCity")
+  routesAsSource Route[]  @relation("SourceCity")
+}
+
+model Route {
+  id           String   @id @default(uuid())
+  sourceCityId String
+  destCityId   String
+  distance     Float?
+  price        Float?
+  isVerified   Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  destCity     City     @relation("DestCity", fields: [destCityId], references: [id])
+  sourceCity   City     @relation("SourceCity", fields: [sourceCityId], references: [id])
+  trips        Trip[]
+
+  @@unique([sourceCityId, destCityId])
+}
+
+model Trip {
+  id            String    @id @default(uuid())
+  routeId       String
+  driverId      String
+  busId         String
+  departureTime DateTime
+  arrivalTime   DateTime?
+  status        String
+  price         Float
+  totalSeats    Int       @default(45)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  bookings      Booking[]
+  bus           Bus       @relation(fields: [busId], references: [id])
+  driver        Driver    @relation("DriverTrips", fields: [driverId], references: [id])
+  route         Route     @relation(fields: [routeId], references: [id])
+
+  @@index([routeId])
+  @@index([driverId])
+  @@index([busId])
+  @@index([departureTime])
+}
+
+model Booking {
+  id            String   @id @default(uuid())
+  tripId        String
+  passengerId   String
+  seatNumbers   Int[]
+  qrCode        String?  @unique
+  status        String
+  createdAt     DateTime @default(now())
+  tourId        String?
+  bookingCode   String?
+  paymentMethod String?
+  paymentStatus String?
+  totalAmount   Float?
+  passenger     Passenger @relation(fields: [passengerId], references: [id])
+  tour          Tour?     @relation(fields: [tourId], references: [id])
+  trip          Trip      @relation(fields: [tripId], references: [id])
+
+  @@index([tripId])
+  @@index([passengerId])
+  @@index([tourId])
+}
+
+model Tour {
+  id          String    @id @default(uuid())
+  passengerId String
+  name        String?
+  status      String
+  createdAt   DateTime  @default(now())
+  bookings    Booking[]
+  passenger   Passenger @relation(fields: [passengerId], references: [id])
+}
+
+model Notification {
+  id            String   @id @default(uuid())
+  userId        String?
+  driverId      String?
+  transporterId String?
+  target        String
+  title         String
+  message       String
+  actionId      String?
+  isRead        Boolean  @default(false)
+  createdAt     DateTime @default(now())
+
+  @@index([driverId, target, createdAt])
+  @@index([transporterId, target, createdAt])
+  @@index([userId, createdAt])
+  @@index([actionId])
+}

@@ -37,6 +37,7 @@ export default function AuthNavigator() {
         name="TransporterRegistration"
         component={TransporterRegistrationScreen}
       />
+
       <Stack.Screen
         name="ForgotPassword"
         component={ForgotPasswordScreen}

@@ -1,0 +1,299 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    function isTransporterOwner() {
+      return isSignedIn() &&
+        resource.data.transporterId == request.auth.uid;
+    }
+
+    // ============================================
+    // ADMIN COLLECTION
+    // ============================================
+    match /admins/{userId} {
+      allow read: if request.auth != null;
+      allow create, update: if request.auth != null && request.auth.uid == userId;
+      allow delete: if false;
+    }
+
+    // ============================================
+    // SYSTEM SETTINGS (admin panel)
+    // ============================================
+    match /system_settings/{document} {
+      allow read: if request.auth != null &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+      allow write: if request.auth != null &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.role == 'super_admin';
+    }
+
+    // ============================================
+    // USERS COLLECTION
+    // ============================================
+    match /users/{userId} {
+      allow read: if request.auth != null &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow update: if request.auth != null &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    // ============================================
+    // PASSENGERS COLLECTION
+    // ============================================
+    match /passengers/{passengerId} {
+      allow read: if request.auth != null &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+      allow read, write: if request.auth != null && request.auth.uid == passengerId;
+      allow create: if request.auth != null && request.auth.uid == passengerId;
+      allow update: if request.auth != null &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    // ============================================
+    // DRIVERS COLLECTION
+    // ============================================
+    match /drivers/{driverId} {
+      allow read: if isSignedIn() && (
+        isAdmin() ||
+        resource.data.transporterId == request.auth.uid ||
+        request.auth.uid == driverId
+      );
+      allow write: if isSignedIn();
+    }
+
+    // ============================================
+    // TRANSPORTERS COLLECTION
+    // ============================================
+    match /transporters/{transporterId} {
+      allow read: if request.auth != null &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+      allow read, write: if request.auth != null && request.auth.uid == transporterId;
+      allow update: if request.auth != null &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    // ============================================
+    // BUSES COLLECTION
+    // ============================================
+    match /buses/{busId} {
+      allow read: if isSignedIn() && (isTransporterOwner() || isAdmin());
+      allow update, delete: if isSignedIn() &&
+        (isAdmin() || request.auth.uid == resource.data.transporterId);
+      allow create: if isSignedIn() &&
+        (isAdmin() || request.auth.uid == request.resource.data.transporterId);
+    }
+
+    // ============================================
+    // TRIPS COLLECTION
+    // ============================================
+    match /trips/{tripId} {
+      allow read: if isSignedIn() && (
+        isAdmin() ||
+        resource.data.transporterId == request.auth.uid ||
+        resource.data.driverId == request.auth.uid
+      );
+      allow create: if isSignedIn() &&
+        (isAdmin() || request.auth.uid == request.resource.data.transporterId);
+      allow update: if isSignedIn() &&
+        (isAdmin() ||
+         resource.data.driverId == request.auth.uid ||
+         resource.data.transporterId == request.auth.uid);
+      allow delete: if isSignedIn() &&
+        (isAdmin() || resource.data.transporterId == request.auth.uid);
+
+      match /seats/{seatId} {
+        allow read, write: if isSignedIn();
+      }
+    }
+
+    // ============================================
+    // BOOKINGS COLLECTION
+    // ============================================
+    match /bookings/{bookingId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+
+    // ============================================
+    // DRIVER LOCATIONS
+    // ============================================
+    match /driver_locations/{locationId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+
+    match /driver_location/{locationId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+
+    // ============================================
+    // ROUTES COLLECTION
+    // ============================================
+    match /routes/{routeId} {
+      allow read: if request.auth != null;
+      allow update, delete: if request.auth != null &&
+        (exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+         request.auth.uid == resource.data.transporterId);
+      allow create: if request.auth != null &&
+        (exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+         request.auth.uid == request.resource.data.transporterId);
+    }
+
+    // ============================================
+    // CITIES COLLECTION
+    // ============================================
+    match /cities/{cityId} {
+      allow read: if true;
+      allow write: if request.auth != null &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    // ============================================
+    // SEARCHES COLLECTION
+    // ============================================
+    match /searches/{searchId} {
+      allow read: if request.auth != null;
+      allow update, delete: if request.auth != null &&
+        request.auth.uid == resource.data.userId;
+      allow create: if request.auth != null;
+    }
+
+    // ============================================
+    // TOURS COLLECTION
+    // ============================================
+    match /tours/{tourId} {
+      allow read, update, delete: if request.auth != null &&
+        request.auth.uid == resource.data.userId;
+      allow create: if request.auth != null;
+    }
+
+    // ============================================
+    // NOTIFICATIONS & DELAYS & RATINGS
+    // ============================================
+    match /transporter_notifications/{notificationId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if isSignedIn() && (
+        isAdmin() ||
+        !('transporterId' in resource.data) ||
+        resource.data.transporterId == request.auth.uid
+      );
+      allow write: if isSignedIn();
+    }
+
+    match /passenger_notifications/{notificationId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+
+    match /delays/{delayId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+
+    match /ratings/{ratingId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+
+    // ============================================
+    // TRANSPORTER ALERTS — DashboardScreen listener
+    // (was missing → default deny caused permission-denied)
+    // ============================================
+    match /alerts/{alertId} {
+      allow read: if isSignedIn() && (
+        isAdmin() ||
+        !('transporterId' in resource.data) ||
+        resource.data.transporterId == request.auth.uid
+      );
+      allow create: if isSignedIn();
+      allow update, delete: if isSignedIn() && (
+        isAdmin() ||
+        resource.data.transporterId == request.auth.uid
+      );
+    }
+
+    // ============================================
+    // TRANSPORTER SETTINGS — ReportsProfileScreen
+    // (was missing → default deny caused permission-denied)
+    // ============================================
+    match /settings/{transporterId} {
+      allow read, write: if request.auth != null && request.auth.uid == transporterId;
+      allow read, write: if request.auth != null &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    // ============================================
+    // FLEET / OPS SUPPORT
+    // ============================================
+    match /maintenance/{maintenanceId} {
+      allow read, write: if request.auth != null;
+    }
+
+    match /trip_activities/{activityId} {
+      allow read, write: if request.auth != null;
+    }
+
+    match /announcements/{announcementId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+
+    match /driver_credentials/{driverId} {
+      allow read, write: if request.auth != null;
+    }
+
+    match /vehicle_checks/{checkId} {
+      allow read, write: if request.auth != null;
+    }
+
+    match /vehicle_issues/{issueId} {
+      allow read, write: if request.auth != null;
+    }
+
+    match /emergencies/{emergencyId} {
+      allow read, write: if request.auth != null;
+    }
+
+    // ============================================
+    // TRIP SCHEDULES COLLECTION
+    // ============================================
+    match /tripSchedules/{scheduleId} {
+      allow read: if request.auth != null;
+      allow update, delete: if request.auth != null &&
+        (exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+         request.auth.uid == resource.data.transporterId);
+      allow create: if request.auth != null &&
+        (exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+         request.auth.uid == request.resource.data.transporterId);
+    }
+
+    // ============================================
+    // TEMP SELECTIONS (unauthenticated analytics)
+    // ============================================
+    match /temp_selections/{selectionId} {
+      allow create: if true;
+    }
+
+    // ============================================
+    // DEFAULT DENY
+    // ============================================
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

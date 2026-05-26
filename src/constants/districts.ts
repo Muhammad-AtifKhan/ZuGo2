@@ -1,0 +1,20 @@
+export const PAKISTAN_DISTRICTS = [
+  'Abbottabad', 'Astore', 'Attock', 'Awaran', 'Badin', 'Bagh', 'Bahawalnagar', 'Bahawalpur', 'Bajaur',
+  'Bannu', 'Barkhan', 'Batagram', 'Bhakkar', 'Bhimber', 'Buner', 'Chagai', 'Chakwal', 'Charsadda',
+  'Chiniot', 'Dadu', 'Darel', 'Dera Bugti', 'Dera Ghazi Khan', 'Dera Ismail Khan', 'Diamer', 'Dir Lower',
+  'Dir Upper', 'Faisalabad', 'Ghanche', 'Ghizer', 'Ghotki', 'Gilgit', 'Gujranwala', 'Gujrat', 'Gwadar',
+  'Hafizabad', 'Hangu', 'Haripur', 'Harnai', 'Hattian', 'Haveli', 'Hunza', 'Hyderabad', 'Islamabad',
+  'Jacobabad', 'Jafarabad', 'Jamshoro', 'Jhal Magsi', 'Jhang', 'Jhelum', 'Kachhi', 'Kalat', 'Karachi Central',
+  'Karachi East', 'Karachi South', 'Karachi West', 'Karak', 'Kashmore', 'Kasur', 'Kech', 'Kharan', 'Kharmang',
+  'Khairpur', 'Khushab', 'Khuzdar', 'Khyber', 'Killa Abdullah', 'Killa Saifullah', 'Kohat', 'Kohlu',
+  'Kolai Pallas', 'Korangi', 'Kotli', 'Kurram', 'Lahore', 'Lakki Marwat', 'Larkana', 'Lasbela', 'Layyah',
+  'Lodhran', 'Loralai', 'Lower Chitral', 'Lower Kohistan', 'Malakand', 'Malir', 'Mandi Bahauddin',
+  'Mansehra', 'Mardan', 'Mastung', 'Matiari', 'Mianwali', 'Mirpur', 'Mirpur Khas', 'Mohmand', 'Multan',
+  'Musakhel', 'Muzaffarabad', 'Muzaffargarh', 'Nagar', 'Nankana Sahib', 'Narowal', 'Naseerabad', 'Naushahro Feroze',
+  'Neelum', 'North Waziristan', 'Nowshera', 'Nushki', 'Okara', 'Orakzai', 'Pakpattan', 'Panjgur', 'Peshawar',
+  'Pishin', 'Poonch', 'Qambar Shahdadkot', 'Quetta', 'Rahim Yar Khan', 'Rajanpur', 'Rawalpindi', 'Roundu',
+  'Sahiwal', 'Sanghar', 'Sargodha', 'Shaheed Benazirabad', 'Sharmang', 'Sherani', 'Shigar', 'Shikarpur',
+  'Sialkot', 'Sibi', 'South Waziristan', 'Sujawal', 'Sukkur', 'Swabi', 'Swat', 'Tando Allahyar', 'Tando Muhammad Khan',
+  'Tangir', 'Tank', 'Tharparkar', 'Thatta', 'Toba Tek Singh', 'Torghar', 'Umerkot', 'Upper Chitral', 'Upper Kohistan',
+  'Vehari', 'Washuk', 'Ziarat', 'Zhob'
+].sort();

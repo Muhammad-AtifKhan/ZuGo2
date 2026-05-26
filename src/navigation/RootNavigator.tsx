@@ -2,8 +2,6 @@ import 'react-native-gesture-handler';
 import React, { useEffect, useState, useContext } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import auth from '@react-native-firebase/auth';
-import firestore from '@react-native-firebase/firestore';
 import { AuthContext } from '../context/AuthContext';
 
 import AuthNavigator from './AuthNavigator';
@@ -14,10 +12,14 @@ import TransporterNavigator from './TransporterNavigator';
 import SplashScreen from '../screens/auth/SplashScreen';
 
 export default function RootNavigator() {
-  const { user, loading } = useContext(AuthContext);
+  const {
+    user,
+    loading,
+    userRole,
+    isEmailVerified,
+    isAdminVerified,
+  } = useContext(AuthContext);
 
-  const [userRole, setUserRole] = useState<string | null>(null);
-  const [checkingRole, setCheckingRole] = useState(true);
   const [firstLaunch, setFirstLaunch] = useState<boolean | null>(null);
   const [splashVisible, setSplashVisible] = useState(true);
 
@@ -37,48 +39,26 @@ export default function RootNavigator() {
     checkFirstLaunch();
   }, []);
 
-  // 🔥 FETCH USER ROLE
-  useEffect(() => {
-    const fetchUserRole = async () => {
-      if (user) {
-        try {
-          const doc = await firestore()
-            .collection('users')
-            .doc(user.uid)
-            .get();
-
-          const userType = doc.data()?.userType?.toLowerCase?.() ?? null;
-          if (!userType || !['passenger', 'driver', 'transporter'].includes(userType)) {
-            setUserRole(null);
-          } else {
-            setUserRole(userType);
-          }
-        } catch {
-          setUserRole(null);
-        }
-      } else {
-        setUserRole(null);
-      }
-      setCheckingRole(false);
-    };
-
-    fetchUserRole();
-  }, [user]);
-
   // Splash timer
   useEffect(() => {
-    if (!loading && !checkingRole && firstLaunch !== null) {
+    if (!loading && firstLaunch !== null) {
       const timer = setTimeout(() => {
         setSplashVisible(false);
       }, 2000);
 
       return () => clearTimeout(timer);
     }
-  }, [loading, checkingRole, firstLaunch]);
+  }, [loading, firstLaunch]);
 
-  if (loading || checkingRole || firstLaunch === null || splashVisible) {
+  if (loading || firstLaunch === null || splashVisible) {
     return <SplashScreen />;
   }
+
+  // ✅ Determine if user can access their respective app
+  const canAccessPassengerApp = user && userRole === 'passenger' && isEmailVerified;
+  const canAccessDriverApp = user && userRole === 'driver' && isEmailVerified;
+  const canAccessTransporterApp =
+    user && userRole === 'transporter' && isEmailVerified && isAdminVerified;
 
   return (
     <NavigationContainer>
@@ -88,14 +68,31 @@ export default function RootNavigator() {
         ) : (
           <AuthNavigator />
         )
-      ) : userRole === 'passenger' ? (
-        <PassengerNavigator />
-      ) : userRole === 'driver' ? (
-        <DriverNavigator />
-      ) : userRole === 'transporter' ? (
-        <TransporterNavigator />
       ) : (
-        <AuthNavigator />
+        <>
+          {userRole === 'passenger' &&
+            (canAccessPassengerApp ? (
+              <PassengerNavigator />
+            ) : (
+              <AuthNavigator />
+            ))}
+
+          {userRole === 'driver' &&
+            (canAccessDriverApp ? (
+              <DriverNavigator />
+            ) : (
+              <AuthNavigator />
+            ))}
+
+          {userRole === 'transporter' &&
+            (canAccessTransporterApp ? (
+              <TransporterNavigator />
+            ) : (
+              <AuthNavigator />
+            ))}
+
+          {!userRole && <AuthNavigator />}
+        </>
       )}
     </NavigationContainer>
   );

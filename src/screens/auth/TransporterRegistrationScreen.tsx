@@ -16,6 +16,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
+import { safeSignOut } from '../../utils/safeAuth';
 
 type AuthStackParamList = {
   Login: undefined;
@@ -94,55 +95,65 @@ export default function TransporterRegistrationScreen() {
       );
 
       const user = userCredential.user;
+      const userEmail = formData.businessEmail.trim().toLowerCase();
+      const userId = user.uid;
+
+      console.log('✅ User created:', userId);
 
       // ========== 2. PREPARE DATA ==========
-      const normalizedEmail = formData.businessEmail.trim().toLowerCase();
       const cleanedPhone = formData.contactPhone.replace(/\D/g, '');
       const now = firestore.FieldValue.serverTimestamp();
 
       const commonData = {
         companyName: formData.companyName.trim(),
         contactPerson: formData.contactPerson.trim(),
-        email: normalizedEmail,
+        email: userEmail,
         phone: cleanedPhone,
         businessAddress: formData.businessAddress.trim(),
         taxNumber: formData.taxNumber.trim().toUpperCase(),
       };
 
-      // ========== 3. BATCH WRITE TO BOTH COLLECTIONS BEFORE EMAIL VERIFICATION ==========
+      // ========== 3. BATCH WRITE TO BOTH COLLECTIONS ==========
       const batch = firestore().batch();
 
-      // 📁 Save to 'users' collection (for authentication & role checking)
-      const userRef = firestore().collection('users').doc(user.uid);
+      // 📁 Save to 'users' collection
+      const userRef = firestore().collection('users').doc(userId);
       batch.set(userRef, {
-        uid: user.uid,
+        uid: userId,
+        id: userId,
         ...commonData,
         userType: 'transporter',
+        role: 'transporter',
         emailVerified: false,
         profileComplete: true,
-        status: 'pending_verification',
+        status: 'pending_admin_verification',
+        isActive: false,
         createdAt: now,
         updatedAt: now,
       });
 
-      // 📁 Save to 'transporters' collection (for business-specific data)
-      const transporterRef = firestore().collection('transporters').doc(user.uid);
+      // 📁 Save to 'transporters' collection
+      const transporterRef = firestore().collection('transporters').doc(userId);
       batch.set(transporterRef, {
-        uid: user.uid,
+        uid: userId,
+        id: userId,
+        transporterId: userId,
         ...commonData,
-        driversCount: 0,              // Initial driver count
-        totalTrips: 0,                // Total trips completed
-        totalRevenue: 0,              // Total revenue generated
-        rating: 0,                    // Average rating (0-5)
-        totalRatings: 0,              // Number of ratings received
-        isVerified: false,            // Admin verification status
-        isActive: true,               // Account active status
+        driversCount: 0,
+        totalTrips: 0,
+        totalRevenue: 0,
+        rating: 0,
+        totalRatings: 0,
+        isEmailVerified: false,
+        isVerified: false,
+        isActive: false,
+        status: 'pending',
         createdAt: now,
         updatedAt: now,
       });
 
-      // Commit batch - both succeed or both fail
       await batch.commit();
+      console.log('✅ Firestore documents created');
 
       // Update profile with company name
       await user.updateProfile({
@@ -151,24 +162,18 @@ export default function TransporterRegistrationScreen() {
 
       // Send email verification
       await user.sendEmailVerification();
+      console.log('✅ Verification email sent');
 
-      // ========== 4. SIGN OUT & SHOW SUCCESS ==========
-      await auth().signOut();
+      await safeSignOut();
+      navigation.reset({
+        index: 0,
+        routes: [{ name: 'Login' }],
+      });
 
       Alert.alert(
-        'Registration Successful! 🎉',
-        `Business account created for ${formData.businessEmail}\n\n📧 A verification email has been sent.\n\nPlease verify your email before logging in.`,
-        [
-          {
-            text: 'Go to Login',
-            onPress: () => {
-              navigation.reset({
-                index: 0,
-                routes: [{ name: 'Login' }],
-              });
-            }
-          }
-        ]
+        'Registration Submitted! ✅',
+        `Account created for ${userEmail}\n\n📧 A verification email has been sent to your inbox.\n\nYou can log in after:\n1️⃣ Email verification\n2️⃣ Admin approval (usually 24–48 hours)`,
+        [{ text: 'OK' }]
       );
 
       // Reset form
@@ -196,6 +201,8 @@ export default function TransporterRegistrationScreen() {
         message = 'Password is too weak. Use at least 6 characters.';
       } else if (error.code === 'auth/network-request-failed') {
         message = 'Network error. Check your internet connection.';
+      } else if (error.code === 'permission-denied') {
+        message = 'Permission denied. Please check your Firebase rules.';
       }
 
       Alert.alert('Registration Failed', message);
@@ -228,7 +235,7 @@ export default function TransporterRegistrationScreen() {
 
             <View style={styles.verifyBadge}>
               <Text style={styles.verifyBadgeText}>
-                📧 Email verification required
+                🔐 Dual Verification Required
               </Text>
             </View>
           </View>
@@ -351,14 +358,18 @@ export default function TransporterRegistrationScreen() {
               </Text>
             </TouchableOpacity>
 
-            {/* Email Verification Info */}
+            {/* Dual Verification Info */}
             <View style={styles.infoBox}>
-              <Text style={styles.infoTitle}>📧 After Registration:</Text>
+              <Text style={styles.infoTitle}>🔐 Two-Step Verification Process:</Text>
               <Text style={styles.infoText}>
-                1. You'll receive a verification email{'\n'}
-                2. Click the link in the email{'\n'}
-                3. Return to login page{'\n'}
-                4. Sign in with your credentials
+                <Text style={{fontWeight: 'bold'}}>1. Email Verification</Text>{'\n'}
+                • Click the link sent to your email{'\n'}
+                • Check spam folder if not received{'\n\n'}
+                <Text style={{fontWeight: 'bold'}}>2. Admin Approval</Text>{'\n'}
+                • Admin will review your application{'\n'}
+                • You will be notified once approved{'\n'}
+                • This may take 24-48 hours{'\n\n'}
+                ⚠️ You can only access the app after BOTH verifications are complete
               </Text>
             </View>
 
@@ -518,22 +529,22 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   infoBox: {
-    backgroundColor: '#E8F0FE',
+    backgroundColor: '#FFF3E0',
     padding: 16,
     borderRadius: 8,
     marginBottom: 24,
     borderLeftWidth: 4,
-    borderLeftColor: '#1a73e8',
+    borderLeftColor: '#FF9800',
   },
   infoTitle: {
     fontSize: 14,
     fontWeight: 'bold',
-    color: '#1a73e8',
+    color: '#E65100',
     marginBottom: 8,
   },
   infoText: {
     fontSize: 13,
-    color: '#1a73e8',
+    color: '#BF360C',
     lineHeight: 20,
   },
   registerButton: {

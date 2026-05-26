@@ -90,10 +90,31 @@ type Notification = {
   actionData?: any;
 };
 
+const logListenerError = (label: string, error: { code?: string }) => {
+  if (!auth().currentUser) {
+    return;
+  }
+  if (error?.code === 'firestore/permission-denied' || error?.code === 'permission-denied') {
+    console.warn(
+      `[${label}] Firestore permission denied — publish firestore.rules to Firebase project zugo2-2d31a.`
+    );
+    return;
+  }
+  console.error(`${label} listener error:`, error);
+};
+
 const DashboardScreen = () => {
   const navigation = useNavigation();
-  const user = auth().currentUser;
-  const transporterId = user?.uid;
+  const [transporterId, setTransporterId] = useState<string | undefined>(
+    auth().currentUser?.uid
+  );
+
+  useEffect(() => {
+    const unsubAuth = auth().onAuthStateChanged((firebaseUser) => {
+      setTransporterId(firebaseUser?.uid);
+    });
+    return unsubAuth;
+  }, []);
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -141,40 +162,8 @@ const DashboardScreen = () => {
     todayRevenue: 0,
   });
 
-  // Fetch all data from Firebase
-  useEffect(() => {
-    if (!transporterId) return;
-
-    const fetchData = async () => {
-      try {
-        setLoading(true);
-
-        // Get transporter name
-        const userDoc = await firestore().collection('users').doc(transporterId).get();
-        if (userDoc.exists) {
-          setTransporterName(userDoc.data()?.fullName || userDoc.data()?.companyName || 'Transporter');
-        }
-
-        // Set up listeners
-        setupBusesListener();
-        setupDriversListener();
-        setupTripsListener();
-        setupAlertsListener();
-        setupNotificationsListener();
-
-      } catch (error) {
-        console.error('Error fetching dashboard data:', error);
-        Alert.alert('Error', 'Failed to load dashboard data');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchData();
-  }, [transporterId]);
-
-  // Setup listeners
   const setupBusesListener = () => {
+    if (!transporterId) return () => {};
     return firestore()
       .collection('buses')
       .where('transporterId', '==', transporterId)
@@ -212,11 +201,12 @@ const DashboardScreen = () => {
             inactiveBuses: busesList.filter(b => b.status === BUS_STATUS.INACTIVE).length,
           }));
         },
-        (error) => console.error('Buses listener error:', error)
+        (error) => logListenerError('Buses', error)
       );
   };
 
   const setupDriversListener = () => {
+    if (!transporterId) return () => {};
     return firestore()
       .collection('drivers')
       .where('transporterId', '==', transporterId)
@@ -262,11 +252,12 @@ const DashboardScreen = () => {
             averageRating: Math.round(avgRating * 10) / 10,
           }));
         },
-        (error) => console.error('Drivers listener error:', error)
+        (error) => logListenerError('Drivers', error)
       );
   };
 
   const setupTripsListener = () => {
+    if (!transporterId) return () => {};
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
@@ -338,11 +329,12 @@ const DashboardScreen = () => {
             todayRevenue: totalRevenue,
           });
         },
-        (error) => console.error('Trips listener error:', error)
+        (error) => logListenerError('Trips', error)
       );
   };
 
   const setupAlertsListener = () => {
+    if (!transporterId) return () => {};
     return firestore()
       .collection('alerts')
       .where('transporterId', '==', transporterId)
@@ -364,11 +356,12 @@ const DashboardScreen = () => {
           });
           setAlerts(alertsList);
         },
-        (error) => console.error('Alerts listener error:', error)
+        (error) => logListenerError('Alerts', error)
       );
   };
 
   const setupNotificationsListener = () => {
+    if (!transporterId) return () => {};
     return firestore()
       .collection('notifications')
       .where('transporterId', '==', transporterId)
@@ -396,9 +389,61 @@ const DashboardScreen = () => {
           });
           setNotifications(notifsList);
         },
-        (error) => console.error('Notifications listener error:', error)
+        (error) => logListenerError('Notifications', error)
       );
   };
+
+  useEffect(() => {
+    if (!transporterId) {
+      setLoading(false);
+      setBuses([]);
+      setDrivers([]);
+      setTrips([]);
+      setAlerts([]);
+      setNotifications([]);
+      return;
+    }
+
+    const unsubscribes: Array<() => void> = [];
+    let cancelled = false;
+
+    const loadDashboard = async () => {
+      try {
+        setLoading(true);
+
+        const userDoc = await firestore().collection('users').doc(transporterId).get();
+        if (cancelled) return;
+
+        if (userDoc.exists) {
+          setTransporterName(
+            userDoc.data()?.fullName || userDoc.data()?.companyName || 'Transporter'
+          );
+        }
+
+        unsubscribes.push(setupBusesListener());
+        unsubscribes.push(setupDriversListener());
+        unsubscribes.push(setupTripsListener());
+        unsubscribes.push(setupAlertsListener());
+        unsubscribes.push(setupNotificationsListener());
+      } catch (error) {
+        if (!cancelled) {
+          console.error('Error fetching dashboard data:', error);
+          Alert.alert('Error', 'Failed to load dashboard data');
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
+
+    loadDashboard();
+
+    return () => {
+      cancelled = true;
+      unsubscribes.forEach((unsub) => unsub());
+    };
+  }, [transporterId]);
 
   // Helper functions
   const getTimeAgo = (date: Date): string => {
