@@ -247,15 +247,19 @@ const BoardingScreen: React.FC<BoardingScreenProps> = ({ navigation, route }) =>
   const mapTripStatus = (firebaseStatus: string): string => {
     // Return the actual status - we'll use TRIP_STATUS directly
     if (firebaseStatus === TRIP_STATUS.SCHEDULED) return TRIP_STATUS.SCHEDULED;
+    if (firebaseStatus === TRIP_STATUS.BOARDING) return TRIP_STATUS.BOARDING;
     if (firebaseStatus === TRIP_STATUS.IN_PROGRESS) return TRIP_STATUS.IN_PROGRESS;
     if (firebaseStatus === TRIP_STATUS.COMPLETED) return TRIP_STATUS.COMPLETED;
     if (firebaseStatus === TRIP_STATUS.DELAYED) return TRIP_STATUS.DELAYED;
     if (firebaseStatus === TRIP_STATUS.CANCELLED) return TRIP_STATUS.CANCELLED;
+    if (firebaseStatus === TRIP_STATUS.EXPIRED) return TRIP_STATUS.EXPIRED;
 
     // Map legacy statuses
     if (firebaseStatus === 'scheduled' || firebaseStatus === 'upcoming') return TRIP_STATUS.SCHEDULED;
-    if (firebaseStatus === 'in-progress' || firebaseStatus === 'active') return TRIP_STATUS.IN_PROGRESS;
+    if (firebaseStatus === 'boarding') return TRIP_STATUS.BOARDING;
+    if (firebaseStatus === 'in-progress' || firebaseStatus === 'active' || firebaseStatus === 'in_progress') return TRIP_STATUS.IN_PROGRESS;
     if (firebaseStatus === 'completed') return TRIP_STATUS.COMPLETED;
+    if (firebaseStatus === 'expired') return TRIP_STATUS.EXPIRED;
 
     return TRIP_STATUS.SCHEDULED;
   };
@@ -380,12 +384,12 @@ const BoardingScreen: React.FC<BoardingScreenProps> = ({ navigation, route }) =>
   const handleOpenBoarding = async () => {
     if (!tripInfo) return;
 
-    // ✅ Only allow opening if trip is SCHEDULED
-    if (tripInfo.status !== TRIP_STATUS.SCHEDULED) {
+    // ✅ Allow opening if trip is SCHEDULED or BOARDING
+    if (tripInfo.status !== TRIP_STATUS.SCHEDULED && tripInfo.status !== TRIP_STATUS.BOARDING) {
       const statusConfig = TRIP_STATUS_CONFIG[tripInfo.status as keyof typeof TRIP_STATUS_CONFIG];
       Alert.alert(
         'Cannot Open Boarding',
-        `Trip is ${statusConfig?.label || tripInfo.status}. It must be Scheduled.`
+        `Trip is ${statusConfig?.label || tripInfo.status}. It must be Scheduled or Boarding.`
       );
       return;
     }

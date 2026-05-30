@@ -106,17 +106,20 @@ const RouteScreen: React.FC<RouteScreenProps> = ({ navigation, route }) => {
   // ✅ Updated: Normalize trip status using standardized constants
   const normalizeStatus = (status: string): string => {
     if (status === TRIP_STATUS.SCHEDULED) return TRIP_STATUS.SCHEDULED;
+    if (status === TRIP_STATUS.BOARDING) return TRIP_STATUS.BOARDING;
     if (status === TRIP_STATUS.IN_PROGRESS) return TRIP_STATUS.IN_PROGRESS;
     if (status === TRIP_STATUS.COMPLETED) return TRIP_STATUS.COMPLETED;
     if (status === TRIP_STATUS.DELAYED) return TRIP_STATUS.DELAYED;
     if (status === TRIP_STATUS.CANCELLED) return TRIP_STATUS.CANCELLED;
+    if (status === TRIP_STATUS.EXPIRED) return TRIP_STATUS.EXPIRED;
 
     // Map legacy statuses
-    if (status === 'in_progress' || status === 'in-progress' || status === 'active') {
+    if (status === 'in_progress' || status === 'in-progress' || status === 'active' || status === 'in_progress') {
       return TRIP_STATUS.IN_PROGRESS;
     }
-    if (status === 'boarding') return TRIP_STATUS.SCHEDULED; // Boarding is pre-trip
+    if (status === 'boarding') return TRIP_STATUS.BOARDING;
     if (status === 'completed') return TRIP_STATUS.COMPLETED;
+    if (status === 'expired') return TRIP_STATUS.EXPIRED;
 
     return TRIP_STATUS.SCHEDULED;
   };
@@ -340,7 +343,7 @@ const RouteScreen: React.FC<RouteScreenProps> = ({ navigation, route }) => {
           tripQuery = firestore()
             .collection('trips')
             .where('driverId', '==', user.uid)
-            .where('status', 'in', [TRIP_STATUS.SCHEDULED, TRIP_STATUS.IN_PROGRESS, 'boarding', 'in-progress'])
+            .where('status', 'in', [TRIP_STATUS.SCHEDULED, TRIP_STATUS.BOARDING, TRIP_STATUS.IN_PROGRESS, TRIP_STATUS.DELAYED])
             .limit(1);
         }
 

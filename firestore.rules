@@ -16,6 +16,12 @@ service cloud.firestore {
         resource.data.transporterId == request.auth.uid;
     }
 
+    function isPassenger() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.userType == 'passenger';
+    }
+
     // ============================================
     // ADMIN COLLECTION
     // ============================================
@@ -66,7 +72,8 @@ service cloud.firestore {
       allow read: if isSignedIn() && (
         isAdmin() ||
         resource.data.transporterId == request.auth.uid ||
-        request.auth.uid == driverId
+        request.auth.uid == driverId ||
+        isPassenger()
       );
       allow write: if isSignedIn();
     }
@@ -100,19 +107,52 @@ service cloud.firestore {
       allow read: if isSignedIn() && (
         isAdmin() ||
         resource.data.transporterId == request.auth.uid ||
-        resource.data.driverId == request.auth.uid
+        resource.data.driverId == request.auth.uid ||
+        isPassenger()
       );
       allow create: if isSignedIn() &&
         (isAdmin() || request.auth.uid == request.resource.data.transporterId);
-      allow update: if isSignedIn() &&
-        (isAdmin() ||
-         resource.data.driverId == request.auth.uid ||
-         resource.data.transporterId == request.auth.uid);
+      allow update: if isSignedIn() && (
+        isAdmin() ||
+        resource.data.driverId == request.auth.uid ||
+        resource.data.transporterId == request.auth.uid ||
+        (isPassenger() &&
+         request.resource.data.diff(resource.data).affectedKeys()
+           .hasOnly(['availableSeats', 'updatedAt']))
+      );
       allow delete: if isSignedIn() &&
         (isAdmin() || resource.data.transporterId == request.auth.uid);
 
       match /seats/{seatId} {
-        allow read, write: if isSignedIn();
+        allow read: if isSignedIn();
+        allow create: if isSignedIn() && (isAdmin() || isTransporter());
+
+        allow update: if isSignedIn() && (
+          isAdmin() ||
+          isTransporter() ||
+          (isPassenger() && resource.data.status == 'available' && 
+           request.resource.data.status == 'reserved' &&
+           request.resource.data.reservedBy == request.auth.uid) ||
+          (isPassenger() && resource.data.status == 'reserved' && 
+           resource.data.reservedBy == request.auth.uid && 
+           request.resource.data.status == 'available') ||
+          (isPassenger() && resource.data.status == 'reserved' && 
+           resource.data.reservedBy == request.auth.uid && 
+           request.resource.data.status == 'booked') ||
+          (isPassenger() && resource.data.status == 'available' && 
+           request.resource.data.status == 'booked' &&
+           request.resource.data.bookedBy == request.auth.uid) ||
+          (isPassenger() && resource.data.status == 'reserved' && 
+           resource.data.reservedBy == request.auth.uid && 
+           request.resource.data.status == 'reserved' &&
+           request.resource.data.reservedBy == request.auth.uid) ||
+          (isSignedIn() && resource.data.status == 'reserved' &&
+           resource.data.reservedUntil != null &&
+           resource.data.reservedUntil < request.time &&
+           request.resource.data.status == 'available')
+        );
+
+        allow delete: if false;
       }
     }
 

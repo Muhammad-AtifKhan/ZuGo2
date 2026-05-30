@@ -454,9 +454,12 @@ const VehicleCheckScreen: React.FC<VehicleCheckScreenProps> = ({ navigation, rou
           const checkRef = firestore().collection('vehicle_checks').doc();
           transaction.set(checkRef, checkData);
 
-          // ✅ Trip status remains SCHEDULED (boarding is next step, not a separate status)
+          // ✅ Trip status: BOARDING and open boarding automatically
           const tripRef = firestore().collection('trips').doc(tripId);
           transaction.update(tripRef, {
+            status: TRIP_STATUS.BOARDING,
+            boardingOpen: true,
+            boardingStartedAt: firestore.FieldValue.serverTimestamp(),
             vehicleChecked: true,
             vehicleCheckedAt: firestore.FieldValue.serverTimestamp(),
             vehicleCheckId: checkRef.id,

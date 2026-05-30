@@ -1,4 +1,4 @@
-// src/screens/passenger/SeatSelectionScreen.tsx - WITH REAL-TIME SNAPSHOT LISTENER
+// src/screens/passenger/SeatSelectionScreen.tsx - COMPLETELY FIXED
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
@@ -22,8 +22,14 @@ type SeatSelectionScreenNavigationProp = StackNavigationProp<PassengerStackParam
 type SeatSelectionScreenRouteProp = RouteProp<PassengerStackParamList, 'SeatSelection'>;
 
 const { width } = Dimensions.get('window');
-const SEAT_SIZE = (width - 60) / 5;
-const AISLE_WIDTH = SEAT_SIZE * 1.5;
+const SCREEN_PADDING = 32;
+const SEAT_CARD_PADDING = 32;
+const SEAT_HORIZONTAL_MARGIN = 3;
+const AISLE_WIDTH = 20;
+const SEAT_LAYOUT_WIDTH = width - SCREEN_PADDING - SEAT_CARD_PADDING;
+const SEAT_SIZE = Math.floor(
+  (SEAT_LAYOUT_WIDTH - AISLE_WIDTH - SEAT_HORIZONTAL_MARGIN * 2 * 5) / 5
+);
 
 interface Seat {
   id: string;
@@ -40,6 +46,7 @@ interface Seat {
   price: number;
   reservedBy?: string | null;
   reservedUntil?: any;
+  isExpiredReservation?: boolean;
 }
 
 const SeatSelectionScreen = () => {
@@ -80,17 +87,16 @@ const SeatSelectionScreen = () => {
   const user = auth().currentUser;
   userIdRef.current = user?.uid;
 
-  // Keep refs in sync
   useEffect(() => {
     selectedSeatsRef.current = selectedSeats;
     tripIdRef.current = tripId;
   }, [selectedSeats, tripId]);
 
-  // ✅ REAL-TIME SNAPSHOT LISTENER FOR SEATS
+  // REAL-TIME SNAPSHOT LISTENER FOR SEATS
   useEffect(() => {
     if (!tripId) return;
 
-    console.log('🪑 Setting up REAL-TIME seat listener for trip:', tripId);
+    console.log('Setting up REAL-TIME seat listener for trip:', tripId);
     setLoading(true);
 
     const db = firestore();
@@ -99,31 +105,50 @@ const SeatSelectionScreen = () => {
       .doc(tripId)
       .collection('seats');
 
-    // ✅ onSnapshot for real-time updates
     const unsubscribe = seatsRef.onSnapshot(
-      (snapshot) => {
+      async (snapshot) => {
         if (!isMountedRef.current) return;
 
-        console.log(`📡 Real-time update: ${snapshot.docs.length} seats received`);
-
         const seatsData: Seat[] = [];
-        snapshot.forEach(doc => {
+        const now = new Date();
+
+        for (const doc of snapshot.docs) {
           const data = doc.data();
           const isReservedByCurrentUser = data.reservedBy === userIdRef.current;
-          const isReservedExpired = data.reservedUntil && data.reservedUntil.toDate() < new Date();
 
-          // Determine seat availability
+          let isExpired = false;
+          if (data.reservedUntil) {
+            const expiryDate = data.reservedUntil?.toDate
+              ? data.reservedUntil.toDate()
+              : new Date(data.reservedUntil);
+            isExpired = expiryDate < now;
+          }
+
           let isAvailable = false;
           if (data.status === 'available') {
             isAvailable = true;
-          } else if (data.status === 'reserved' && isReservedByCurrentUser && !isReservedExpired) {
-            // Current user's own reservation - treat as available for selection
-            isAvailable = true;
-          } else if (data.status === 'reserved' && isReservedExpired) {
-            // Expired reservation - should be available
-            isAvailable = true;
-          } else {
+          } else if (data.status === 'booked') {
             isAvailable = false;
+          } else if (data.status === 'reserved') {
+            if (isReservedByCurrentUser) {
+              isAvailable = true;
+            } else if (isExpired) {
+              isAvailable = true;
+              if (!isReservedByCurrentUser && isExpired) {
+                try {
+                  await doc.ref.update({
+                    status: 'available',
+                    reservedBy: null,
+                    reservedUntil: null,
+                    updatedAt: firestore.FieldValue.serverTimestamp(),
+                  });
+                } catch (e) {
+                  console.error('Error auto-releasing expired seat:', e);
+                }
+              }
+            } else {
+              isAvailable = false;
+            }
           }
 
           seatsData.push({
@@ -141,10 +166,10 @@ const SeatSelectionScreen = () => {
             price: data.price || farePerSeat,
             reservedBy: data.reservedBy,
             reservedUntil: data.reservedUntil,
+            isExpiredReservation: data.status === 'reserved' && isExpired && !isReservedByCurrentUser,
           });
-        });
+        }
 
-        // Sort seats by row and column
         seatsData.sort((a, b) => {
           if (a.row !== b.row) return a.row - b.row;
           return a.column - b.column;
@@ -153,7 +178,6 @@ const SeatSelectionScreen = () => {
         setSeats(seatsData);
         setLoading(false);
 
-        // ✅ CRITICAL: Check if current user's selected seats are still available
         if (selectedSeatsRef.current.length > 0 && userIdRef.current) {
           const unavailableSeats = selectedSeatsRef.current.filter(seatId => {
             const seat = seatsData.find(s => s.id === seatId);
@@ -161,8 +185,6 @@ const SeatSelectionScreen = () => {
           });
 
           if (unavailableSeats.length > 0) {
-            console.log('⚠️ Some selected seats are no longer available:', unavailableSeats);
-
             const unavailableNumbers = unavailableSeats.map(id => {
               const seat = seatsData.find(s => s.id === id);
               return seat?.number;
@@ -170,18 +192,16 @@ const SeatSelectionScreen = () => {
 
             Alert.alert(
               'Seat Status Changed',
-              `Seat(s) ${unavailableNumbers} are no longer available. Another user may have booked them.`,
+              `Seat(s) ${unavailableNumbers} are no longer available.`,
               [
                 {
                   text: 'OK',
                   onPress: () => {
-                    // Clear only the unavailable seats, keep the available ones
                     const stillAvailable = selectedSeatsRef.current.filter(
                       seatId => !unavailableSeats.includes(seatId)
                     );
                     setSelectedSeats(stillAvailable);
 
-                    // If no seats left, clear hold
                     if (stillAvailable.length === 0 && countdown !== null) {
                       releaseHeldSeats();
                       setCountdown(null);
@@ -192,24 +212,19 @@ const SeatSelectionScreen = () => {
             );
           }
         }
-
-        console.log(`✅ Real-time seats updated: ${seatsData.filter(s => s.isAvailable).length} available`);
       },
       (error) => {
-        console.error('❌ Error in real-time seat listener:', error);
+        console.error('Error in real-time seat listener:', error);
         if (isMountedRef.current) {
-          Alert.alert('Error', 'Failed to get real-time seat updates. Please refresh.');
+          Alert.alert('Error', 'Failed to get real-time seat updates.');
           setLoading(false);
         }
       }
     );
 
-    // Store unsubscribe function for cleanup
     unsubscribeRef.current = unsubscribe;
 
-    // Cleanup on unmount
     return () => {
-      console.log('🪑 Cleaning up real-time seat listener');
       if (unsubscribeRef.current) {
         unsubscribeRef.current();
         unsubscribeRef.current = null;
@@ -217,7 +232,6 @@ const SeatSelectionScreen = () => {
     };
   }, [tripId, farePerSeat]);
 
-  // ✅ Release seats function
   const releaseHeldSeats = useCallback(async () => {
     const currentSelectedSeats = selectedSeatsRef.current;
     const currentTripId = tripIdRef.current;
@@ -227,89 +241,160 @@ const SeatSelectionScreen = () => {
 
     try {
       const seatNumbers = currentSelectedSeats.map(id => id.replace('seat-', ''));
-      console.log('🔄 Releasing held seats:', seatNumbers);
-
       const db = firestore();
-      const tripRef = db.collection('trips').doc(currentTripId);
 
-      await db.runTransaction(async (transaction) => {
-        const tripDoc = await transaction.get(tripRef);
-        if (!tripDoc.exists) return;
+      for (const seatNumber of seatNumbers) {
+        const seatRef = db
+          .collection('trips')
+          .doc(currentTripId)
+          .collection('seats')
+          .doc(seatNumber);
 
-        for (const seatNumber of seatNumbers) {
-          const seatRef = tripRef.collection('seats').doc(seatNumber);
-          const seatDoc = await transaction.get(seatRef);
+        const seatDoc = await seatRef.get();
 
-          if (seatDoc.exists && seatDoc.data()?.reservedBy === currentUserId) {
-            transaction.update(seatRef, {
-              status: 'available',
-              reservedBy: null,
-              reservedUntil: null,
-              updatedAt: firestore.FieldValue.serverTimestamp(),
-            });
-          }
-        }
-
-        if (tripDoc.data()?.heldSeats) {
-          transaction.update(tripRef, {
-            heldSeats: firestore.FieldValue.increment(-currentSelectedSeats.length),
-            availableSeats: firestore.FieldValue.increment(currentSelectedSeats.length),
+        if (seatDoc.exists && seatDoc.data()?.reservedBy === currentUserId) {
+          await seatRef.update({
+            status: 'available',
+            reservedBy: null,
+            reservedUntil: null,
             updatedAt: firestore.FieldValue.serverTimestamp(),
           });
         }
-      });
+      }
 
-      console.log('✅ Seats released successfully');
+      const tripRef = db.collection('trips').doc(currentTripId);
+      const tripDoc = await tripRef.get();
+
+      if (tripDoc.exists) {
+        await tripRef.update({
+          heldSeats: firestore.FieldValue.increment(-currentSelectedSeats.length),
+          availableSeats: firestore.FieldValue.increment(currentSelectedSeats.length),
+          updatedAt: firestore.FieldValue.serverTimestamp(),
+        });
+      }
     } catch (error) {
       console.error('Error releasing seats:', error);
     }
   }, []);
 
-  // ✅ Clean up on unmount
+  const holdSelectedSeats = async (seatIds: string[]) => {
+    if (!user) {
+      Alert.alert('Error', 'Please login to continue');
+      return;
+    }
+
+    if (seatIds.length === 0) return;
+
+    setHoldingSeats(true);
+
+    try {
+      const db = firestore();
+      const seatNumbers = seatIds.map(id => id.replace('seat-', ''));
+      const reservedUntil = new Date();
+      reservedUntil.setMinutes(reservedUntil.getMinutes() + 15);
+      const now = new Date();
+
+      for (const seatNumber of seatNumbers) {
+        const seatRef = db
+          .collection('trips')
+          .doc(tripId)
+          .collection('seats')
+          .doc(seatNumber);
+
+        const seatDoc = await seatRef.get();
+        const data = seatDoc.data();
+
+        if (!seatDoc.exists) {
+          throw new Error(`Seat ${seatNumber} does not exist`);
+        }
+
+        if (data?.status === 'booked') {
+          throw new Error(`Seat ${seatNumber} is already booked`);
+        }
+
+        if (data?.status === 'reserved' && data?.reservedBy !== user.uid) {
+          const expiryDate = data.reservedUntil?.toDate
+            ? data.reservedUntil.toDate()
+            : new Date(data.reservedUntil);
+          const isExpired = expiryDate < now;
+
+          if (isExpired) {
+            await seatRef.update({
+              status: 'available',
+              reservedBy: null,
+              reservedUntil: null,
+              updatedAt: firestore.FieldValue.serverTimestamp(),
+            });
+          } else {
+            throw new Error(`Seat ${seatNumber} is reserved by another user`);
+          }
+        }
+      }
+
+      for (const seatNumber of seatNumbers) {
+        const seatRef = db
+          .collection('trips')
+          .doc(tripId)
+          .collection('seats')
+          .doc(seatNumber);
+
+        await seatRef.update({
+          status: 'reserved',
+          reservedBy: user.uid,
+          reservedUntil: firestore.Timestamp.fromDate(reservedUntil),
+          updatedAt: firestore.FieldValue.serverTimestamp(),
+        });
+      }
+
+      const tripRef = db.collection('trips').doc(tripId);
+      await tripRef.update({
+        availableSeats: firestore.FieldValue.increment(-seatNumbers.length),
+        heldSeats: firestore.FieldValue.increment(seatNumbers.length),
+        updatedAt: firestore.FieldValue.serverTimestamp(),
+      });
+
+      const secondsLeft = 15 * 60;
+      setCountdown(secondsLeft);
+
+      Alert.alert(
+        'Seats Held',
+        `Your seats are held for 15 minutes. Complete payment within this time.`,
+        [{ text: 'OK' }]
+      );
+
+    } catch (error: any) {
+      console.error('Error holding seats:', error);
+
+      if (error.code === 'permission-denied') {
+        Alert.alert(
+          'Permission Error',
+          'Unable to reserve seats. Please check if you are logged in properly.'
+        );
+      } else {
+        Alert.alert('Hold Failed', error.message || 'Failed to hold seats. Please try again.');
+      }
+
+      setSelectedSeats([]);
+    } finally {
+      setHoldingSeats(false);
+    }
+  };
+
   useEffect(() => {
     isMountedRef.current = true;
 
     return () => {
       isMountedRef.current = false;
-
-      // Clean up interval
       if (countdownIntervalRef.current) {
         clearInterval(countdownIntervalRef.current);
         countdownIntervalRef.current = null;
       }
-
-      // Release seats on unmount if any are selected
       if (selectedSeatsRef.current.length > 0 && userIdRef.current) {
         releaseHeldSeats();
       }
-
-      // Snapshot listener cleanup is handled in its own useEffect
     };
   }, [releaseHeldSeats]);
 
-  // ✅ Focus effect
-  useFocusEffect(
-    useCallback(() => {
-      console.log('📱 SeatSelection screen focused');
-
-      return () => {
-        console.log('📱 SeatSelection screen unfocused');
-
-        // Clean up interval
-        if (countdownIntervalRef.current) {
-          clearInterval(countdownIntervalRef.current);
-          countdownIntervalRef.current = null;
-        }
-
-        // Release held seats if any
-        if (selectedSeatsRef.current.length > 0 && userIdRef.current) {
-          releaseHeldSeats();
-        }
-      };
-    }, [releaseHeldSeats])
-  );
-
-  // ✅ Countdown timer
   useEffect(() => {
     if (countdown !== null && countdown > 0) {
       if (countdownIntervalRef.current) {
@@ -338,11 +423,9 @@ const SeatSelectionScreen = () => {
     };
   }, [countdown]);
 
-  // ✅ Auto-release when countdown reaches 0
   useEffect(() => {
     if (countdown === 0) {
       const autoRelease = async () => {
-        console.log('⏰ Countdown expired, auto-releasing seats');
         await releaseHeldSeats();
 
         if (isMountedRef.current) {
@@ -366,81 +449,6 @@ const SeatSelectionScreen = () => {
     }
   }, [countdown, releaseHeldSeats]);
 
-  // ✅ Hold seats with transaction
-  const holdSelectedSeats = async (seatIds: string[]) => {
-    if (!user) {
-      Alert.alert('Error', 'Please login to continue');
-      return;
-    }
-
-    if (seatIds.length === 0) return;
-
-    setHoldingSeats(true);
-
-    try {
-      const db = firestore();
-      const tripRef = db.collection('trips').doc(tripId);
-      const seatNumbers = seatIds.map(id => id.replace('seat-', ''));
-      const holdDurationMinutes = 15;
-      const reservedUntil = new Date();
-      reservedUntil.setMinutes(reservedUntil.getMinutes() + holdDurationMinutes);
-
-      await db.runTransaction(async (transaction) => {
-        const seatRefs = seatNumbers.map(num => tripRef.collection('seats').doc(num));
-        const seatDocs = await Promise.all(seatRefs.map(ref => transaction.get(ref)));
-
-        for (let i = 0; i < seatDocs.length; i++) {
-          const doc = seatDocs[i];
-          const data = doc.data();
-
-          if (!doc.exists) {
-            throw new Error(`Seat ${seatNumbers[i]} does not exist`);
-          }
-
-          if (data?.status === 'booked') {
-            throw new Error(`Seat ${seatNumbers[i]} is already booked`);
-          }
-
-          if (data?.status === 'reserved' && data?.reservedBy !== user.uid) {
-            throw new Error(`Seat ${seatNumbers[i]} is reserved by another user`);
-          }
-        }
-
-        for (let i = 0; i < seatRefs.length; i++) {
-          transaction.update(seatRefs[i], {
-            status: 'reserved',
-            reservedBy: user.uid,
-            reservedUntil,
-            updatedAt: firestore.FieldValue.serverTimestamp(),
-          });
-        }
-
-        transaction.update(tripRef, {
-          availableSeats: firestore.FieldValue.increment(-seatNumbers.length),
-          heldSeats: firestore.FieldValue.increment(seatNumbers.length),
-          updatedAt: firestore.FieldValue.serverTimestamp(),
-        });
-      });
-
-      const secondsLeft = Math.floor((reservedUntil.getTime() - new Date().getTime()) / 1000);
-      setCountdown(secondsLeft);
-      holdDeadlineRef.current = reservedUntil;
-
-      Alert.alert(
-        'Seats Held',
-        `Your seats are held for ${holdDurationMinutes} minutes. Complete payment within this time.`,
-        [{ text: 'OK' }]
-      );
-
-    } catch (error: any) {
-      console.error('Error holding seats:', error);
-      Alert.alert('Hold Failed', error.message || 'Failed to hold seats. Please try again.');
-      setSelectedSeats([]);
-    } finally {
-      setHoldingSeats(false);
-    }
-  };
-
   const calculateTotalAmount = useCallback(() => {
     let total = 0;
     for (const seatId of selectedSeats) {
@@ -460,7 +468,6 @@ const SeatSelectionScreen = () => {
     }
 
     if (selectedSeats.includes(seatId)) {
-      // Deselect seat
       const newSelected = selectedSeats.filter(id => id !== seatId);
       setSelectedSeats(newSelected);
 
@@ -509,7 +516,7 @@ const SeatSelectionScreen = () => {
 
   const handleProceedToPayment = () => {
     if (!tripId || !busId) {
-      Alert.alert('Error', 'Invalid trip data. Please go back and try again.');
+      Alert.alert('Error', 'Invalid trip data.');
       return;
     }
     if (selectedSeats.length === 0) {
@@ -555,81 +562,61 @@ const SeatSelectionScreen = () => {
 
     for (let row = 1; row <= rows; row++) {
       const rowSeats = seats.filter(seat => seat.row === row);
+      const leftSeats = rowSeats.filter(seat => seat.column <= 2).sort((a, b) => a.column - b.column);
+      const rightSeats = rowSeats.filter(seat => seat.column > 2).sort((a, b) => a.column - b.column);
 
       layout.push(
         <View key={`row-${row}`} style={styles.seatRow}>
           <View style={styles.seatGroup}>
-            {rowSeats.filter(seat => seat.column <= 2).map(seat => (
-              <TouchableOpacity
-                key={seat.id}
-                style={[
-                  styles.seat,
-                  seat.column === 1 ? styles.windowSeat : styles.aisleSeat,
-                  !seat.isAvailable && styles.seatBooked,
-                  selectedSeats.includes(seat.id) && styles.seatSelected,
-                  seat.isWheelchairAccessible && styles.wheelchairSeat,
-                  seat.hasExtraLegroom && styles.premiumSeat,
-                ]}
-                onPress={() => handleSeatSelect(seat.id, seat.number)}
-                disabled={!seat.isAvailable || holdingSeats}
-              >
-                <Text style={[
-                  styles.seatText,
-                  !seat.isAvailable && styles.seatTextBooked,
-                  selectedSeats.includes(seat.id) && styles.seatTextSelected,
-                ]}>
-                  {seat.number}
-                </Text>
-                {seat.isWheelchairAccessible && (
-                  <Icon name="accessible" size={10} color="#FFF" style={styles.seatIcon} />
-                )}
-                {seat.hasExtraLegroom && (
-                  <Icon name="star" size={10} color="#FFD700" style={styles.seatIcon} />
-                )}
-              </TouchableOpacity>
-            ))}
+            {leftSeats.map(seat => renderSeatButton(seat))}
           </View>
-
-          <View style={styles.aisle}>
-            <Text style={styles.rowNumber}>{row}</Text>
-          </View>
-
+          <View style={styles.aisle} />
           <View style={styles.seatGroup}>
-            {rowSeats.filter(seat => seat.column > 2).map(seat => (
-              <TouchableOpacity
-                key={seat.id}
-                style={[
-                  styles.seat,
-                  seat.column === 4 ? styles.windowSeat : styles.aisleSeat,
-                  !seat.isAvailable && styles.seatBooked,
-                  selectedSeats.includes(seat.id) && styles.seatSelected,
-                  seat.isWheelchairAccessible && styles.wheelchairSeat,
-                  seat.hasExtraLegroom && styles.premiumSeat,
-                ]}
-                onPress={() => handleSeatSelect(seat.id, seat.number)}
-                disabled={!seat.isAvailable || holdingSeats}
-              >
-                <Text style={[
-                  styles.seatText,
-                  !seat.isAvailable && styles.seatTextBooked,
-                  selectedSeats.includes(seat.id) && styles.seatTextSelected,
-                ]}>
-                  {seat.number}
-                </Text>
-                {seat.isWheelchairAccessible && (
-                  <Icon name="accessible" size={10} color="#FFF" style={styles.seatIcon} />
-                )}
-                {seat.hasExtraLegroom && (
-                  <Icon name="star" size={10} color="#FFD700" style={styles.seatIcon} />
-                )}
-              </TouchableOpacity>
-            ))}
+            {rightSeats.map(seat => renderSeatButton(seat))}
           </View>
         </View>
       );
     }
 
     return layout;
+  };
+
+  const renderSeatButton = (seat: Seat) => {
+    const isExpired = seat.isExpiredReservation;
+
+    return (
+      <TouchableOpacity
+        key={seat.id}
+        style={[
+          styles.seat,
+          !seat.isAvailable && styles.seatBooked,
+          selectedSeats.includes(seat.id) && styles.seatSelected,
+          isExpired && styles.seatExpired,
+          seat.isWheelchairAccessible && !selectedSeats.includes(seat.id) && seat.isAvailable && !isExpired && styles.wheelchairSeat,
+          seat.hasExtraLegroom && !selectedSeats.includes(seat.id) && seat.isAvailable && !isExpired && styles.premiumSeat,
+        ]}
+        onPress={() => handleSeatSelect(seat.id, seat.number)}
+        disabled={!seat.isAvailable || holdingSeats}
+      >
+        <Text style={[
+          styles.seatText,
+          !seat.isAvailable && styles.seatTextBooked,
+          selectedSeats.includes(seat.id) && styles.seatTextSelected,
+          isExpired && styles.seatTextExpired,
+        ]}>
+          {seat.number}
+        </Text>
+        {isExpired && (
+          <Text style={styles.expiredBadge}>!</Text>
+        )}
+        {seat.isWheelchairAccessible && seat.isAvailable && !selectedSeats.includes(seat.id) && !isExpired && (
+          <Icon name="accessible" size={10} color="#FFF" style={styles.seatIcon} />
+        )}
+        {seat.hasExtraLegroom && seat.isAvailable && !selectedSeats.includes(seat.id) && !isExpired && (
+          <Icon name="star" size={10} color="#FFD700" style={styles.seatIcon} />
+        )}
+      </TouchableOpacity>
+    );
   };
 
   if (loading && seats.length === 0) {
@@ -645,19 +632,19 @@ const SeatSelectionScreen = () => {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <ScrollView style={styles.container}>
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={styles.contentContainer}
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => navigation.goBack()}
-          >
+          <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
             <Icon name="arrow-back" size={24} color="#1A237E" />
           </TouchableOpacity>
           <View style={styles.headerContent}>
             <Text style={styles.headerTitle}>SELECT SEATS</Text>
             <Text style={styles.headerSubtitle}>Bus {busNumber}</Text>
           </View>
-          {/* Real-time indicator */}
           <View style={styles.liveBadge}>
             <View style={styles.liveDot} />
             <Text style={styles.liveText}>LIVE</Text>
@@ -698,16 +685,13 @@ const SeatSelectionScreen = () => {
         {countdown !== null && countdown > 0 && (
           <View style={styles.countdownContainer}>
             <Icon name="timer" size={20} color="#FF9800" />
-            <Text style={styles.countdownText}>
-              Seats held for: {formatTime(countdown)}
-            </Text>
+            <Text style={styles.countdownText}>Seats held for: {formatTime(countdown)}</Text>
           </View>
         )}
 
         <View style={styles.seatLayoutContainer}>
           <Text style={styles.sectionTitle}>CHOOSE YOUR SEATS</Text>
 
-          {/* Real-time update notice */}
           <View style={styles.realtimeNotice}>
             <Icon name="update" size={14} color="#4CAF50" />
             <Text style={styles.realtimeNoticeText}>Seats update in real-time</Text>
@@ -718,9 +702,7 @@ const SeatSelectionScreen = () => {
             <Text style={styles.busFrontText}>Front</Text>
           </View>
 
-          <View style={styles.layoutContainer}>
-            {renderSeatLayout()}
-          </View>
+          <View style={styles.layoutContainer}>{renderSeatLayout()}</View>
 
           <View style={styles.legendContainer}>
             <View style={styles.legendRow}>
@@ -729,23 +711,21 @@ const SeatSelectionScreen = () => {
                 <Text style={styles.legendText}>Available</Text>
               </View>
               <View style={styles.legendItem}>
-                <View style={[styles.legendBox, styles.seatSelected]} />
+                <View style={[styles.legendBox, styles.seatSelectedLegend]} />
                 <Text style={styles.legendText}>Selected</Text>
               </View>
               <View style={styles.legendItem}>
-                <View style={[styles.legendBox, styles.seatBooked]} />
+                <View style={[styles.legendBox, styles.seatBookedLegend]} />
                 <Text style={styles.legendText}>Booked</Text>
               </View>
             </View>
             <View style={styles.legendRow}>
               <View style={styles.legendItem}>
-                <View style={[styles.legendBox, styles.wheelchairSeat]} />
+                <View style={[styles.legendBox, styles.wheelchairSeatLegend]} />
                 <Text style={styles.legendText}>Wheelchair</Text>
               </View>
               <View style={styles.legendItem}>
-                <View style={[styles.legendBox, styles.premiumSeat]}>
-                  <Icon name="star" size={12} color="#FFD700" />
-                </View>
+                <View style={[styles.legendBox, styles.premiumSeatLegend]} />
                 <Text style={styles.legendText}>Premium</Text>
               </View>
             </View>
@@ -788,73 +768,32 @@ const SeatSelectionScreen = () => {
               <Icon name="add" size={24} color="#4A90E2" />
             </TouchableOpacity>
           </View>
-
-          <Text style={styles.selectionNote}>
-            Select exactly {passengerCount} seat(s)
-          </Text>
+          <Text style={styles.selectionNote}>Select exactly {passengerCount} seat(s)</Text>
         </View>
 
         <View style={styles.specialNeedsSection}>
           <Text style={styles.sectionTitle}>SPECIAL NEEDS</Text>
           <View style={styles.needsContainer}>
             <TouchableOpacity
-              style={[
-                styles.needOption,
-                specialNeeds.wheelchair && styles.needOptionSelected,
-              ]}
+              style={[styles.needOption, specialNeeds.wheelchair && styles.needOptionSelected]}
               onPress={() => handleSpecialNeedToggle('wheelchair')}
             >
-              <Icon
-                name="accessible"
-                size={24}
-                color={specialNeeds.wheelchair ? '#FFF' : '#4A90E2'}
-              />
-              <Text style={[
-                styles.needText,
-                specialNeeds.wheelchair && styles.needTextSelected,
-              ]}>
-                Wheelchair
-              </Text>
+              <Icon name="accessible" size={24} color={specialNeeds.wheelchair ? '#FFF' : '#4A90E2'} />
+              <Text style={[styles.needText, specialNeeds.wheelchair && styles.needTextSelected]}>Wheelchair</Text>
             </TouchableOpacity>
-
             <TouchableOpacity
-              style={[
-                styles.needOption,
-                specialNeeds.extraLegroom && styles.needOptionSelected,
-              ]}
+              style={[styles.needOption, specialNeeds.extraLegroom && styles.needOptionSelected]}
               onPress={() => handleSpecialNeedToggle('extraLegroom')}
             >
-              <Icon
-                name="airline-seat-legroom-extra"
-                size={24}
-                color={specialNeeds.extraLegroom ? '#FFF' : '#4A90E2'}
-              />
-              <Text style={[
-                styles.needText,
-                specialNeeds.extraLegroom && styles.needTextSelected,
-              ]}>
-                Extra Legroom
-              </Text>
+              <Icon name="airline-seat-legroom-extra" size={24} color={specialNeeds.extraLegroom ? '#FFF' : '#4A90E2'} />
+              <Text style={[styles.needText, specialNeeds.extraLegroom && styles.needTextSelected]}>Extra Legroom</Text>
             </TouchableOpacity>
-
             <TouchableOpacity
-              style={[
-                styles.needOption,
-                specialNeeds.nearExit && styles.needOptionSelected,
-              ]}
+              style={[styles.needOption, specialNeeds.nearExit && styles.needOptionSelected]}
               onPress={() => handleSpecialNeedToggle('nearExit')}
             >
-              <Icon
-                name="exit-to-app"
-                size={24}
-                color={specialNeeds.nearExit ? '#FFF' : '#4A90E2'}
-              />
-              <Text style={[
-                styles.needText,
-                specialNeeds.nearExit && styles.needTextSelected,
-              ]}>
-                Near Exit
-              </Text>
+              <Icon name="exit-to-app" size={24} color={specialNeeds.nearExit ? '#FFF' : '#4A90E2'} />
+              <Text style={[styles.needText, specialNeeds.nearExit && styles.needTextSelected]}>Near Exit</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -865,16 +804,13 @@ const SeatSelectionScreen = () => {
             <Text style={styles.summaryValue}>
               {selectedSeats.length > 0
                 ? selectedSeats.map(id => seats.find(s => s.id === id)?.number).join(', ')
-                : 'None'
-              }
+                : 'None'}
             </Text>
           </View>
-
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Total Amount:</Text>
             <Text style={styles.summaryValue}>PKR {calculateTotalAmount()}</Text>
           </View>
-
           <TouchableOpacity
             style={[
               styles.proceedButton,
@@ -887,9 +823,7 @@ const SeatSelectionScreen = () => {
               <ActivityIndicator size="small" color="#FFF" />
             ) : (
               <>
-                <Text style={styles.proceedButtonText}>
-                  PROCEED TO PAYMENT
-                </Text>
+                <Text style={styles.proceedButtonText}>PROCEED TO PAYMENT</Text>
                 <Icon name="arrow-forward" size={20} color="#FFF" />
               </>
             )}
@@ -902,9 +836,11 @@ const SeatSelectionScreen = () => {
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: '#F8F9FA' },
-  container: { flex: 1, padding: 16 },
+  container: { flex: 1 },
+  contentContainer: { padding: 16, paddingBottom: 40 },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   loadingText: { marginTop: 12, fontSize: 16, color: '#666' },
+
   header: { flexDirection: 'row', alignItems: 'center', marginBottom: 20, marginTop: 10 },
   backButton: { padding: 8, marginRight: 16 },
   headerContent: { flex: 1 },
@@ -913,10 +849,7 @@ const styles = StyleSheet.create({
   liveBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#E8F5E9', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
   liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#4CAF50', marginRight: 4 },
   liveText: { fontSize: 10, fontWeight: 'bold', color: '#4CAF50' },
-  realtimeNotice: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
-  realtimeNoticeText: { fontSize: 12, color: '#4CAF50', marginLeft: 4 },
-  countdownContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF3E0', padding: 12, borderRadius: 8, marginBottom: 16 },
-  countdownText: { fontSize: 14, color: '#FF9800', fontWeight: '600', marginLeft: 8 },
+
   tripSummaryCard: { backgroundColor: '#FFF', borderRadius: 16, padding: 20, marginBottom: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 5 },
   tripInfo: { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
   locationRow: { flexDirection: 'row', alignItems: 'center', flex: 1 },
@@ -928,32 +861,56 @@ const styles = StyleSheet.create({
   tripDetails: { flexDirection: 'row', justifyContent: 'space-around' },
   detailItem: { flexDirection: 'row', alignItems: 'center' },
   detailText: { fontSize: 14, color: '#666', marginLeft: 8 },
-  seatLayoutContainer: { backgroundColor: '#FFF', borderRadius: 16, padding: 20, marginBottom: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 5 },
+
+  countdownContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF3E0', padding: 12, borderRadius: 8, marginBottom: 16 },
+  countdownText: { fontSize: 14, color: '#FF9800', fontWeight: '600', marginLeft: 8 },
+
+  seatLayoutContainer: { backgroundColor: '#FFF', borderRadius: 16, padding: 16, marginBottom: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 5 },
   sectionTitle: { fontSize: 18, fontWeight: '600', color: '#1A237E', marginBottom: 16 },
+  realtimeNotice: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
+  realtimeNoticeText: { fontSize: 12, color: '#4CAF50', marginLeft: 4 },
   busFront: { alignItems: 'center', marginBottom: 20, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
   busFrontText: { fontSize: 14, color: '#666', marginTop: 8 },
-  layoutContainer: { alignItems: 'center', marginBottom: 20 },
-  seatRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
-  seatGroup: { flexDirection: 'row' },
+  layoutContainer: { alignItems: 'center', alignSelf: 'stretch', marginBottom: 20 },
+
+  seatRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', width: '100%', marginBottom: 8 },
+  seatGroup: { flexDirection: 'row', flexShrink: 0 },
   aisle: { width: AISLE_WIDTH, alignItems: 'center', justifyContent: 'center' },
-  rowNumber: { fontSize: 14, color: '#999', fontWeight: '600' },
-  seat: { width: SEAT_SIZE, height: SEAT_SIZE, borderRadius: 8, justifyContent: 'center', alignItems: 'center', marginHorizontal: 2, borderWidth: 1 },
-  windowSeat: { borderColor: '#4A90E2', backgroundColor: '#F0F8FF' },
-  aisleSeat: { borderColor: '#87CEEB', backgroundColor: '#F0FFFF' },
-  seatSelected: { backgroundColor: '#4CAF50', borderColor: '#388E3C' },
+
+  seat: {
+    width: SEAT_SIZE,
+    height: SEAT_SIZE,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginHorizontal: SEAT_HORIZONTAL_MARGIN,
+    borderWidth: 1,
+    backgroundColor: '#F0F8FF',
+    borderColor: '#4A90E2',
+  },
   seatBooked: { backgroundColor: '#FFCDD2', borderColor: '#F44336' },
+  seatSelected: { backgroundColor: '#4CAF50', borderColor: '#388E3C' },
+  seatExpired: { backgroundColor: '#FFF9C4', borderColor: '#FBC02D' },
   wheelchairSeat: { backgroundColor: '#FF9800', borderColor: '#F57C00' },
   premiumSeat: { backgroundColor: '#FFF3E0', borderColor: '#FFB74D' },
-  seatText: { fontSize: 12, fontWeight: '600' },
+  seatText: { fontSize: 12, fontWeight: '600', color: '#1A237E' },
   seatTextSelected: { color: '#FFF' },
   seatTextBooked: { color: '#666', textDecorationLine: 'line-through' },
+  seatTextExpired: { color: '#F57C00' },
   seatIcon: { position: 'absolute', top: 2, right: 2 },
-  legendContainer: { marginTop: 20 },
+  expiredBadge: { position: 'absolute', bottom: 2, right: 2, fontSize: 10, fontWeight: 'bold', color: '#F57C00' },
+
+  legendContainer: { marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#F0F0F0' },
   legendRow: { flexDirection: 'row', justifyContent: 'space-around', marginBottom: 10 },
   legendItem: { flexDirection: 'row', alignItems: 'center' },
   legendBox: { width: 20, height: 20, borderRadius: 4, borderWidth: 1, marginRight: 8, justifyContent: 'center', alignItems: 'center' },
   seatAvailable: { backgroundColor: '#F0F8FF', borderColor: '#4A90E2' },
-  legendText: { fontSize: 12, color: '#666' },
+  seatSelectedLegend: { backgroundColor: '#4CAF50', borderColor: '#388E3C' },
+  seatBookedLegend: { backgroundColor: '#FFCDD2', borderColor: '#F44336' },
+  wheelchairSeatLegend: { backgroundColor: '#FF9800', borderColor: '#F57C00' },
+  premiumSeatLegend: { backgroundColor: '#FFF3E0', borderColor: '#FFB74D' },
+  legendText: { fontSize: 11, color: '#666' },
+
   passengerSection: { backgroundColor: '#FFF', borderRadius: 16, padding: 20, marginBottom: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 5 },
   passengerCountContainer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 10 },
   countButton: { width: 40, height: 40, borderRadius: 20, borderWidth: 2, borderColor: '#4A90E2', justifyContent: 'center', alignItems: 'center' },
@@ -961,12 +918,14 @@ const styles = StyleSheet.create({
   countText: { fontSize: 36, fontWeight: 'bold', color: '#1A237E' },
   countLabel: { fontSize: 14, color: '#666' },
   selectionNote: { fontSize: 14, color: '#666', textAlign: 'center', fontStyle: 'italic' },
+
   specialNeedsSection: { backgroundColor: '#FFF', borderRadius: 16, padding: 20, marginBottom: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 5 },
   needsContainer: { flexDirection: 'row', justifyContent: 'space-between' },
   needOption: { alignItems: 'center', padding: 12, borderRadius: 12, borderWidth: 1, borderColor: '#E3E8EF', width: '30%' },
   needOptionSelected: { backgroundColor: '#4A90E2', borderColor: '#4A90E2' },
   needText: { fontSize: 12, color: '#666', marginTop: 8, textAlign: 'center' },
   needTextSelected: { color: '#FFF', fontWeight: '600' },
+
   summaryCard: { backgroundColor: '#FFF', borderRadius: 16, padding: 20, marginBottom: 30, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 5 },
   summaryRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   summaryLabel: { fontSize: 16, color: '#666' },

@@ -1,3 +1,4 @@
+// src/screens/passenger/BookingConfirmationScreen.tsx
 import React, { useEffect, useState } from 'react';
 import {
   View,
@@ -12,12 +13,14 @@ import {
   Platform,
   ActivityIndicator,
   Clipboard,
+  Modal,
 } from 'react-native';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { PassengerStackParamList } from '../../navigation/PassengerNavigator';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import firestore from '@react-native-firebase/firestore';
+import QRCode from 'react-native-qrcode-svg';
 
 type BookingConfirmationScreenNavigationProp = StackNavigationProp<PassengerStackParamList, 'BookingConfirmation'>;
 type BookingConfirmationScreenRouteProp = RouteProp<PassengerStackParamList, 'BookingConfirmation'>;
@@ -49,7 +52,7 @@ interface BookingDetails {
   paymentStatus: 'paid' | 'pending' | 'failed';
   status: 'confirmed' | 'pending_payment' | 'cancelled' | 'expired';
   paymentDeadline?: Date;
-  tripId?: string; // ✅ ADDED: tripId for seat updates
+  tripId?: string;
   bankDetails?: {
     accountNumber: string;
     accountTitle: string;
@@ -68,6 +71,8 @@ const BookingConfirmationScreen = () => {
   const [bookingDetails, setBookingDetails] = useState<BookingDetails | null>(null);
   const [timeRemaining, setTimeRemaining] = useState<string>('');
   const [isConfirming, setIsConfirming] = useState(false);
+  const [qrValue, setQrValue] = useState<string>('');
+  const [qrModalVisible, setQrModalVisible] = useState(false);
 
   useEffect(() => {
     const fetchBooking = async () => {
@@ -91,7 +96,6 @@ const BookingConfirmationScreen = () => {
         let tripTime = data.departureTime ?? '--:--';
         let arrivalTime = data.arrivalTime ?? '--:--';
 
-        // If tripId exists, fetch trip details
         if (data.tripId) {
           const tripDoc = await firestore().collection('trips').doc(data.tripId).get();
           const tripData = tripDoc.data();
@@ -99,7 +103,7 @@ const BookingConfirmationScreen = () => {
           arrivalTime = tripData?.arrivalTime ?? arrivalTime;
         }
 
-        setBookingDetails({
+        const details: BookingDetails = {
           id: doc.id,
           ticketNumber: data.ticketNumber ?? doc.id,
           bookingCode: data.bookingCode,
@@ -126,10 +130,11 @@ const BookingConfirmationScreen = () => {
           paymentStatus: data.paymentStatus ?? 'pending',
           status: data.status ?? 'pending_payment',
           paymentDeadline,
-          tripId: data.tripId, // ✅ ADDED: store tripId
+          tripId: data.tripId,
           bankDetails: data.bankDetails,
           createdAt: data.createdAt?.toDate?.() ?? new Date(),
-        });
+        };
+        setBookingDetails(details);
       } catch (err: any) {
         setError(err?.message ?? 'Failed to load booking');
       } finally {
@@ -138,6 +143,29 @@ const BookingConfirmationScreen = () => {
     };
     fetchBooking();
   }, [bookingId]);
+
+  // Generate QR code when booking is paid
+  useEffect(() => {
+    if (bookingDetails && bookingDetails.paymentStatus === 'paid') {
+      const qrData = {
+        bookingId: bookingDetails.id,
+        ticketNumber: bookingDetails.ticketNumber,
+        bookingCode: bookingDetails.bookingCode,
+        passengerName: bookingDetails.passengerName,
+        busNumber: bookingDetails.busNumber,
+        from: bookingDetails.from,
+        fromCode: bookingDetails.fromCode,
+        to: bookingDetails.to,
+        toCode: bookingDetails.toCode,
+        date: bookingDetails.date,
+        time: bookingDetails.time,
+        seatNumbers: bookingDetails.seatNumbers,
+        total: bookingDetails.total,
+        timestamp: new Date().toISOString(),
+      };
+      setQrValue(JSON.stringify(qrData));
+    }
+  }, [bookingDetails]);
 
   // Countdown timer for pending payments
   useEffect(() => {
@@ -164,29 +192,19 @@ const BookingConfirmationScreen = () => {
     return () => clearInterval(timer);
   }, [bookingDetails]);
 
-  // ✅ NEW: Manual payment confirmation function
   const handleManualPaymentConfirm = async () => {
     if (!bookingDetails) return;
 
-    // Check if booking is already confirmed
     if (bookingDetails.paymentStatus === 'paid') {
       Alert.alert('Already Confirmed', 'This booking is already confirmed.');
       return;
     }
 
-    // Check if payment deadline has passed
     if (bookingDetails.paymentDeadline && bookingDetails.paymentDeadline < new Date()) {
       Alert.alert(
         'Payment Deadline Passed',
         'The payment deadline for this booking has expired. Please make a new booking.',
-        [
-          {
-            text: 'OK',
-            onPress: () => {
-              navigation.goBack();
-            }
-          }
-        ]
+        [{ text: 'OK', onPress: () => navigation.goBack() }]
       );
       return;
     }
@@ -194,12 +212,10 @@ const BookingConfirmationScreen = () => {
     setIsConfirming(true);
 
     try {
-      // ✅ Optional: Add fake verification delay for demo feel
       await new Promise(resolve => setTimeout(resolve, 2000));
 
       const bookingRef = firestore().collection('bookings').doc(bookingDetails.id);
 
-      // 1. Update booking status
       await bookingRef.update({
         status: 'confirmed',
         paymentStatus: 'paid',
@@ -207,13 +223,10 @@ const BookingConfirmationScreen = () => {
         updatedAt: firestore.FieldValue.serverTimestamp(),
       });
 
-      // 2. Update seats from reserved to booked
       const seatNumbers = bookingDetails.seatNumbers;
       const tripId = bookingDetails.tripId;
 
-      if (!tripId) {
-        console.warn('⚠️ No tripId found in booking, skipping seat updates');
-      } else {
+      if (tripId) {
         for (const seatNum of seatNumbers) {
           const seatRef = firestore()
             .collection('trips')
@@ -229,14 +242,12 @@ const BookingConfirmationScreen = () => {
           });
         }
 
-        // 3. Update trip's available seats count
         await firestore().collection('trips').doc(tripId).update({
           availableSeats: firestore.FieldValue.increment(-seatNumbers.length),
           updatedAt: firestore.FieldValue.serverTimestamp(),
         });
       }
 
-      // 4. Refresh local state
       setBookingDetails(prev => prev ? {
         ...prev,
         status: 'confirmed',
@@ -258,6 +269,7 @@ const BookingConfirmationScreen = () => {
   };
 
   const handleAddToCalendar = () => {
+    if (!bookingDetails) return;
     Alert.alert(
       'Add to Calendar',
       'Would you like to add this trip to your calendar?',
@@ -266,8 +278,8 @@ const BookingConfirmationScreen = () => {
         {
           text: 'Add to Google Calendar',
           onPress: () => {
-            const eventTitle = `Bus Trip: ${bookingDetails?.from} → ${bookingDetails?.to}`;
-            const eventDetails = `Ticket: ${bookingDetails?.ticketNumber}\nBus: ${bookingDetails?.busNumber}\nSeat: ${bookingDetails?.seatNumbers.join(', ')}\nBoarding: ${bookingDetails?.boardingTime}\nFrom: ${bookingDetails?.from}\nTo: ${bookingDetails?.to}`;
+            const eventTitle = `Bus Trip: ${bookingDetails.from} → ${bookingDetails.to}`;
+            const eventDetails = `Ticket: ${bookingDetails.ticketNumber}\nBus: ${bookingDetails.busNumber}\nSeat: ${bookingDetails.seatNumbers.join(', ')}\nBoarding: ${bookingDetails.boardingTime}\nFrom: ${bookingDetails.from}\nTo: ${bookingDetails.to}`;
 
             if (Platform.OS === 'ios') {
               const calendarUrl = `calshow://?title=${encodeURIComponent(eventTitle)}&notes=${encodeURIComponent(eventDetails)}`;
@@ -302,7 +314,7 @@ ${statusText}
       ticketContent += `
 📋 Ticket: ${bookingDetails.ticketNumber}
 👤 Passenger: ${bookingDetails.passengerName}
-🚌 Bus: ${bookingDetails.busNumber} (${bookingDetails.busType})
+🚌 Bus: ${bookingDetails.busNumber}
 
 📍 FROM: ${bookingDetails.from} (${bookingDetails.fromCode})
 📍 TO: ${bookingDetails.to} (${bookingDetails.toCode})
@@ -310,9 +322,6 @@ ${statusText}
 📅 Date: ${bookingDetails.date}
 ⏰ Time: ${bookingDetails.time}
 💺 Seats: ${bookingDetails.seatNumbers.join(', ')}
-
-⌚ Boarding: ${bookingDetails.boardingTime}
-✅ Arrival: ${bookingDetails.arrivalTime}
 
 💰 Total: PKR ${bookingDetails.total.toLocaleString()}
 `;
@@ -320,18 +329,13 @@ ${statusText}
       ticketContent += `
 📋 Booking Code: ${bookingDetails.bookingCode}
 👤 Passenger: ${bookingDetails.passengerName}
-
 📍 FROM: ${bookingDetails.from} (${bookingDetails.fromCode})
 📍 TO: ${bookingDetails.to} (${bookingDetails.toCode})
-
 📅 Date: ${bookingDetails.date}
 ⏰ Time: ${bookingDetails.time}
 💺 Seats: ${bookingDetails.seatNumbers.join(', ')}
-
 💰 Total: PKR ${bookingDetails.total.toLocaleString()}
-⏳ Payment Method: ${getPaymentMethodName(bookingDetails.paymentMethod)}
 ⏰ Payment Deadline: ${bookingDetails.paymentDeadline?.toLocaleString()}
-
 ⚠️ Please complete payment within the deadline to confirm your seats.
 `;
     }
@@ -361,7 +365,6 @@ ${statusText}
 
   const handleSetReminder = () => {
     if (!bookingDetails) return;
-
     Alert.alert(
       'Set Reminder',
       'When would you like to be reminded?',
@@ -394,17 +397,12 @@ ${statusText}
   const handleDownloadTicket = () => {
     if (!bookingDetails) return;
 
-    const statusEmoji = bookingDetails.paymentStatus === 'paid' ? '✅' : '⏳';
-    const statusText = bookingDetails.paymentStatus === 'paid' ? 'CONFIRMED' : 'PENDING PAYMENT';
-
     const ticketContent = `
 ╔══════════════════════════════════════════╗
-║          ${statusEmoji} BUS TICKET ${statusEmoji}          ║
-║              ${statusText.padEnd(25)}              ║
+║          ✅ BUS TICKET ✅                ║
+║              CONFIRMED                   ║
 ╠══════════════════════════════════════════╣
-${bookingDetails.paymentStatus === 'paid' ?
-`║ 🎫 Ticket: ${bookingDetails.ticketNumber.padEnd(25)} ║` :
-`║ 🔑 Code: ${(bookingDetails.bookingCode || '').padEnd(27)} ║`}
+║ 🎫 Ticket: ${bookingDetails.ticketNumber.padEnd(25)} ║
 ║ 👤 Passenger: ${bookingDetails.passengerName.padEnd(22)} ║
 ╠══════════════════════════════════════════╣
 ║ 🚌 Bus: ${bookingDetails.busNumber.padEnd(29)} ║
@@ -415,21 +413,13 @@ ${bookingDetails.paymentStatus === 'paid' ?
 ║ 📍 FROM: ${(bookingDetails.from + ' (' + bookingDetails.fromCode + ')').padEnd(26)} ║
 ║ 📍 TO:   ${(bookingDetails.to + ' (' + bookingDetails.toCode + ')').padEnd(26)} ║
 ╠══════════════════════════════════════════╣
-║ ⌚ Boarding: ${bookingDetails.boardingTime.padEnd(24)} ║
-║ ✅ Arrival:  ${bookingDetails.arrivalTime.padEnd(24)} ║
-╠══════════════════════════════════════════╣
 ║ 💰 Total: PKR ${bookingDetails.total.toLocaleString().padEnd(24)} ║
-║ 💳 Payment: ${getPaymentMethodName(bookingDetails.paymentMethod).padEnd(24)} ║
-${bookingDetails.paymentStatus !== 'paid' ?
-`╠══════════════════════════════════════════╣
-║ ⚠️  PAYMENT PENDING                      ║
-║ ⏰ Deadline: ${bookingDetails.paymentDeadline?.toLocaleString().padEnd(23)} ║` : ''}
 ╚══════════════════════════════════════════╝
     `;
 
     Alert.alert(
       'Download Ticket',
-      'Your ticket has been saved as a text file.',
+      'Your ticket has been saved.',
       [
         { text: 'OK' },
         {
@@ -444,33 +434,13 @@ ${bookingDetails.paymentStatus !== 'paid' ?
   };
 
   const handleContactSupport = () => {
-    if (!bookingDetails) return;
-
     Alert.alert(
       'Contact Support',
       'How would you like to contact support?',
       [
         { text: 'Cancel', style: 'cancel' },
-        {
-          text: '📞 Call Support',
-          onPress: () => {
-            Linking.openURL('tel:+923001234567').catch(() => {
-              Alert.alert('Error', 'Cannot make phone call');
-            });
-          }
-        },
-        {
-          text: '📧 Email Support',
-          onPress: () => {
-            const subject = `Support Request - ${bookingDetails.paymentStatus === 'paid' ? 'Ticket' : 'Booking'}: ${bookingDetails.ticketNumber || bookingDetails.bookingCode}`;
-            const body = `Hello,\n\nI need support regarding my bus booking:\n\n${bookingDetails.paymentStatus === 'paid' ? 'Ticket' : 'Booking Code'}: ${bookingDetails.ticketNumber || bookingDetails.bookingCode}\nBus: ${bookingDetails.busNumber}\nFrom: ${bookingDetails.from}\nTo: ${bookingDetails.to}\nDate: ${bookingDetails.date}\nTime: ${bookingDetails.time}\nPayment Status: ${bookingDetails.paymentStatus}\n\nPlease assist with:\n`;
-
-            Linking.openURL(`mailto:support@zugo.com?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`)
-              .catch(() => {
-                Alert.alert('Error', 'Cannot open email app');
-              });
-          }
-        }
+        { text: '📞 Call Support', onPress: () => Linking.openURL('tel:+923001234567') },
+        { text: '📧 Email Support', onPress: () => Linking.openURL('mailto:support@zugo.com') },
       ]
     );
   };
@@ -535,8 +505,6 @@ ${bookingDetails.paymentStatus !== 'paid' ?
   const isPaid = bookingDetails.paymentStatus === 'paid';
   const isPending = !isPaid && bookingDetails.status === 'pending_payment';
   const isExpired = bookingDetails.status === 'expired';
-
-  // ✅ Show "I HAVE PAID" button only for JazzCash/Easypaisa pending payments
   const showManualConfirmButton = isPending &&
     (bookingDetails.paymentMethod === 'jazzcash' || bookingDetails.paymentMethod === 'easypaisa');
 
@@ -551,22 +519,16 @@ ${bookingDetails.paymentStatus !== 'paid' ?
           <Text style={[styles.statusTitle, { color: getStatusColor() }]}>
             {getStatusText()}
           </Text>
-          {isPaid && (
-            <Text style={styles.statusSubtitle}>Your ticket has been issued</Text>
-          )}
+          {isPaid && <Text style={styles.statusSubtitle}>Your ticket has been issued</Text>}
           {isPending && (
             <Text style={styles.statusSubtitle}>
               Complete payment and tap "I HAVE PAID" to confirm your booking
             </Text>
           )}
-          {isExpired && (
-            <Text style={styles.statusSubtitle}>
-              Payment deadline has passed
-            </Text>
-          )}
+          {isExpired && <Text style={styles.statusSubtitle}>Payment deadline has passed</Text>}
         </View>
 
-        {/* ✅ NEW: I HAVE PAID BUTTON */}
+        {/* I HAVE PAID Button */}
         {showManualConfirmButton && (
           <TouchableOpacity
             style={styles.manualConfirmButton}
@@ -587,7 +549,7 @@ ${bookingDetails.paymentStatus !== 'paid' ?
           </TouchableOpacity>
         )}
 
-        {/* Booking Code / Ticket Number */}
+        {/* Ticket Number Card */}
         <View style={styles.ticketNumberCard}>
           <Text style={styles.ticketNumberLabel}>
             {isPaid ? 'TICKET NUMBER' : 'BOOKING CODE'}
@@ -603,7 +565,7 @@ ${bookingDetails.paymentStatus !== 'paid' ?
           )}
         </View>
 
-        {/* Payment Deadline - Only for pending payments */}
+        {/* Payment Deadline */}
         {isPending && bookingDetails.paymentDeadline && (
           <View style={styles.deadlineCard}>
             <Icon name="access-time" size={24} color="#FF9800" />
@@ -612,41 +574,27 @@ ${bookingDetails.paymentStatus !== 'paid' ?
               <Text style={styles.deadlineTime}>
                 {bookingDetails.paymentDeadline.toLocaleString()}
               </Text>
-              <Text style={styles.deadlineCountdown}>
-                Time remaining: {timeRemaining}
-              </Text>
+              <Text style={styles.deadlineCountdown}>Time remaining: {timeRemaining}</Text>
             </View>
           </View>
         )}
 
-        {/* Payment Instructions - For cash/transfer */}
+        {/* Payment Instructions */}
         {isPending && bookingDetails.paymentMethod === 'cash_counter' && (
           <View style={styles.instructionsCard}>
             <Icon name="store" size={24} color="#4A90E2" />
             <Text style={styles.instructionsTitle}>Cash Payment Instructions</Text>
             <View style={styles.instructionItem}>
               <Icon name="looks-one" size={20} color="#4A90E2" />
-              <Text style={styles.instructionText}>
-                Visit any ZUGO customer service counter
-              </Text>
+              <Text style={styles.instructionText}>Visit any ZUGO customer service counter</Text>
             </View>
             <View style={styles.instructionItem}>
               <Icon name="looks-two" size={20} color="#4A90E2" />
-              <Text style={styles.instructionText}>
-                Show your booking code: {bookingDetails.bookingCode}
-              </Text>
+              <Text style={styles.instructionText}>Show your booking code: {bookingDetails.bookingCode}</Text>
             </View>
             <View style={styles.instructionItem}>
-              <Icon name="looks-3" size={20} color="#4A90E2" />
-              <Text style={styles.instructionText}>
-                Pay PKR {bookingDetails.total.toLocaleString()} in cash
-              </Text>
-            </View>
-            <View style={styles.instructionItem}>
-              <Icon name="looks-4" size={20} color="#FF9800" />
-              <Text style={styles.instructionText}>
-                Complete payment within {timeRemaining}
-              </Text>
+              <Icon name="looks-three" size={20} color="#4A90E2" />
+              <Text style={styles.instructionText}>Pay PKR {bookingDetails.total.toLocaleString()} in cash</Text>
             </View>
           </View>
         )}
@@ -655,84 +603,45 @@ ${bookingDetails.paymentStatus !== 'paid' ?
           <View style={styles.instructionsCard}>
             <Icon name="account-balance" size={24} color="#4A90E2" />
             <Text style={styles.instructionsTitle}>Bank Transfer Instructions</Text>
-
             <View style={styles.bankDetailsCard}>
               <Text style={styles.bankDetailLabel}>Bank Name:</Text>
               <Text style={styles.bankDetailValue}>HBL - Habib Bank Limited</Text>
-
               <Text style={styles.bankDetailLabel}>Account Title:</Text>
               <Text style={styles.bankDetailValue}>ZUGO TRANSPORT SERVICES</Text>
-
               <Text style={styles.bankDetailLabel}>Account Number:</Text>
               <Text style={styles.bankDetailValue}>1234 5678 9012 3456</Text>
-
               <Text style={styles.bankDetailLabel}>Amount:</Text>
               <Text style={styles.bankDetailValue}>PKR {bookingDetails.total.toLocaleString()}</Text>
-            </View>
-
-            <View style={styles.instructionItem}>
-              <Icon name="check-circle" size={20} color="#4CAF50" />
-              <Text style={styles.instructionText}>
-                Transfer the exact amount to above account
-              </Text>
-            </View>
-            <View style={styles.instructionItem}>
-              <Icon name="check-circle" size={20} color="#4CAF50" />
-              <Text style={styles.instructionText}>
-                Use booking code {bookingDetails.bookingCode} as reference
-              </Text>
-            </View>
-            <View style={styles.instructionItem}>
-              <Icon name="info" size={20} color="#FF9800" />
-              <Text style={styles.instructionText}>
-                Seats will be confirmed after transfer verification (2-4 hours)
-              </Text>
             </View>
           </View>
         )}
 
-        {/* JazzCash/Easypaisa Instructions */}
         {isPending && (bookingDetails.paymentMethod === 'jazzcash' || bookingDetails.paymentMethod === 'easypaisa') && (
           <View style={styles.instructionsCard}>
             <Icon name="phone-android" size={24} color="#4A90E2" />
             <Text style={styles.instructionsTitle}>
               {bookingDetails.paymentMethod === 'jazzcash' ? 'JazzCash' : 'Easypaisa'} Payment
             </Text>
-
             <View style={styles.instructionItem}>
               <Icon name="looks-one" size={20} color="#4A90E2" />
-              <Text style={styles.instructionText}>
-                Open {bookingDetails.paymentMethod === 'jazzcash' ? 'JazzCash' : 'Easypaisa'} app
-              </Text>
+              <Text style={styles.instructionText}>Open {bookingDetails.paymentMethod === 'jazzcash' ? 'JazzCash' : 'Easypaisa'} app</Text>
             </View>
             <View style={styles.instructionItem}>
               <Icon name="looks-two" size={20} color="#4A90E2" />
-              <Text style={styles.instructionText}>
-                Go to "Pay Merchant" or "Scan QR"
-              </Text>
+              <Text style={styles.instructionText}>Go to "Pay Merchant" or "Scan QR"</Text>
             </View>
             <View style={styles.instructionItem}>
-              <Icon name="looks-3" size={20} color="#4A90E2" />
-              <Text style={styles.instructionText}>
-                Enter Merchant ID: ZUGO123
-              </Text>
+              <Icon name="looks-three" size={20} color="#4A90E2" />
+              <Text style={styles.instructionText}>Enter Merchant ID: ZUGO123</Text>
             </View>
             <View style={styles.instructionItem}>
-              <Icon name="looks-4" size={20} color="#4A90E2" />
-              <Text style={styles.instructionText}>
-                Amount: PKR {bookingDetails.total.toLocaleString()}
-              </Text>
-            </View>
-            <View style={styles.instructionItem}>
-              <Icon name="check-circle" size={20} color="#4CAF50" />
-              <Text style={styles.instructionText}>
-                After payment, click "I HAVE PAID" button above
-              </Text>
+              <Icon name="looks-four" size={20} color="#4A90E2" />
+              <Text style={styles.instructionText}>Amount: PKR {bookingDetails.total.toLocaleString()}</Text>
             </View>
           </View>
         )}
 
-        {/* Ticket Details - Show for all bookings */}
+        {/* Ticket Card */}
         <View style={styles.ticketCard}>
           {/* Passenger Info */}
           <View style={styles.ticketSection}>
@@ -751,7 +660,6 @@ ${bookingDetails.paymentStatus !== 'paid' ?
               <Icon name="route" size={20} color="#4A90E2" />
               <Text style={styles.sectionTitle}>JOURNEY</Text>
             </View>
-
             <View style={styles.journeyRow}>
               <View style={styles.locationItem}>
                 <View style={styles.locationDot} />
@@ -762,9 +670,7 @@ ${bookingDetails.paymentStatus !== 'paid' ?
                   </Text>
                 </View>
               </View>
-
               <Icon name="arrow-forward" size={24} color="#666" style={styles.arrowIcon} />
-
               <View style={styles.locationItem}>
                 <View style={[styles.locationDot, styles.destinationDot]} />
                 <View>
@@ -783,26 +689,22 @@ ${bookingDetails.paymentStatus !== 'paid' ?
               <Icon name="directions-bus" size={20} color="#4A90E2" />
               <Text style={styles.sectionTitle}>TRIP DETAILS</Text>
             </View>
-
             <View style={styles.detailsGrid}>
               <View style={styles.detailItem}>
                 <Icon name="calendar-today" size={16} color="#666" />
                 <Text style={styles.detailLabel}>Date</Text>
                 <Text style={styles.detailValue}>{bookingDetails.date}</Text>
               </View>
-
               <View style={styles.detailItem}>
                 <Icon name="schedule" size={16} color="#666" />
                 <Text style={styles.detailLabel}>Time</Text>
                 <Text style={styles.detailValue}>{bookingDetails.time}</Text>
               </View>
-
               <View style={styles.detailItem}>
                 <Icon name="event-seat" size={16} color="#666" />
                 <Text style={styles.detailLabel}>Seats</Text>
                 <Text style={styles.detailValue}>{bookingDetails.seatNumbers.join(', ')}</Text>
               </View>
-
               <View style={styles.detailItem}>
                 <Icon name="confirmation-number" size={16} color="#666" />
                 <Text style={styles.detailLabel}>Bus</Text>
@@ -817,7 +719,6 @@ ${bookingDetails.paymentStatus !== 'paid' ?
               <Icon name="info" size={20} color="#4A90E2" />
               <Text style={styles.sectionTitle}>BOARDING INFORMATION</Text>
             </View>
-
             <View style={styles.boardingInfo}>
               <View style={styles.boardingItem}>
                 <Icon name="access-time" size={20} color="#4CAF50" />
@@ -826,7 +727,6 @@ ${bookingDetails.paymentStatus !== 'paid' ?
                   <Text style={styles.boardingValue}>{bookingDetails.boardingTime}</Text>
                 </View>
               </View>
-
               <View style={styles.boardingItem}>
                 <Icon name="location-on" size={20} color="#4CAF50" />
                 <View style={styles.boardingTextContainer}>
@@ -843,18 +743,15 @@ ${bookingDetails.paymentStatus !== 'paid' ?
               <Icon name="payment" size={20} color="#4A90E2" />
               <Text style={styles.sectionTitle}>PAYMENT SUMMARY</Text>
             </View>
-
             <View style={styles.paymentSummary}>
               <View style={styles.paymentRow}>
                 <Text style={styles.paymentLabel}>Base Fare ({bookingDetails.seatCount} seats)</Text>
                 <Text style={styles.paymentValue}>PKR {bookingDetails.fare.toLocaleString()}</Text>
               </View>
-
               <View style={styles.paymentRow}>
                 <Text style={styles.paymentLabel}>Service Fee</Text>
                 <Text style={styles.paymentValue}>PKR {bookingDetails.serviceFee}</Text>
               </View>
-
               {bookingDetails.discountAmount > 0 && (
                 <View style={styles.paymentRow}>
                   <Text style={styles.paymentLabel}>Discount</Text>
@@ -863,19 +760,16 @@ ${bookingDetails.paymentStatus !== 'paid' ?
                   </Text>
                 </View>
               )}
-
               <View style={[styles.paymentRow, styles.totalRow]}>
                 <Text style={styles.totalLabel}>TOTAL</Text>
                 <Text style={styles.totalValue}>PKR {bookingDetails.total.toLocaleString()}</Text>
               </View>
-
               <View style={styles.paymentMethodRow}>
                 <Text style={styles.paymentMethodLabel}>Payment Method:</Text>
                 <Text style={styles.paymentMethodValue}>
                   {getPaymentMethodName(bookingDetails.paymentMethod)}
                 </Text>
               </View>
-
               <View style={styles.paymentStatusRow}>
                 <Text style={styles.paymentStatusLabel}>Payment Status:</Text>
                 <View style={[styles.paymentStatusBadge, { backgroundColor: getStatusColor() }]}>
@@ -887,13 +781,26 @@ ${bookingDetails.paymentStatus !== 'paid' ?
             </View>
           </View>
 
-          {/* QR Code - Only for paid bookings */}
-          {isPaid && (
+          {/* ✅ REAL QR CODE - Only for paid bookings */}
+          {isPaid && qrValue && (
             <View style={styles.qrContainer}>
-              <View style={styles.qrPlaceholder}>
-                <Icon name="qr-code" size={100} color="#4A90E2" />
-                <Text style={styles.qrText}>Scan at boarding</Text>
+              <View style={styles.qrWrapper}>
+                <QRCode
+                  value={qrValue}
+                  size={160}
+                  color="#1A237E"
+                  backgroundColor="#FFFFFF"
+                />
+                <Text style={styles.qrText}>📱 Scan at Boarding</Text>
+                <Text style={styles.qrSubText}>Show this QR code to the driver</Text>
               </View>
+              <TouchableOpacity
+                style={styles.enlargeQrButton}
+                onPress={() => setQrModalVisible(true)}
+              >
+                <Icon name="fullscreen" size={20} color="#4A90E2" />
+                <Text style={styles.enlargeQrText}>View Full Screen</Text>
+              </TouchableOpacity>
             </View>
           )}
         </View>
@@ -901,26 +808,22 @@ ${bookingDetails.paymentStatus !== 'paid' ?
         {/* Important Notes */}
         <View style={styles.notesCard}>
           <Text style={styles.notesTitle}>IMPORTANT REMINDERS</Text>
-
           <View style={styles.noteItem}>
             <Icon name="check-circle" size={16} color="#4CAF50" />
             <Text style={styles.noteText}>Arrive at least 15 minutes before boarding time</Text>
           </View>
-
           {isPaid && (
             <View style={styles.noteItem}>
               <Icon name="check-circle" size={16} color="#4CAF50" />
               <Text style={styles.noteText}>Show QR code or ticket to driver for boarding</Text>
             </View>
           )}
-
           {!isPaid && (
             <View style={styles.noteItem}>
               <Icon name="warning" size={16} color="#FF9800" />
               <Text style={styles.noteText}>Complete payment and tap "I HAVE PAID" to confirm your seats</Text>
             </View>
           )}
-
           <View style={styles.noteItem}>
             <Icon name="check-circle" size={16} color="#4CAF50" />
             <Text style={styles.noteText}>Carry valid ID proof</Text>
@@ -930,52 +833,29 @@ ${bookingDetails.paymentStatus !== 'paid' ?
         {/* Action Buttons */}
         <View style={styles.actionsContainer}>
           <View style={styles.actionRow}>
-            <TouchableOpacity
-              style={styles.actionButton}
-              onPress={handleAddToCalendar}
-            >
+            <TouchableOpacity style={styles.actionButton} onPress={handleAddToCalendar}>
               <Icon name="calendar-today" size={24} color="#4A90E2" />
               <Text style={styles.actionText}>Calendar</Text>
             </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.actionButton}
-              onPress={handleShareTicket}
-            >
+            <TouchableOpacity style={styles.actionButton} onPress={handleShareTicket}>
               <Icon name="share" size={24} color="#4A90E2" />
               <Text style={styles.actionText}>Share</Text>
             </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.actionButton}
-              onPress={handleSetReminder}
-            >
+            <TouchableOpacity style={styles.actionButton} onPress={handleSetReminder}>
               <Icon name="notifications" size={24} color="#4A90E2" />
               <Text style={styles.actionText}>Reminder</Text>
             </TouchableOpacity>
           </View>
-
           <View style={styles.actionRow}>
-            <TouchableOpacity
-              style={styles.actionButton}
-              onPress={handleDownloadTicket}
-            >
+            <TouchableOpacity style={styles.actionButton} onPress={handleDownloadTicket}>
               <Icon name="download" size={24} color="#4A90E2" />
               <Text style={styles.actionText}>Download</Text>
             </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.actionButton}
-              onPress={handleContactSupport}
-            >
+            <TouchableOpacity style={styles.actionButton} onPress={handleContactSupport}>
               <Icon name="support-agent" size={24} color="#4A90E2" />
               <Text style={styles.actionText}>Support</Text>
             </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.actionButton}
-              onPress={handleViewTrip}
-            >
+            <TouchableOpacity style={styles.actionButton} onPress={handleViewTrip}>
               <Icon name="visibility" size={24} color="#4A90E2" />
               <Text style={styles.actionText}>My Trips</Text>
             </TouchableOpacity>
@@ -983,14 +863,38 @@ ${bookingDetails.paymentStatus !== 'paid' ?
         </View>
 
         {/* Done Button */}
-        <TouchableOpacity
-          style={styles.doneButton}
-          onPress={() => navigation.navigate('Home')}
-        >
+        <TouchableOpacity style={styles.doneButton} onPress={() => navigation.navigate('Home')}>
           <Text style={styles.doneButtonText}>DONE</Text>
           <Icon name="check-circle" size={20} color="#FFF" />
         </TouchableOpacity>
       </ScrollView>
+
+      {/* Full Screen QR Code Modal */}
+      <Modal
+        visible={qrModalVisible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setQrModalVisible(false)}
+      >
+        <View style={styles.qrModalOverlay}>
+          <View style={styles.qrModalContent}>
+            <TouchableOpacity
+              style={styles.qrModalClose}
+              onPress={() => setQrModalVisible(false)}
+            >
+              <Icon name="close" size={30} color="#FFF" />
+            </TouchableOpacity>
+            <QRCode
+              value={qrValue}
+              size={280}
+              color="#1A237E"
+              backgroundColor="#FFFFFF"
+            />
+            <Text style={styles.qrModalText}>ZUGO Transport</Text>
+            <Text style={styles.qrModalSubText}>Show this QR code at boarding</Text>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -1008,7 +912,6 @@ const styles = StyleSheet.create({
   statusCircle: { width: 100, height: 100, borderRadius: 50, justifyContent: 'center', alignItems: 'center', marginBottom: 16, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
   statusTitle: { fontSize: 24, fontWeight: 'bold', marginBottom: 4 },
   statusSubtitle: { fontSize: 16, color: '#666', textAlign: 'center' },
-  // ✅ NEW STYLES
   manualConfirmButton: {
     backgroundColor: '#4CAF50',
     borderRadius: 16,
@@ -1094,9 +997,17 @@ const styles = StyleSheet.create({
   paymentStatusLabel: { fontSize: 14, color: '#666' },
   paymentStatusBadge: { paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 },
   paymentStatusBadgeText: { fontSize: 12, fontWeight: '600', color: '#FFF' },
-  qrContainer: { alignItems: 'center', padding: 20, borderWidth: 1, borderColor: '#E3E8EF', borderRadius: 12, marginTop: 20 },
-  qrPlaceholder: { alignItems: 'center' },
-  qrText: { fontSize: 16, color: '#666', marginTop: 12, fontWeight: '500' },
+  qrContainer: { alignItems: 'center', padding: 20, borderWidth: 1, borderColor: '#E3E8EF', borderRadius: 12, marginTop: 20, backgroundColor: '#FFF' },
+  qrWrapper: { alignItems: 'center', padding: 16, backgroundColor: '#FFF', borderRadius: 12 },
+  qrText: { fontSize: 16, color: '#4CAF50', marginTop: 16, fontWeight: 'bold' },
+  qrSubText: { fontSize: 12, color: '#666', marginTop: 4, textAlign: 'center' },
+  enlargeQrButton: { flexDirection: 'row', alignItems: 'center', marginTop: 12, paddingVertical: 8, paddingHorizontal: 16, backgroundColor: '#F0F8FF', borderRadius: 20 },
+  enlargeQrText: { fontSize: 12, color: '#4A90E2', marginLeft: 8 },
+  qrModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.9)', justifyContent: 'center', alignItems: 'center' },
+  qrModalContent: { alignItems: 'center', padding: 20 },
+  qrModalClose: { position: 'absolute', top: -40, right: 0, padding: 10 },
+  qrModalText: { fontSize: 20, fontWeight: 'bold', color: '#FFF', marginTop: 24 },
+  qrModalSubText: { fontSize: 14, color: '#CCC', marginTop: 8 },
   notesCard: { backgroundColor: '#FFF', borderRadius: 16, padding: 20, marginBottom: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 5 },
   notesTitle: { fontSize: 18, fontWeight: '600', color: '#1A237E', marginBottom: 16 },
   noteItem: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 12 },

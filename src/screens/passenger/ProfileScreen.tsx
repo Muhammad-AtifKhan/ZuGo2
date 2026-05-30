@@ -49,37 +49,6 @@ interface UserData {
   city?: string;
 }
 
-interface PaymentMethod {
-  id: string;
-  type: 'visa' | 'mastercard' | 'jazzcash' | 'easypaisa';
-  lastFour: string;
-  expiry: string;
-  name: string;
-  isDefault: boolean;
-  token?: string;
-}
-
-interface NotificationSettings {
-  tripReminders: boolean;
-  boardingAlerts: boolean;
-  delayUpdates: boolean;
-  promotionalOffers: boolean;
-  systemUpdates: boolean;
-  bookingConfirmations: boolean;
-  receipts: boolean;
-  newsletter: boolean;
-  bookingDetailsSMS: boolean;
-  importantAlertsSMS: boolean;
-  otpCodesSMS: boolean;
-}
-
-interface UserPreferences {
-  defaultPayment: 'card' | 'mobile';
-  seatPreference: 'window' | 'aisle' | 'any';
-  language: 'english' | 'urdu' | 'arabic';
-  currency: 'USD' | 'PKR';
-}
-
 interface EmergencyContact {
   name: string;
   relationship: string;
@@ -117,28 +86,6 @@ const ProfileScreen = () => {
     city: '',
   });
 
-  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
-  const [notifications, setNotifications] = useState<NotificationSettings>({
-    tripReminders: true,
-    boardingAlerts: true,
-    delayUpdates: true,
-    promotionalOffers: false,
-    systemUpdates: true,
-    bookingConfirmations: true,
-    receipts: true,
-    newsletter: false,
-    bookingDetailsSMS: true,
-    importantAlertsSMS: true,
-    otpCodesSMS: true,
-  });
-
-  const [preferences, setPreferences] = useState<UserPreferences>({
-    defaultPayment: 'card',
-    seatPreference: 'window',
-    language: 'english',
-    currency: 'USD',
-  });
-
   const [emergencyContact, setEmergencyContact] = useState<EmergencyContact>({
     name: '',
     relationship: '',
@@ -153,21 +100,11 @@ const ProfileScreen = () => {
   });
 
   const [isEditing, setIsEditing] = useState(false);
-  const [activeSection, setActiveSection] = useState<'profile' | 'payments' | 'notifications' | 'help'>('profile');
+  const [activeSection, setActiveSection] = useState<'profile' | 'help'>('profile');
 
   // Dropdown states
-  const [showPaymentDropdown, setShowPaymentDropdown] = useState(false);
   const [showSeatDropdown, setShowSeatDropdown] = useState(false);
   const [showLanguageDropdown, setShowLanguageDropdown] = useState(false);
-
-  // Payment modal states
-  const [showAddCardModal, setShowAddCardModal] = useState(false);
-  const [cardDetails, setCardDetails] = useState({
-    number: '',
-    expiry: '',
-    name: '',
-    cvv: '',
-  });
 
   // Load user data from Firebase
   useEffect(() => {
@@ -220,27 +157,6 @@ const ProfileScreen = () => {
           city: data?.city || '',
         });
 
-        // Load payment methods
-        if (data?.paymentMethods) {
-          setPaymentMethods(data.paymentMethods);
-        }
-
-        // Load notification settings
-        if (data?.notificationSettings) {
-          setNotifications({
-            ...notifications,
-            ...data.notificationSettings,
-          });
-        }
-
-        // Load preferences
-        if (data?.preferences) {
-          setPreferences({
-            ...preferences,
-            ...data.preferences,
-          });
-        }
-
         // Load emergency contact
         if (data?.emergencyContact) {
           setEmergencyContact(data.emergencyContact);
@@ -260,7 +176,7 @@ const ProfileScreen = () => {
     }
   };
 
-  // ✅ FIXED: Logout function - navigation reset REMOVED
+  // Logout function
   const handleLogout = () => {
     Alert.alert(
       'Logout',
@@ -274,7 +190,6 @@ const ProfileScreen = () => {
             setLogoutLoading(true);
             try {
               await auth().signOut();
-              // ✅ RootNavigator automatically shows AuthNavigator
             } catch (error) {
               console.error('Logout error:', error);
               Alert.alert('Error', 'Failed to logout. Please try again.');
@@ -289,7 +204,6 @@ const ProfileScreen = () => {
 
   const handleEditProfile = () => {
     setIsEditing(true);
-    setShowPaymentDropdown(false);
     setShowSeatDropdown(false);
     setShowLanguageDropdown(false);
   };
@@ -307,7 +221,6 @@ const ProfileScreen = () => {
         cnic: userData.cnic,
         address: userData.address,
         city: userData.city,
-        preferences: preferences,
         emergencyContact: emergencyContact,
         specialNeeds: specialNeeds,
         updatedAt: firestore.FieldValue.serverTimestamp(),
@@ -352,7 +265,6 @@ const ProfileScreen = () => {
   };
 
   const openCamera = () => {
-    // Implement camera functionality
     Alert.alert('Camera', 'Camera feature coming soon');
   };
 
@@ -397,169 +309,6 @@ const ProfileScreen = () => {
     }
   };
 
-  const handleAddPaymentMethod = () => {
-    Alert.alert(
-      'Add Payment Method',
-      'Select payment method type:',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Credit/Debit Card', onPress: () => setShowAddCardModal(true) },
-        { text: 'JazzCash', onPress: () => addMobileWallet('jazzcash') },
-        { text: 'EasyPaisa', onPress: () => addMobileWallet('easypaisa') },
-      ]
-    );
-  };
-
-  const handleSaveCard = async () => {
-    if (!user) return;
-
-    if (!cardDetails.number || cardDetails.number.replace(/\s/g, '').length !== 16) {
-      Alert.alert('Invalid Card', 'Please enter a valid 16-digit card number');
-      return;
-    }
-
-    if (!cardDetails.expiry || !/^\d{2}\/\d{2}$/.test(cardDetails.expiry)) {
-      Alert.alert('Invalid Expiry', 'Please enter expiry date in MM/YY format');
-      return;
-    }
-
-    if (!cardDetails.name) {
-      Alert.alert('Invalid Name', 'Please enter cardholder name');
-      return;
-    }
-
-    if (!cardDetails.cvv || cardDetails.cvv.length !== 3) {
-      Alert.alert('Invalid CVV', 'Please enter 3-digit CVV');
-      return;
-    }
-
-    const newCard: PaymentMethod = {
-      id: `card-${Date.now()}`,
-      type: cardDetails.number.startsWith('4') ? 'visa' : 'mastercard',
-      lastFour: cardDetails.number.slice(-4),
-      expiry: cardDetails.expiry,
-      name: cardDetails.name,
-      isDefault: paymentMethods.length === 0,
-    };
-
-    const updatedMethods = [...paymentMethods, newCard];
-
-    try {
-      await firestore().collection('users').doc(user.uid).update({
-        paymentMethods: updatedMethods,
-      });
-
-      setPaymentMethods(updatedMethods);
-      setShowAddCardModal(false);
-      setCardDetails({ number: '', expiry: '', name: '', cvv: '' });
-      Alert.alert('Success', 'Card added successfully');
-    } catch (error) {
-      console.error('Error saving card:', error);
-      Alert.alert('Error', 'Failed to save card');
-    }
-  };
-
-  const addMobileWallet = async (wallet: 'jazzcash' | 'easypaisa') => {
-    if (!user) return;
-
-    const newWallet: PaymentMethod = {
-      id: `${wallet}-${Date.now()}`,
-      type: wallet,
-      lastFour: '',
-      expiry: '',
-      name: wallet === 'jazzcash' ? 'JazzCash' : 'EasyPaisa',
-      isDefault: paymentMethods.length === 0,
-    };
-
-    const updatedMethods = [...paymentMethods, newWallet];
-
-    try {
-      await firestore().collection('users').doc(user.uid).update({
-        paymentMethods: updatedMethods,
-      });
-
-      setPaymentMethods(updatedMethods);
-      Alert.alert('Success', `${wallet === 'jazzcash' ? 'JazzCash' : 'EasyPaisa'} connected successfully`);
-    } catch (error) {
-      console.error('Error adding wallet:', error);
-      Alert.alert('Error', 'Failed to connect wallet');
-    }
-  };
-
-  const handleSetDefaultPayment = async (id: string) => {
-    if (!user) return;
-
-    const updatedMethods = paymentMethods.map(method => ({
-      ...method,
-      isDefault: method.id === id,
-    }));
-
-    try {
-      await firestore().collection('users').doc(user.uid).update({
-        paymentMethods: updatedMethods,
-      });
-
-      setPaymentMethods(updatedMethods);
-      Alert.alert('Updated', 'Default payment method updated');
-    } catch (error) {
-      console.error('Error updating default payment:', error);
-      Alert.alert('Error', 'Failed to update default payment');
-    }
-  };
-
-  const handleRemovePayment = async (id: string) => {
-    if (!user) return;
-
-    Alert.alert(
-      'Remove Payment Method',
-      'Are you sure you want to remove this payment method?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Remove',
-          style: 'destructive',
-          onPress: async () => {
-            const updatedMethods = paymentMethods.filter(method => method.id !== id);
-
-            try {
-              await firestore().collection('users').doc(user.uid).update({
-                paymentMethods: updatedMethods,
-              });
-
-              setPaymentMethods(updatedMethods);
-              Alert.alert('Removed', 'Payment method removed');
-            } catch (error) {
-              console.error('Error removing payment:', error);
-              Alert.alert('Error', 'Failed to remove payment method');
-            }
-          },
-        },
-      ]
-    );
-  };
-
-  const handleToggleNotification = (key: keyof NotificationSettings) => {
-    setNotifications(prev => ({
-      ...prev,
-      [key]: !prev[key],
-    }));
-  };
-
-  const handleSaveNotifications = async () => {
-    if (!user) return;
-
-    try {
-      await firestore().collection('users').doc(user.uid).update({
-        notificationSettings: notifications,
-      });
-
-      Alert.alert('Saved', 'Notification preferences updated');
-    } catch (error) {
-      console.error('Error saving notifications:', error);
-      Alert.alert('Error', 'Failed to save preferences');
-    }
-  };
-
   const handleContactSupport = () => {
     Alert.alert(
       'Contact Support',
@@ -585,7 +334,6 @@ const ProfileScreen = () => {
     navigation.navigate('TermsConditions');
   };
 
-  // ✅ FIXED: Delete Account function - navigation reset REMOVED
   const handleDeleteAccount = () => {
     Alert.alert(
       'Delete Account',
@@ -599,14 +347,9 @@ const ProfileScreen = () => {
             if (!user) return;
 
             try {
-              // Delete user data from Firestore
               await firestore().collection('users').doc(user.uid).delete();
-
-              // Delete user auth
               await user.delete();
-
               Alert.alert('Account Deleted', 'Your account has been deleted');
-              // ✅ No navigation needed - user becomes null, RootNavigator shows AuthNavigator
             } catch (error) {
               console.error('Error deleting account:', error);
               Alert.alert('Error', 'Failed to delete account');
@@ -615,20 +358,6 @@ const ProfileScreen = () => {
         },
       ]
     );
-  };
-
-  const formatCardNumber = (text: string) => {
-    const cleaned = text.replace(/\D/g, '');
-    const match = cleaned.match(/(\d{1,4})/g);
-    return match ? match.join(' ') : '';
-  };
-
-  const formatExpiry = (text: string) => {
-    const cleaned = text.replace(/\D/g, '');
-    if (cleaned.length >= 3) {
-      return cleaned.slice(0, 2) + '/' + cleaned.slice(2, 4);
-    }
-    return cleaned;
   };
 
   if (loading) {
@@ -692,7 +421,7 @@ const ProfileScreen = () => {
 
         <View style={styles.statCard}>
           <Icon name="savings" size={24} color="#4CAF50" />
-          <Text style={styles.statNumber}>${userData.totalSaved}</Text>
+          <Text style={styles.statNumber}>PKR {userData.totalSaved}</Text>
           <Text style={styles.statLabel}>Saved</Text>
         </View>
 
@@ -801,194 +530,6 @@ const ProfileScreen = () => {
             />
           ) : (
             <Text style={styles.infoValue}>{userData.city || 'Not set'}</Text>
-          )}
-        </View>
-      </View>
-
-      {/* Preferences */}
-      <View style={styles.infoCard}>
-        <Text style={styles.cardTitle}>PREFERENCES</Text>
-
-        <View style={styles.preferenceRow}>
-          <Text style={styles.preferenceLabel}>Default Payment:</Text>
-          {isEditing ? (
-            <View style={styles.dropdownContainer}>
-              <TouchableOpacity
-                style={styles.dropdown}
-                onPress={() => {
-                  setShowPaymentDropdown(!showPaymentDropdown);
-                  setShowSeatDropdown(false);
-                  setShowLanguageDropdown(false);
-                }}
-              >
-                <Text style={styles.dropdownText}>
-                  {preferences.defaultPayment === 'card' ? 'Credit/Debit Card' : 'Mobile Wallet'}
-                </Text>
-                <Icon
-                  name={showPaymentDropdown ? "arrow-drop-up" : "arrow-drop-down"}
-                  size={24}
-                  color="#666"
-                />
-              </TouchableOpacity>
-
-              {showPaymentDropdown && (
-                <View style={styles.dropdownMenu}>
-                  <TouchableOpacity
-                    style={styles.dropdownMenuItem}
-                    onPress={() => {
-                      setPreferences({...preferences, defaultPayment: 'card'});
-                      setShowPaymentDropdown(false);
-                    }}
-                  >
-                    <Text style={styles.dropdownMenuItemText}>Credit/Debit Card</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={styles.dropdownMenuItem}
-                    onPress={() => {
-                      setPreferences({...preferences, defaultPayment: 'mobile'});
-                      setShowPaymentDropdown(false);
-                    }}
-                  >
-                    <Text style={styles.dropdownMenuItemText}>Mobile Wallet</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-            </View>
-          ) : (
-            <Text style={styles.preferenceValue}>
-              {preferences.defaultPayment === 'card' ? 'Credit/Debit Card' : 'Mobile Wallet'}
-            </Text>
-          )}
-        </View>
-
-        <View style={styles.preferenceRow}>
-          <Text style={styles.preferenceLabel}>Seat Preference:</Text>
-          {isEditing ? (
-            <View style={styles.dropdownContainer}>
-              <TouchableOpacity
-                style={styles.dropdown}
-                onPress={() => {
-                  setShowSeatDropdown(!showSeatDropdown);
-                  setShowPaymentDropdown(false);
-                  setShowLanguageDropdown(false);
-                }}
-              >
-                <Text style={styles.dropdownText}>
-                  {preferences.seatPreference === 'window' ? 'Window' :
-                   preferences.seatPreference === 'aisle' ? 'Aisle' : 'Any'}
-                </Text>
-                <Icon
-                  name={showSeatDropdown ? "arrow-drop-up" : "arrow-drop-down"}
-                  size={24}
-                  color="#666"
-                />
-              </TouchableOpacity>
-
-              {showSeatDropdown && (
-                <View style={styles.dropdownMenu}>
-                  <TouchableOpacity
-                    style={styles.dropdownMenuItem}
-                    onPress={() => {
-                      setPreferences({...preferences, seatPreference: 'window'});
-                      setShowSeatDropdown(false);
-                    }}
-                  >
-                    <Text style={styles.dropdownMenuItemText}>Window</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={styles.dropdownMenuItem}
-                    onPress={() => {
-                      setPreferences({...preferences, seatPreference: 'aisle'});
-                      setShowSeatDropdown(false);
-                    }}
-                  >
-                    <Text style={styles.dropdownMenuItemText}>Aisle</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={styles.dropdownMenuItem}
-                    onPress={() => {
-                      setPreferences({...preferences, seatPreference: 'any'});
-                      setShowSeatDropdown(false);
-                    }}
-                  >
-                    <Text style={styles.dropdownMenuItemText}>Any</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-            </View>
-          ) : (
-            <Text style={styles.preferenceValue}>
-              {preferences.seatPreference === 'window' ? 'Window' :
-               preferences.seatPreference === 'aisle' ? 'Aisle' : 'Any'}
-            </Text>
-          )}
-        </View>
-
-        <View style={styles.preferenceRow}>
-          <Text style={styles.preferenceLabel}>Language:</Text>
-          {isEditing ? (
-            <View style={styles.dropdownContainer}>
-              <TouchableOpacity
-                style={styles.dropdown}
-                onPress={() => {
-                  setShowLanguageDropdown(!showLanguageDropdown);
-                  setShowPaymentDropdown(false);
-                  setShowSeatDropdown(false);
-                }}
-              >
-                <Text style={styles.dropdownText}>
-                  {preferences.language === 'english' ? 'English' :
-                   preferences.language === 'urdu' ? 'Urdu' : 'العربية'}
-                </Text>
-                <Icon
-                  name={showLanguageDropdown ? "arrow-drop-up" : "arrow-drop-down"}
-                  size={24}
-                  color="#666"
-                />
-              </TouchableOpacity>
-
-              {showLanguageDropdown && (
-                <View style={styles.dropdownMenu}>
-                  <TouchableOpacity
-                    style={styles.dropdownMenuItem}
-                    onPress={() => {
-                      setPreferences({...preferences, language: 'english'});
-                      setShowLanguageDropdown(false);
-                    }}
-                  >
-                    <Text style={styles.dropdownMenuItemText}>English</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={styles.dropdownMenuItem}
-                    onPress={() => {
-                      setPreferences({...preferences, language: 'urdu'});
-                      setShowLanguageDropdown(false);
-                    }}
-                  >
-                    <Text style={styles.dropdownMenuItemText}>Urdu</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={styles.dropdownMenuItem}
-                    onPress={() => {
-                      setPreferences({...preferences, language: 'arabic'});
-                      setShowLanguageDropdown(false);
-                    }}
-                  >
-                    <Text style={styles.dropdownMenuItemText}>العربية</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-            </View>
-          ) : (
-            <Text style={styles.preferenceValue}>
-              {preferences.language === 'english' ? 'English' :
-               preferences.language === 'urdu' ? 'Urdu' : 'العربية'}
-            </Text>
           )}
         </View>
       </View>
@@ -1135,322 +676,9 @@ const ProfileScreen = () => {
         </View>
       </View>
 
-      {/* Edit/Save Buttons */}
-      <View style={styles.actionButtons}>
-        {isEditing ? (
-          <>
-            <TouchableOpacity
-              style={[styles.actionButton, styles.saveButton]}
-              onPress={handleSaveProfile}
-              disabled={saving}
-            >
-              {saving ? (
-                <ActivityIndicator size="small" color="#FFF" />
-              ) : (
-                <>
-                  <Icon name="check" size={20} color="#FFF" />
-                  <Text style={styles.saveButtonText}>SAVE CHANGES</Text>
-                </>
-              )}
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.actionButton, styles.cancelButton]}
-              onPress={() => {
-                setIsEditing(false);
-                loadUserData(); // Reload original data
-                setShowPaymentDropdown(false);
-                setShowSeatDropdown(false);
-                setShowLanguageDropdown(false);
-              }}
-            >
-              <Icon name="close" size={20} color="#666" />
-              <Text style={styles.cancelButtonText}>CANCEL</Text>
-            </TouchableOpacity>
-          </>
-        ) : (
-          <TouchableOpacity
-            style={[styles.actionButton, styles.editButton]}
-            onPress={handleEditProfile}
-          >
-            <Icon name="edit" size={20} color="#4A90E2" />
-            <Text style={styles.editButtonText}>EDIT PROFILE</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-    </View>
-  );
-
-  const renderPaymentsSection = () => (
-    <View style={styles.section}>
-      <Text style={styles.sectionTitle}>PAYMENT METHODS</Text>
-
-      <View style={styles.paymentsList}>
-        {paymentMethods.map((method) => (
-          <View key={method.id} style={styles.paymentCard}>
-            <View style={styles.paymentHeader}>
-              <View style={styles.paymentIcon}>
-                <Icon
-                  name={
-                    method.type === 'visa' ? 'credit-card' :
-                    method.type === 'mastercard' ? 'card-membership' :
-                    'smartphone'
-                  }
-                  size={28}
-                  color="#4A90E2"
-                />
-              </View>
-
-              <View style={styles.paymentInfo}>
-                <Text style={styles.paymentName}>{method.name}</Text>
-                {method.type === 'visa' || method.type === 'mastercard' ? (
-                  <Text style={styles.paymentDetails}>
-                    **** **** **** {method.lastFour} • Expires {method.expiry}
-                  </Text>
-                ) : (
-                  <Text style={styles.paymentDetails}>
-                    Connected • {method.name}
-                  </Text>
-                )}
-              </View>
-
-              {method.isDefault && (
-                <View style={styles.defaultBadge}>
-                  <Text style={styles.defaultBadgeText}>DEFAULT</Text>
-                </View>
-              )}
-            </View>
-
-            <View style={styles.paymentActions}>
-              {!method.isDefault && (
-                <TouchableOpacity
-                  style={styles.paymentActionButton}
-                  onPress={() => handleSetDefaultPayment(method.id)}
-                >
-                  <Icon name="star" size={18} color="#FFD700" />
-                  <Text style={styles.paymentActionText}>Set Default</Text>
-                </TouchableOpacity>
-              )}
-
-              <TouchableOpacity
-                style={[styles.paymentActionButton, styles.removeButton]}
-                onPress={() => handleRemovePayment(method.id)}
-              >
-                <Icon name="delete" size={18} color="#F44336" />
-                <Text style={[styles.paymentActionText, styles.removeText]}>Remove</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        ))}
-      </View>
-
-      <TouchableOpacity
-        style={styles.addPaymentButton}
-        onPress={handleAddPaymentMethod}
-      >
-        <Icon name="add" size={24} color="#4A90E2" />
-        <Text style={styles.addPaymentText}>ADD PAYMENT METHOD</Text>
-      </TouchableOpacity>
-
-      <View style={styles.mobileWallets}>
-        <Text style={styles.walletsTitle}>MOBILE WALLETS</Text>
-
-        <View style={styles.walletsList}>
-          <TouchableOpacity
-            style={styles.walletButton}
-            onPress={() => addMobileWallet('jazzcash')}
-          >
-            <Icon name="smartphone" size={24} color="#4A90E2" />
-            <Text style={styles.walletText}>JazzCash</Text>
-            <Text style={styles.walletStatus}>
-              {paymentMethods.some(m => m.type === 'jazzcash') ? 'Connected' : 'Not Connected'}
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.walletButton}
-            onPress={() => addMobileWallet('easypaisa')}
-          >
-            <Icon name="smartphone" size={24} color="#4A90E2" />
-            <Text style={styles.walletText}>EasyPaisa</Text>
-            <Text style={styles.walletStatus}>
-              {paymentMethods.some(m => m.type === 'easypaisa') ? 'Connected' : 'Not Connected'}
-            </Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    </View>
-  );
-
-  const renderNotificationsSection = () => (
-    <View style={styles.section}>
-      <Text style={styles.sectionTitle}>NOTIFICATION SETTINGS</Text>
-
-      <View style={styles.notificationsCard}>
-        <Text style={styles.notificationsSubtitle}>PUSH NOTIFICATIONS</Text>
-
-        <View style={styles.notificationRow}>
-          <View style={styles.notificationInfo}>
-            <Icon name="notifications" size={20} color="#666" />
-            <Text style={styles.notificationLabel}>Trip Reminders</Text>
-            <Text style={styles.notificationDesc}>1 hour before departure</Text>
-          </View>
-          <Switch
-            value={notifications.tripReminders}
-            onValueChange={() => handleToggleNotification('tripReminders')}
-            trackColor={{ false: '#DDD', true: '#4CAF50' }}
-          />
-        </View>
-
-        <View style={styles.notificationRow}>
-          <View style={styles.notificationInfo}>
-            <Icon name="directions-bus" size={20} color="#666" />
-            <Text style={styles.notificationLabel}>Boarding Alerts</Text>
-            <Text style={styles.notificationDesc}>When boarding starts</Text>
-          </View>
-          <Switch
-            value={notifications.boardingAlerts}
-            onValueChange={() => handleToggleNotification('boardingAlerts')}
-            trackColor={{ false: '#DDD', true: '#4CAF50' }}
-          />
-        </View>
-
-        <View style={styles.notificationRow}>
-          <View style={styles.notificationInfo}>
-            <Icon name="schedule" size={20} color="#666" />
-            <Text style={styles.notificationLabel}>Delay Updates</Text>
-            <Text style={styles.notificationDesc}>If delay > 10 minutes</Text>
-          </View>
-          <Switch
-            value={notifications.delayUpdates}
-            onValueChange={() => handleToggleNotification('delayUpdates')}
-            trackColor={{ false: '#DDD', true: '#4CAF50' }}
-          />
-        </View>
-
-        <View style={styles.notificationRow}>
-          <View style={styles.notificationInfo}>
-            <Icon name="local-offer" size={20} color="#666" />
-            <Text style={styles.notificationLabel}>Promotional Offers</Text>
-            <Text style={styles.notificationDesc}>Discounts & deals</Text>
-          </View>
-          <Switch
-            value={notifications.promotionalOffers}
-            onValueChange={() => handleToggleNotification('promotionalOffers')}
-            trackColor={{ false: '#DDD', true: '#4CAF50' }}
-          />
-        </View>
-
-        <View style={styles.notificationRow}>
-          <View style={styles.notificationInfo}>
-            <Icon name="system-update" size={20} color="#666" />
-            <Text style={styles.notificationLabel}>System Updates</Text>
-            <Text style={styles.notificationDesc}>App updates & maintenance</Text>
-          </View>
-          <Switch
-            value={notifications.systemUpdates}
-            onValueChange={() => handleToggleNotification('systemUpdates')}
-            trackColor={{ false: '#DDD', true: '#4CAF50' }}
-          />
-        </View>
-      </View>
-
-      <View style={styles.notificationsCard}>
-        <Text style={styles.notificationsSubtitle}>EMAIL NOTIFICATIONS</Text>
-
-        <View style={styles.notificationRow}>
-          <View style={styles.notificationInfo}>
-            <Icon name="email" size={20} color="#666" />
-            <Text style={styles.notificationLabel}>Booking Confirmations</Text>
-          </View>
-          <Switch
-            value={notifications.bookingConfirmations}
-            onValueChange={() => handleToggleNotification('bookingConfirmations')}
-            trackColor={{ false: '#DDD', true: '#4CAF50' }}
-          />
-        </View>
-
-        <View style={styles.notificationRow}>
-          <View style={styles.notificationInfo}>
-            <Icon name="receipt" size={20} color="#666" />
-            <Text style={styles.notificationLabel}>Receipts</Text>
-          </View>
-          <Switch
-            value={notifications.receipts}
-            onValueChange={() => handleToggleNotification('receipts')}
-            trackColor={{ false: '#DDD', true: '#4CAF50' }}
-          />
-        </View>
-
-        <View style={styles.notificationRow}>
-          <View style={styles.notificationInfo}>
-            <Icon name="newspaper" size={20} color="#666" />
-            <Text style={styles.notificationLabel}>Newsletter</Text>
-            <Text style={styles.notificationDesc}>Monthly updates</Text>
-          </View>
-          <Switch
-            value={notifications.newsletter}
-            onValueChange={() => handleToggleNotification('newsletter')}
-            trackColor={{ false: '#DDD', true: '#4CAF50' }}
-          />
-        </View>
-      </View>
-
-      <View style={styles.notificationsCard}>
-        <Text style={styles.notificationsSubtitle}>SMS NOTIFICATIONS</Text>
-
-        <View style={styles.notificationRow}>
-          <View style={styles.notificationInfo}>
-            <Icon name="sms" size={20} color="#666" />
-            <Text style={styles.notificationLabel}>Booking Details</Text>
-          </View>
-          <Switch
-            value={notifications.bookingDetailsSMS}
-            onValueChange={() => handleToggleNotification('bookingDetailsSMS')}
-            trackColor={{ false: '#DDD', true: '#4CAF50' }}
-          />
-        </View>
-
-        <View style={styles.notificationRow}>
-          <View style={styles.notificationInfo}>
-            <Icon name="warning" size={20} color="#666" />
-            <Text style={styles.notificationLabel}>Important Alerts</Text>
-          </View>
-          <Switch
-            value={notifications.importantAlertsSMS}
-            onValueChange={() => handleToggleNotification('importantAlertsSMS')}
-            trackColor={{ false: '#DDD', true: '#4CAF50' }}
-          />
-        </View>
-
-        <View style={styles.notificationRow}>
-          <View style={styles.notificationInfo}>
-            <Icon name="lock" size={20} color="#666" />
-            <Text style={styles.notificationLabel}>OTP Codes</Text>
-          </View>
-          <Switch
-            value={notifications.otpCodesSMS}
-            onValueChange={() => handleToggleNotification('otpCodesSMS')}
-            trackColor={{ false: '#DDD', true: '#4CAF50' }}
-          />
-        </View>
-      </View>
-
-      <TouchableOpacity
-        style={styles.saveNotificationsButton}
-        onPress={handleSaveNotifications}
-      >
-        <Text style={styles.saveNotificationsText}>SAVE NOTIFICATION PREFERENCES</Text>
-      </TouchableOpacity>
-    </View>
-  );
-
-  const renderHelpSection = () => (
-    <View style={styles.section}>
-      <Text style={styles.sectionTitle}>HELP & SUPPORT</Text>
-
-      <View style={styles.helpCard}>
-        <Text style={styles.helpSubtitle}>QUICK HELP</Text>
+      {/* Help & Support Section - Moved here from help tab */}
+      <View style={styles.infoCard}>
+        <Text style={styles.cardTitle}>HELP & SUPPORT</Text>
 
         <TouchableOpacity style={styles.helpItem} onPress={handleViewFAQ}>
           <Icon name="help" size={20} color="#4A90E2" />
@@ -1477,8 +705,9 @@ const ProfileScreen = () => {
         </TouchableOpacity>
       </View>
 
-      <View style={styles.helpCard}>
-        <Text style={styles.helpSubtitle}>CONTACT SUPPORT</Text>
+      {/* Contact Support Card */}
+      <View style={styles.infoCard}>
+        <Text style={styles.cardTitle}>CONTACT SUPPORT</Text>
 
         <TouchableOpacity style={styles.contactItem} onPress={handleContactSupport}>
           <Icon name="phone" size={24} color="#4CAF50" />
@@ -1499,8 +728,8 @@ const ProfileScreen = () => {
         <TouchableOpacity style={styles.contactItem} onPress={handleContactSupport}>
           <Icon name="chat" size={24} color="#25D366" />
           <View style={styles.contactInfo}>
-            <Text style={styles.contactLabel}>WhatsApp</Text>
-            <Text style={styles.contactValue}>+92 300 9999999</Text>
+            <Text style={styles.contactLabel}>Live Chat</Text>
+            <Text style={styles.contactValue}>24/7 Support</Text>
           </View>
         </TouchableOpacity>
 
@@ -1510,22 +739,26 @@ const ProfileScreen = () => {
         </View>
       </View>
 
-      <View style={styles.legalCard}>
-        <Text style={styles.legalTitle}>LEGAL</Text>
+      {/* Legal Card */}
+      <View style={styles.infoCard}>
+        <Text style={styles.cardTitle}>LEGAL</Text>
 
         <TouchableOpacity style={styles.legalItem} onPress={handlePrivacyPolicy}>
           <Icon name="privacy-tip" size={20} color="#666" />
           <Text style={styles.legalItemText}>Privacy Policy</Text>
+          <Icon name="chevron-right" size={20} color="#999" />
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.legalItem} onPress={handleTermsConditions}>
           <Icon name="gavel" size={20} color="#666" />
           <Text style={styles.legalItemText}>Terms & Conditions</Text>
+          <Icon name="chevron-right" size={20} color="#999" />
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.legalItem} onPress={() => Alert.alert('About', 'ZUGO App Version 1.0.0')}>
           <Icon name="info" size={20} color="#666" />
           <Text style={styles.legalItemText}>About This App</Text>
+          <Icon name="chevron-right" size={20} color="#999" />
         </TouchableOpacity>
 
         <TouchableOpacity style={[styles.legalItem, styles.deleteItem]} onPress={handleDeleteAccount}>
@@ -1534,104 +767,58 @@ const ProfileScreen = () => {
         </TouchableOpacity>
       </View>
 
+      {/* App Info */}
       <View style={styles.appInfo}>
         <Text style={styles.appVersion}>Version 1.0.0</Text>
         <Text style={styles.appCopyright}>© 2024 ZUGO Transport. All rights reserved.</Text>
       </View>
+
+      {/* Edit/Save Buttons */}
+      <View style={styles.actionButtons}>
+        {isEditing ? (
+          <>
+            <TouchableOpacity
+              style={[styles.actionButton, styles.saveButton]}
+              onPress={handleSaveProfile}
+              disabled={saving}
+            >
+              {saving ? (
+                <ActivityIndicator size="small" color="#FFF" />
+              ) : (
+                <>
+                  <Icon name="check" size={20} color="#FFF" />
+                  <Text style={styles.saveButtonText}>SAVE CHANGES</Text>
+                </>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.actionButton, styles.cancelButton]}
+              onPress={() => {
+                setIsEditing(false);
+                loadUserData();
+                setShowSeatDropdown(false);
+                setShowLanguageDropdown(false);
+              }}
+            >
+              <Icon name="close" size={20} color="#666" />
+              <Text style={styles.cancelButtonText}>CANCEL</Text>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <TouchableOpacity
+            style={[styles.actionButton, styles.editButton]}
+            onPress={handleEditProfile}
+          >
+            <Icon name="edit" size={20} color="#4A90E2" />
+            <Text style={styles.editButtonText}>EDIT PROFILE</Text>
+          </TouchableOpacity>
+        )}
+      </View>
     </View>
   );
 
-  // Add Payment Method Modal
-  const AddCardModal = () => (
-    <Modal
-      visible={showAddCardModal}
-      animationType="slide"
-      transparent={true}
-      onRequestClose={() => setShowAddCardModal(false)}
-    >
-      <View style={styles.modalOverlay}>
-        <View style={styles.modalContent}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Add New Card</Text>
-            <TouchableOpacity onPress={() => setShowAddCardModal(false)}>
-              <Icon name="close" size={24} color="#666" />
-            </TouchableOpacity>
-          </View>
-
-          <ScrollView style={styles.modalBody}>
-            <View style={styles.formGroup}>
-              <Text style={styles.formLabel}>Card Number</Text>
-              <TextInput
-                style={styles.formInput}
-                placeholder="1234 5678 9012 3456"
-                value={formatCardNumber(cardDetails.number)}
-                onChangeText={(text) => setCardDetails({...cardDetails, number: text.replace(/\s/g, '')})}
-                keyboardType="numeric"
-                maxLength={19}
-              />
-            </View>
-
-            <View style={styles.formRow}>
-              <View style={[styles.formGroup, {flex: 1, marginRight: 10}]}>
-                <Text style={styles.formLabel}>Expiry Date</Text>
-                <TextInput
-                  style={styles.formInput}
-                  placeholder="MM/YY"
-                  value={cardDetails.expiry}
-                  onChangeText={(text) => setCardDetails({...cardDetails, expiry: formatExpiry(text)})}
-                  keyboardType="numeric"
-                  maxLength={5}
-                />
-              </View>
-
-              <View style={[styles.formGroup, {flex: 1}]}>
-                <Text style={styles.formLabel}>CVV</Text>
-                <TextInput
-                  style={styles.formInput}
-                  placeholder="123"
-                  value={cardDetails.cvv}
-                  onChangeText={(text) => setCardDetails({...cardDetails, cvv: text.replace(/\D/g, '')})}
-                  keyboardType="numeric"
-                  maxLength={3}
-                  secureTextEntry
-                />
-              </View>
-            </View>
-
-            <View style={styles.formGroup}>
-              <Text style={styles.formLabel}>Cardholder Name</Text>
-              <TextInput
-                style={styles.formInput}
-                placeholder="John Doe"
-                value={cardDetails.name}
-                onChangeText={(text) => setCardDetails({...cardDetails, name: text})}
-              />
-            </View>
-
-            <View style={styles.securityNote}>
-              <Icon name="lock" size={16} color="#4CAF50" />
-              <Text style={styles.securityText}>Your payment information is secure and encrypted</Text>
-            </View>
-          </ScrollView>
-
-          <View style={styles.modalFooter}>
-            <TouchableOpacity
-              style={[styles.modalButton, styles.cancelModalButton]}
-              onPress={() => setShowAddCardModal(false)}
-            >
-              <Text style={styles.cancelModalButtonText}>Cancel</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.modalButton, styles.saveModalButton]}
-              onPress={handleSaveCard}
-            >
-              <Text style={styles.saveModalButtonText}>Add Card</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
-    </Modal>
-  );
+  const renderHelpSection = () => null; // Help section removed
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -1645,94 +832,8 @@ const ProfileScreen = () => {
           </View>
         </View>
 
-        {/* Navigation Tabs */}
-        <View style={styles.navTabs}>
-          <TouchableOpacity
-            style={[
-              styles.navTab,
-              activeSection === 'profile' && styles.navTabActive,
-            ]}
-            onPress={() => setActiveSection('profile')}
-          >
-            <Icon
-              name="person"
-              size={20}
-              color={activeSection === 'profile' ? '#FFF' : '#4A90E2'}
-            />
-            <Text style={[
-              styles.navTabText,
-              activeSection === 'profile' && styles.navTabTextActive,
-            ]}>
-              Profile
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[
-              styles.navTab,
-              activeSection === 'payments' && styles.navTabActive,
-            ]}
-            onPress={() => setActiveSection('payments')}
-          >
-            <Icon
-              name="payment"
-              size={20}
-              color={activeSection === 'payments' ? '#FFF' : '#4A90E2'}
-            />
-            <Text style={[
-              styles.navTabText,
-              activeSection === 'payments' && styles.navTabTextActive,
-            ]}>
-              Payments
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[
-              styles.navTab,
-              activeSection === 'notifications' && styles.navTabActive,
-            ]}
-            onPress={() => setActiveSection('notifications')}
-          >
-            <Icon
-              name="notifications"
-              size={20}
-              color={activeSection === 'notifications' ? '#FFF' : '#4A90E2'}
-            />
-            <Text style={[
-              styles.navTabText,
-              activeSection === 'notifications' && styles.navTabTextActive,
-            ]}>
-              Notifications
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[
-              styles.navTab,
-              activeSection === 'help' && styles.navTabActive,
-            ]}
-            onPress={() => setActiveSection('help')}
-          >
-            <Icon
-              name="help"
-              size={20}
-              color={activeSection === 'help' ? '#FFF' : '#4A90E2'}
-            />
-            <Text style={[
-              styles.navTabText,
-              activeSection === 'help' && styles.navTabTextActive,
-            ]}>
-              Help
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Active Section Content */}
-        {activeSection === 'profile' && renderProfileSection()}
-        {activeSection === 'payments' && renderPaymentsSection()}
-        {activeSection === 'notifications' && renderNotificationsSection()}
-        {activeSection === 'help' && renderHelpSection()}
+        {/* Active Section Content - Only Profile now */}
+        {renderProfileSection()}
 
         {/* Logout Button */}
         <TouchableOpacity
@@ -1746,9 +847,6 @@ const ProfileScreen = () => {
           </Text>
         </TouchableOpacity>
       </ScrollView>
-
-      {/* Add Card Modal */}
-      <AddCardModal />
     </SafeAreaView>
   );
 };
@@ -1792,45 +890,7 @@ const styles = StyleSheet.create({
     color: '#666',
     marginTop: 4,
   },
-  navTabs: {
-    flexDirection: 'row',
-    backgroundColor: '#FFF',
-    borderRadius: 12,
-    padding: 4,
-    marginBottom: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  navTab: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-    borderRadius: 8,
-  },
-  navTabActive: {
-    backgroundColor: '#4A90E2',
-  },
-  navTabText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#4A90E2',
-    marginLeft: 6,
-  },
-  navTabTextActive: {
-    color: '#FFF',
-  },
   section: {
-    marginBottom: 20,
-  },
-  sectionTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#1A237E',
     marginBottom: 20,
   },
   // Profile Section
@@ -1959,68 +1019,6 @@ const styles = StyleSheet.create({
     color: '#1A1A1A',
     paddingVertical: 4,
   },
-  preferenceRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-  },
-  preferenceLabel: {
-    fontSize: 16,
-    color: '#666',
-  },
-  preferenceValue: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1A1A1A',
-  },
-  dropdownContainer: {
-    position: 'relative',
-    minWidth: 150,
-  },
-  dropdown: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F8F9FA',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#E3E8EF',
-    minWidth: 150,
-  },
-  dropdownText: {
-    fontSize: 16,
-    color: '#1A1A1A',
-    flex: 1,
-  },
-  dropdownMenu: {
-    position: 'absolute',
-    top: '100%',
-    left: 0,
-    right: 0,
-    backgroundColor: '#FFF',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#E3E8EF',
-    marginTop: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-    zIndex: 1000,
-  },
-  dropdownMenuItem: {
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
-  },
-  dropdownMenuItemText: {
-    fontSize: 16,
-    color: '#1A1A1A',
-  },
   specialNeedsContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -2096,207 +1094,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginLeft: 8,
   },
-  // Payments Section
-  paymentsList: {
-    marginBottom: 20,
-  },
-  paymentCard: {
-    backgroundColor: '#FFF',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-  paymentHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  paymentIcon: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: '#F0F8FF',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 16,
-  },
-  paymentInfo: {
-    flex: 1,
-  },
-  paymentName: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#1A237E',
-    marginBottom: 4,
-  },
-  paymentDetails: {
-    fontSize: 14,
-    color: '#666',
-  },
-  defaultBadge: {
-    backgroundColor: '#E8F5E9',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  defaultBadgeText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#2E7D32',
-  },
-  paymentActions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    borderTopWidth: 1,
-    borderTopColor: '#F0F0F0',
-    paddingTop: 16,
-  },
-  paymentActionButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginLeft: 16,
-  },
-  paymentActionText: {
-    fontSize: 14,
-    color: '#666',
-    marginLeft: 4,
-  },
-  removeButton: {
-    marginLeft: 24,
-  },
-  removeText: {
-    color: '#F44336',
-  },
-  addPaymentButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#FFF',
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 2,
-    borderColor: '#E3E8EF',
-    borderStyle: 'dashed',
-    marginBottom: 24,
-  },
-  addPaymentText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#4A90E2',
-    marginLeft: 8,
-  },
-  mobileWallets: {
-    backgroundColor: '#FFF',
-    borderRadius: 16,
-    padding: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-  walletsTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1A237E',
-    marginBottom: 16,
-  },
-  walletsList: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  walletButton: {
-    flex: 1,
-    alignItems: 'center',
-    padding: 16,
-    backgroundColor: '#F8F9FA',
-    borderRadius: 12,
-    marginHorizontal: 8,
-  },
-  walletText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1A1A1A',
-    marginTop: 8,
-    marginBottom: 4,
-  },
-  walletStatus: {
-    fontSize: 12,
-    color: '#666',
-  },
-  // Notifications Section
-  notificationsCard: {
-    backgroundColor: '#FFF',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-  notificationsSubtitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1A237E',
-    marginBottom: 16,
-  },
-  notificationRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-  },
-  notificationInfo: {
-    flex: 1,
-  },
-  notificationLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1A1A1A',
-    marginBottom: 4,
-  },
-  notificationDesc: {
-    fontSize: 14,
-    color: '#666',
-  },
-  saveNotificationsButton: {
-    backgroundColor: '#4A90E2',
-    borderRadius: 12,
-    paddingVertical: 18,
-    alignItems: 'center',
-    marginTop: 10,
-    marginBottom: 20,
-  },
-  saveNotificationsText: {
-    color: '#FFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  // Help Section
-  helpCard: {
-    backgroundColor: '#FFF',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-  helpSubtitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1A237E',
-    marginBottom: 16,
-  },
+  // Help Items
   helpItem: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2343,23 +1141,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
     marginLeft: 12,
-  },
-  legalCard: {
-    backgroundColor: '#FFF',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-  legalTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1A237E',
-    marginBottom: 16,
   },
   legalItem: {
     flexDirection: 'row',
@@ -2419,101 +1200,6 @@ const styles = StyleSheet.create({
   buttonDisabled: {
     borderColor: '#CCC',
     backgroundColor: '#F5F5F5',
-  },
-  // Modal Styles
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'flex-end',
-  },
-  modalContent: {
-    backgroundColor: '#FFF',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    maxHeight: '80%',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#1A237E',
-  },
-  modalBody: {
-    padding: 20,
-  },
-  formGroup: {
-    marginBottom: 20,
-  },
-  formRow: {
-    flexDirection: 'row',
-    marginBottom: 20,
-  },
-  formLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#666',
-    marginBottom: 8,
-  },
-  formInput: {
-    borderWidth: 1,
-    borderColor: '#E3E8EF',
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 16,
-    color: '#1A1A1A',
-    backgroundColor: '#F8F9FA',
-  },
-  securityNote: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 12,
-    backgroundColor: '#E8F5E9',
-    borderRadius: 8,
-    marginTop: 10,
-  },
-  securityText: {
-    fontSize: 12,
-    color: '#2E7D32',
-    marginLeft: 8,
-    flex: 1,
-  },
-  modalFooter: {
-    flexDirection: 'row',
-    padding: 20,
-    borderTopWidth: 1,
-    borderTopColor: '#F0F0F0',
-  },
-  modalButton: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginHorizontal: 8,
-  },
-  cancelModalButton: {
-    backgroundColor: '#FFF',
-    borderWidth: 1,
-    borderColor: '#E3E8EF',
-  },
-  saveModalButton: {
-    backgroundColor: '#4A90E2',
-  },
-  cancelModalButtonText: {
-    color: '#666',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  saveModalButtonText: {
-    color: '#FFF',
-    fontSize: 16,
-    fontWeight: '600',
   },
 });
 

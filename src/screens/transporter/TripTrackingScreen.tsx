@@ -95,7 +95,7 @@ const TripTrackingScreen = () => {
           .doc(tripId)
           .onSnapshot(
             (doc) => {
-              if (doc.exists) {
+              if ((doc as any).exists) {
                 const data = doc.data();
                 setTripData({
                   id: doc.id,

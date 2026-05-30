@@ -78,19 +78,19 @@ const AddDriverScreen = () => {
     setFormData(prev => ({ ...prev, [key]: value }));
   }, []);
 
-  const emailCheckTimeout = useRef<NodeJS.Timeout>();
+  const emailCheckTimeout = useRef<any>(null);
   const [emailError, setEmailError] = useState('');
 
   // Load existing driver data if in edit mode
   useEffect(() => {
     if (mode === 'edit' && driver) {
       // Map old status to new status if needed
-      let mappedStatus = driver.status;
-      if (driver.status === 'active' || driver.status === 'online') {
+      let mappedStatus = driver.status as string;
+      if (mappedStatus === 'active' || mappedStatus === 'online') {
         mappedStatus = DRIVER_STATUS.AVAILABLE;
-      } else if (driver.status === 'on-duty') {
+      } else if (mappedStatus === 'on-duty') {
         mappedStatus = DRIVER_STATUS.ON_TRIP;
-      } else if (driver.status === 'inactive' || driver.status === 'offline') {
+      } else if (mappedStatus === 'inactive' || mappedStatus === 'offline') {
         mappedStatus = DRIVER_STATUS.OFFLINE;
       }
 

@@ -48,10 +48,13 @@ export const DRIVER_STATUS_CONFIG: Record<DriverStatusType, { label: string; ico
 // ============================================
 export const TRIP_STATUS = {
   SCHEDULED: 'scheduled',
-  IN_PROGRESS: 'in_progress',
+  BOARDING: 'boarding',
+  IN_PROGRESS: 'active',
+  ACTIVE: 'active',
   DELAYED: 'delayed',
   COMPLETED: 'completed',
   CANCELLED: 'cancelled',
+  EXPIRED: 'expired',
 } as const;
 
 export type TripStatusType = typeof TRIP_STATUS[keyof typeof TRIP_STATUS];
@@ -59,14 +62,13 @@ export type TripStatusType = typeof TRIP_STATUS[keyof typeof TRIP_STATUS];
 // Trip status display configuration
 export const TRIP_STATUS_CONFIG: Record<TripStatusType, { label: string; icon: string; color: string }> = {
   [TRIP_STATUS.SCHEDULED]: { label: 'Scheduled', icon: '📅', color: '#9C27B0' },
-  [TRIP_STATUS.IN_PROGRESS]: { label: 'In Progress', icon: '🚌', color: '#2196F3' },
+  [TRIP_STATUS.BOARDING]: { label: 'Boarding', icon: '👥', color: '#FF9800' },
+  [TRIP_STATUS.IN_PROGRESS]: { label: 'Active', icon: '🚌', color: '#2196F3' },
   [TRIP_STATUS.DELAYED]: { label: 'Delayed', icon: '⚠️', color: '#FF9800' },
   [TRIP_STATUS.COMPLETED]: { label: 'Completed', icon: '✅', color: '#4CAF50' },
   [TRIP_STATUS.CANCELLED]: { label: 'Cancelled', icon: '❌', color: '#F44336' },
+  [TRIP_STATUS.EXPIRED]: { label: 'Expired', icon: '⏰', color: '#FF6B6B' },
 };
-
-// Computed status for expired trips
-export const EXPIRED_TRIP_CONFIG = { label: 'Expired', icon: '⏰', color: '#FF6B6B' };
 
 // ============================================
 // SCHEDULE STATUS
@@ -118,12 +120,15 @@ export const migrateTripStatus = (oldStatus: string): TripStatusType => {
   const mapping: Record<string, TripStatusType> = {
     'upcoming': TRIP_STATUS.SCHEDULED,
     'scheduled': TRIP_STATUS.SCHEDULED,
+    'boarding': TRIP_STATUS.BOARDING,
     'active': TRIP_STATUS.IN_PROGRESS,
     'in-progress': TRIP_STATUS.IN_PROGRESS,
+    'in_progress': TRIP_STATUS.IN_PROGRESS,
     'on-time': TRIP_STATUS.IN_PROGRESS,
     'delayed': TRIP_STATUS.DELAYED,
     'completed': TRIP_STATUS.COMPLETED,
     'cancelled': TRIP_STATUS.CANCELLED,
+    'expired': TRIP_STATUS.EXPIRED,
   };
   return mapping[oldStatus] || TRIP_STATUS.SCHEDULED;
 };

@@ -65,7 +65,7 @@ const AddBusScreen = () => {
   const effectiveTransporterId = routeTransporterId || user?.uid;
 
   // Debounce ref for duplicate check
-  const duplicateCheckTimeout = useRef<NodeJS.Timeout>();
+  const duplicateCheckTimeout = useRef<any>(null);
 
   // Update field helper
   const updateField = useCallback((key: string, value: any) => {
@@ -333,7 +333,7 @@ const AddBusScreen = () => {
 
         const transporterRef = firestore().collection('transporters').doc(transporterId);
         const transporterDoc = await transporterRef.get();
-        if (transporterDoc.exists) {
+        if ((transporterDoc as any).exists) {
           await transporterRef.update({
             busesCount: firestore.FieldValue.increment(1),
             updatedAt: firestore.FieldValue.serverTimestamp(),

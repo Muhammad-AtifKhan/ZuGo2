@@ -41,7 +41,7 @@ export const loadUserProfileFromFirestore = async (
   const uid = firebaseUser.uid;
   const userSnap = await firestore().collection('users').doc(uid).get();
 
-  if (!userSnap.exists) {
+  if (!(userSnap as any).exists) {
     return null;
   }
 
@@ -73,7 +73,7 @@ export const loadUserProfileFromFirestore = async (
 
   if (userType === 'driver') {
     const driverSnap = await firestore().collection('drivers').doc(uid).get();
-    const driverData = driverSnap.exists ? driverSnap.data() || {} : {};
+    const driverData = (driverSnap as any).exists ? driverSnap.data() || {} : {};
 
     return {
       ...base,
@@ -96,7 +96,7 @@ export const loadUserProfileFromFirestore = async (
       .collection('transporters')
       .doc(uid)
       .get();
-    const transporterData = transporterSnap.exists
+    const transporterData = (transporterSnap as any).exists
       ? transporterSnap.data() || {}
       : {};
 
@@ -122,7 +122,7 @@ export const loadUserProfileFromFirestore = async (
       .collection('passengers')
       .doc(uid)
       .get();
-    const passengerData = passengerSnap.exists
+    const passengerData = (passengerSnap as any).exists
       ? passengerSnap.data() || {}
       : {};
 

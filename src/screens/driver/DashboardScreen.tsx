@@ -255,9 +255,11 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
     // ✅ Map Firebase status to standardized status
     let status = data.status;
     if (status === 'upcoming' || status === 'scheduled') status = TRIP_STATUS.SCHEDULED;
-    if (status === 'active' || status === 'on-time' || status === 'in-progress') status = TRIP_STATUS.IN_PROGRESS;
-    if (status === 'vehicle_check') status = TRIP_STATUS.SCHEDULED; // Vehicle check is pre-trip
-    if (status === 'boarding') status = TRIP_STATUS.SCHEDULED; // Boarding is pre-trip
+    if (status === 'boarding') status = TRIP_STATUS.BOARDING;
+    if (status === 'active' || status === 'on-time' || status === 'in-progress' || status === 'in_progress') status = TRIP_STATUS.IN_PROGRESS;
+    if (status === 'expired') status = TRIP_STATUS.EXPIRED;
+    if (status === 'completed') status = TRIP_STATUS.COMPLETED;
+    if (status === 'cancelled') status = TRIP_STATUS.CANCELLED;
 
     return {
       id: doc.id,
@@ -291,29 +293,32 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
     };
   };
 
-  const canStartTrip = (departureTime: string): boolean => {
+  const canStartTrip = (departureTime: string, dutyDate?: string): boolean => {
     if (!departureTime) return false;
     const now = new Date();
     const [hours, minutes] = departureTime.split(':');
-    const departureDateTime = new Date();
+    // Use the actual trip date if provided, otherwise fall back to today
+    const departureDateTime = dutyDate ? new Date(dutyDate) : new Date();
     departureDateTime.setHours(parseInt(hours), parseInt(minutes), 0, 0);
     const timeDiff = departureDateTime.getTime() - now.getTime();
     const minutesDiff = timeDiff / (1000 * 60);
-    return minutesDiff <= 15 && minutesDiff >= -30;
+    // Allow starting duty from 45 minutes before scheduled time up to 60 minutes after scheduled time
+    return minutesDiff <= 45 && minutesDiff >= -60;
   };
 
-  const calculateTimeLeft = (departureTime: string): string => {
+  const calculateTimeLeft = (departureTime: string, dutyDate?: string): string => {
     if (!departureTime) return '';
     const now = new Date();
     const [hours, minutes] = departureTime.split(':');
-    const departureDateTime = new Date();
+    // Use the actual trip date if provided, otherwise fall back to today
+    const departureDateTime = dutyDate ? new Date(dutyDate) : new Date();
     departureDateTime.setHours(parseInt(hours), parseInt(minutes), 0, 0);
     const timeDiff = departureDateTime.getTime() - now.getTime();
     const minutesDiff = Math.floor(timeDiff / (1000 * 60));
     if (minutesDiff <= 0) {
       const absMinutes = Math.abs(minutesDiff);
-      if (absMinutes <= 30) return `Late by ${absMinutes} min`;
-      return 'Departed';
+      if (absMinutes <= 60) return `Late by ${absMinutes} min`;
+      return 'Expired';
     }
     if (minutesDiff < 60) return `Starts in ${minutesDiff} min`;
     const hoursDiff = Math.floor(minutesDiff / 60);
@@ -331,7 +336,7 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
       const activeTrips = await firestore()
         .collection('trips')
         .where('busId', '==', busId)
-        .where('status', 'in', [TRIP_STATUS.IN_PROGRESS, TRIP_STATUS.SCHEDULED])
+        .where('status', 'in', [TRIP_STATUS.IN_PROGRESS, TRIP_STATUS.SCHEDULED, TRIP_STATUS.BOARDING])
         .get();
 
       const conflictingTrip = activeTrips.docs.find(doc => doc.id !== tripId);
@@ -405,6 +410,8 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
 
     if (tripStatus === TRIP_STATUS.SCHEDULED) {
       navigation.navigate('VehicleCheck', { tripId: currentTripId });
+    } else if (tripStatus === TRIP_STATUS.BOARDING) {
+      navigation.navigate('Boarding', { tripId: currentTripId });
     } else if (tripStatus === TRIP_STATUS.IN_PROGRESS) {
       navigation.navigate('Route', { tripId: currentTripId });
     } else {
@@ -416,15 +423,21 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
   const handleStartDuty = async (dutyId: string) => {
     if (!user || !driverUid) return;
 
-    if (driverStatus !== DRIVER_STATUS.AVAILABLE) {
+    const duty = allDuties.find(d => d.id === dutyId);
+    if (!duty) return;
+
+    // Bypassing online check if it's the current trip being resumed
+    if (driverStatus !== DRIVER_STATUS.AVAILABLE && currentTripId !== duty.id) {
       Alert.alert('Cannot Start Duty', 'Please go online first before starting a duty.');
       return;
     }
 
-    const duty = allDuties.find(d => d.id === dutyId);
-    if (!duty) return;
+    if (driverStatus === DRIVER_STATUS.ON_TRIP && currentTripId === duty.id) {
+      navigateBasedOnTripStatus(currentTripStatus);
+      return;
+    }
 
-    if (hasActiveTrip()) {
+    if (hasActiveTrip() && currentTripId !== duty.id) {
       Alert.alert(
         'Cannot Start Duty',
         'You already have an active trip. Please complete or end that trip first.'
@@ -437,13 +450,30 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
       return;
     }
 
+    if (duty.status === TRIP_STATUS.BOARDING) {
+      navigation.navigate('Boarding', {
+        tripId: duty.id,
+        dutyDetails: {
+          busId: duty.busId,
+          busNumber: duty.busNumber,
+          routeName: duty.routeName,
+          timeSlot: duty.timeSlot,
+          date: duty.date,
+          from: duty.from,
+          to: duty.to,
+          distance: duty.distance
+        }
+      });
+      return;
+    }
+
     if (duty.status === TRIP_STATUS.SCHEDULED) {
-      const canStart = canStartTrip(duty.startTime);
+      const canStart = canStartTrip(duty.startTime, duty.startDate);
       if (!canStart) {
-        const timeLeftMsg = calculateTimeLeft(duty.startTime);
+        const timeLeftMsg = calculateTimeLeft(duty.startTime, duty.startDate);
         Alert.alert(
           'Cannot Start Duty Yet',
-          `You can start duty 15 minutes before departure time.\n\n${timeLeftMsg}`,
+          `You can start duty 45 minutes before departure time.\n\n${timeLeftMsg}`,
           [{ text: 'OK' }]
         );
         return;
@@ -756,20 +786,39 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
   };
 
   const getButtonText = (status: string, duty: Duty): string => {
-    if (driverStatus === DRIVER_STATUS.ON_TRIP && status === TRIP_STATUS.IN_PROGRESS) return 'GO TO ROUTE';
-    if (driverStatus === DRIVER_STATUS.ON_TRIP && status === TRIP_STATUS.SCHEDULED) return 'RESUME CHECK';
     if (status === TRIP_STATUS.COMPLETED) return 'COMPLETED';
+    if (status === TRIP_STATUS.EXPIRED) return 'EXPIRED';
+
+    // Check computed expiration — pass duty's actual date so future trips are not mistaken as expired
+    const timeLeftText = calculateTimeLeft(duty.startTime, duty.startDate);
+    if (timeLeftText === 'Expired' && (status === TRIP_STATUS.SCHEDULED || status === TRIP_STATUS.BOARDING)) {
+      return 'EXPIRED';
+    }
+
+    if (driverStatus === DRIVER_STATUS.ON_TRIP && status === TRIP_STATUS.IN_PROGRESS) return 'GO TO ROUTE';
+    if (driverStatus === DRIVER_STATUS.ON_TRIP && status === TRIP_STATUS.BOARDING) return 'GO TO BOARDING';
+    if (driverStatus === DRIVER_STATUS.ON_TRIP && status === TRIP_STATUS.SCHEDULED) return 'RESUME CHECK';
+
+    if (status === TRIP_STATUS.BOARDING) return 'GO TO BOARDING';
     if (status === TRIP_STATUS.SCHEDULED) {
-      const canStart = canStartTrip(duty.startTime);
+      const canStart = canStartTrip(duty.startTime, duty.startDate);
       return canStart ? 'START DUTY' : 'WAITING';
     }
     return 'START DUTY';
   };
 
   const isButtonDisabled = (status: string, duty: Duty): boolean => {
-    if (status === TRIP_STATUS.COMPLETED) return true;
+    if (status === TRIP_STATUS.COMPLETED || status === TRIP_STATUS.EXPIRED) return true;
+
+    // Pass duty's actual date so future trips are not mistaken as expired
+    const timeLeftText = calculateTimeLeft(duty.startTime, duty.startDate);
+    if (timeLeftText === 'Expired' && (status === TRIP_STATUS.SCHEDULED || status === TRIP_STATUS.BOARDING)) {
+      return true;
+    }
+
+    if (status === TRIP_STATUS.BOARDING) return false;
     if (status === TRIP_STATUS.SCHEDULED) {
-      const canStart = canStartTrip(duty.startTime);
+      const canStart = canStartTrip(duty.startTime, duty.startDate);
       return !canStart;
     }
     return false;
@@ -777,6 +826,7 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
 
   const renderDutyCard = (duty: Duty) => {
     const isActive = duty.status === TRIP_STATUS.IN_PROGRESS ||
+                     duty.status === TRIP_STATUS.BOARDING ||
                      (driverStatus === DRIVER_STATUS.ON_TRIP && currentTripId === duty.id);
     const buttonText = getButtonText(duty.status, duty);
     const disabled = isButtonDisabled(duty.status, duty);
@@ -824,7 +874,7 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
           <TouchableOpacity
             style={[
               styles.actionButton,
-              duty.status === TRIP_STATUS.IN_PROGRESS ? styles.activeButton :
+              (duty.status === TRIP_STATUS.IN_PROGRESS || duty.status === TRIP_STATUS.BOARDING) ? styles.activeButton :
               duty.status === TRIP_STATUS.SCHEDULED && driverStatus === DRIVER_STATUS.ON_TRIP ? styles.vehicleCheckButton :
               styles.startButton,
               disabled && styles.disabledButton
@@ -833,7 +883,7 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
               if (disabled && duty.status === TRIP_STATUS.SCHEDULED) {
                 Alert.alert(
                   'Cannot Start Yet',
-                  `You can start duty 15 minutes before departure.\n\n${timeLeftText}`,
+                  `You can start duty 45 minutes before departure.\n\n${timeLeftText}`,
                   [{ text: 'OK' }]
                 );
                 return;
@@ -845,6 +895,7 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
             <Text style={[
               styles.actionButtonText,
               (duty.status === TRIP_STATUS.IN_PROGRESS ||
+               duty.status === TRIP_STATUS.BOARDING ||
                (duty.status === TRIP_STATUS.SCHEDULED && driverStatus === DRIVER_STATUS.ON_TRIP)) && styles.activeButtonText,
               disabled && styles.disabledButtonText
             ]}>
@@ -997,8 +1048,8 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
             const timeLeftMap: { [key: string]: string } = {};
             const canStartMap: { [key: string]: boolean } = {};
             todayTripsData.forEach(trip => {
-              timeLeftMap[trip.id] = calculateTimeLeft(trip.startTime);
-              canStartMap[trip.id] = canStartTrip(trip.startTime);
+              timeLeftMap[trip.id] = calculateTimeLeft(trip.startTime, trip.startDate);
+              canStartMap[trip.id] = canStartTrip(trip.startTime, trip.startDate);
             });
 
             if (isMountedRef.current) {

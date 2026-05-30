@@ -72,12 +72,17 @@ type DriverPerformance = {
 
 const ReportsProfileScreen = () => {
   const navigation = useNavigation<NavigationProp>();
-  const [activeTab, setActiveTab] = useState('reports'); // reports, profile, settings
+  const [activeTab, setActiveTab] = useState('reports'); // reports, profile (settings removed)
   const [reportType, setReportType] = useState('daily'); // daily, monthly
   const [loading, setLoading] = useState(true);
-  const [settingsLoading, setSettingsLoading] = useState(false); // 👈 NEW
   const [refreshing, setRefreshing] = useState(false);
   const [logoutLoading, setLogoutLoading] = useState(false);
+
+  // Modal states for Help & Support
+  const [faqModalVisible, setFaqModalVisible] = useState(false);
+  const [contactModalVisible, setContactModalVisible] = useState(false);
+  const [termsModalVisible, setTermsModalVisible] = useState(false);
+  const [privacyModalVisible, setPrivacyModalVisible] = useState(false);
 
   // Firebase data states
   const [dailyRevenue, setDailyRevenue] = useState<DailyRevenue[]>([]);
@@ -96,15 +101,6 @@ const ReportsProfileScreen = () => {
     cancelledTrips: 0,
   });
 
-  // Settings state - with default values
-  const [settings, setSettings] = useState({
-    notifications: true,
-    emailReports: true,
-    lowBusAlert: true,
-    maintenanceReminders: true,
-    autoGenerateReports: false,
-  });
-
   // Profile state
   const [profileModalVisible, setProfileModalVisible] = useState(false);
   const [companyInfo, setCompanyInfo] = useState({
@@ -121,34 +117,6 @@ const ReportsProfileScreen = () => {
 
   const user = auth().currentUser;
 
-  // ========== LOAD SETTINGS SPECIFICALLY ==========
-  const loadSettings = useCallback(async () => {
-    if (!user) return;
-
-    setSettingsLoading(true);
-    try {
-      const settingsDoc = await firestore()
-        .collection('settings')
-        .doc(user.uid)
-        .get();
-
-      if (settingsDoc.exists) {
-        setSettings(settingsDoc.data() as typeof settings);
-      }
-    } catch (error) {
-      console.error('Error loading settings:', error);
-    } finally {
-      setSettingsLoading(false);
-    }
-  }, [user]);
-
-  // Load settings when settings tab is opened
-  useEffect(() => {
-    if (activeTab === 'settings') {
-      loadSettings();
-    }
-  }, [activeTab, loadSettings]);
-
   // ========== FETCH DATA FROM FIREBASE ==========
   const fetchAllData = useCallback(async () => {
     if (!user) return;
@@ -162,7 +130,7 @@ const ReportsProfileScreen = () => {
         .doc(user.uid)
         .get();
 
-      if (companyDoc.exists) {
+      if ((companyDoc as any).exists) {
         const data = companyDoc.data();
         setCompanyInfo({
           name: data?.companyName || 'ZUGO Transport',
@@ -186,7 +154,7 @@ const ReportsProfileScreen = () => {
       const buses = busesSnapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data(),
-      }));
+      } as any));
 
       // Fetch drivers for stats
       const driversSnapshot = await firestore()
@@ -197,7 +165,7 @@ const ReportsProfileScreen = () => {
       const drivers = driversSnapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data(),
-      }));
+      } as any));
 
       // Fetch trips for stats
       const tripsSnapshot = await firestore()
@@ -210,11 +178,11 @@ const ReportsProfileScreen = () => {
       const trips = tripsSnapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data(),
-      }));
+      } as any));
 
       // Calculate stats
-      const activeBuses = buses.filter(b => b.status === 'active').length;
-      const activeDrivers = drivers.filter(d => d.status === 'active' || d.status === 'on-duty').length;
+      const activeBuses = buses.filter(b => b.status === 'active' || b.status === 'available').length;
+      const activeDrivers = drivers.filter(d => d.status === 'active' || d.status === 'available' || d.status === 'on-duty').length;
       const completedTrips = trips.filter(t => t.status === 'completed').length;
       const cancelledTrips = trips.filter(t => t.status === 'cancelled').length;
 
@@ -240,7 +208,7 @@ const ReportsProfileScreen = () => {
 
       setStats({
         totalRevenue,
-        avgDailyRevenue: Math.round(totalRevenue / 30), // Approx daily average
+        avgDailyRevenue: Math.round(totalRevenue / 30),
         totalTrips,
         avgRating: parseFloat(avgRating.toFixed(1)),
         activeBuses,
@@ -258,7 +226,6 @@ const ReportsProfileScreen = () => {
         date.setDate(date.getDate() - i);
         const dayName = days[date.getDay()];
 
-        // Filter trips for this date
         const dayTrips = trips.filter(trip => {
           const tripDate = trip.startDate ? new Date(trip.startDate) : null;
           return tripDate && tripDate.toDateString() === date.toDateString();
@@ -285,7 +252,6 @@ const ReportsProfileScreen = () => {
         date.setMonth(date.getMonth() - i);
         const monthName = months[date.getMonth()];
 
-        // Filter trips for this month
         const monthTrips = trips.filter(trip => {
           const tripDate = trip.startDate ? new Date(trip.startDate) : null;
           return tripDate &&
@@ -359,24 +325,6 @@ const ReportsProfileScreen = () => {
     fetchAllData();
   }, [fetchAllData]);
 
-  // ========== SETTINGS FUNCTIONS ==========
-  const toggleSetting = async (key: keyof typeof settings) => {
-    const newSettings = { ...settings, [key]: !settings[key] };
-    setSettings(newSettings);
-
-    if (!user) return;
-
-    try {
-      await firestore()
-        .collection('settings')
-        .doc(user.uid)
-        .set(newSettings, { merge: true });
-    } catch (error) {
-      console.error('Error saving settings:', error);
-      Alert.alert('Error', 'Failed to save settings');
-    }
-  };
-
   // ========== PROFILE FUNCTIONS ==========
   const handleUpdateProfile = async () => {
     if (!user) return;
@@ -406,32 +354,57 @@ const ReportsProfileScreen = () => {
 
   // ========== LOGOUT FUNCTION ==========
   const handleLogout = () => {
-  Alert.alert(
-    'Logout',
-    'Are you sure you want to logout?',
-    [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Logout',
-        style: 'destructive',
-        onPress: async () => {
-          setLogoutLoading(true);
-          try {
-            await auth().signOut();
-            // 🚫 DO NOT NAVIGATE
-            // RootNavigator will auto-switch to AuthNavigator
-          } catch (error) {
-            console.error('Logout error:', error);
-            Alert.alert('Error', 'Failed to logout.');
-          } finally {
-            setLogoutLoading(false);
-          }
+    Alert.alert(
+      'Logout',
+      'Are you sure you want to logout?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Logout',
+          style: 'destructive',
+          onPress: async () => {
+            setLogoutLoading(true);
+            try {
+              await auth().signOut();
+            } catch (error) {
+              console.error('Logout error:', error);
+              Alert.alert('Error', 'Failed to logout.');
+            } finally {
+              setLogoutLoading(false);
+            }
+          },
         },
-      },
-    ],
-    { cancelable: true }
+      ],
+      { cancelable: true }
+    );
+  };
+
+  // ========== HELP MODAL COMPONENT ==========
+  const renderHelpModal = (title: string, content: string, visible: boolean, onClose: () => void) => (
+    <Modal
+      animationType="slide"
+      transparent={true}
+      visible={visible}
+      onRequestClose={onClose}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={styles.helpModalContainer}>
+          <View style={styles.helpModalHeader}>
+            <Text style={styles.helpModalTitle}>{title}</Text>
+            <TouchableOpacity onPress={onClose}>
+              <Text style={styles.helpModalClose}>✕</Text>
+            </TouchableOpacity>
+          </View>
+          <ScrollView style={styles.helpModalBody}>
+            <Text style={styles.helpModalContent}>{content}</Text>
+          </ScrollView>
+          <TouchableOpacity style={styles.helpModalButton} onPress={onClose}>
+            <Text style={styles.helpModalButtonText}>Close</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
   );
-};
 
   // ========== RENDER FUNCTIONS ==========
   const renderBarChart = (data: any[], maxValue: number, color: string, label: string) => {
@@ -665,127 +638,42 @@ const ReportsProfileScreen = () => {
           </View>
         </View>
       </View>
+
+      {/* Help & Support Section - Moved from Settings */}
+      <View style={[styles.sectionCard, SHADOWS.medium]}>
+        <Text style={styles.sectionTitle}>🆘 Help & Support</Text>
+
+        <TouchableOpacity style={styles.helpItem} onPress={() => setFaqModalVisible(true)}>
+          <Text style={styles.helpItemText}>📚 FAQ & Guides</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.helpItem} onPress={() => setContactModalVisible(true)}>
+          <Text style={styles.helpItemText}>📞 Contact Support</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.helpItem} onPress={() => setTermsModalVisible(true)}>
+          <Text style={styles.helpItemText}>📖 Terms & Conditions</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.helpItem} onPress={() => setPrivacyModalVisible(true)}>
+          <Text style={styles.helpItemText}>🔒 Privacy Policy</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Logout Button */}
+      <TouchableOpacity
+        style={[styles.logoutButton, logoutLoading && styles.buttonDisabled]}
+        onPress={handleLogout}
+        disabled={logoutLoading}
+      >
+        {logoutLoading ? (
+          <Text style={styles.logoutButtonText}>Logging out...</Text>
+        ) : (
+          <Text style={styles.logoutButtonText}>🚪 Logout</Text>
+        )}
+      </TouchableOpacity>
     </ScrollView>
   );
-
-  const renderSettingsSection = () => {
-    // 👇 AGAR SETTINGS LOAD HO RAHI HAIN TO LOADER DIKHAO
-    if (settingsLoading) {
-      return (
-        <View style={styles.centerContainer}>
-          <ActivityIndicator size="large" color={COLORS.primary} />
-          <Text style={styles.loadingText}>Loading settings...</Text>
-        </View>
-      );
-    }
-
-    // 👇 SETTINGS AVAILABLE HAIN TO RENDER KARO
-    return (
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-      >
-        {/* Notification Settings */}
-        <View style={[styles.sectionCard, SHADOWS.medium]}>
-          <Text style={styles.sectionTitle}>🔔 Notification Settings</Text>
-
-          <View style={styles.settingItem}>
-            <View style={styles.settingInfo}>
-              <Text style={styles.settingLabel}>Push Notifications</Text>
-              <Text style={styles.settingDescription}>Receive alerts on your device</Text>
-            </View>
-            <Switch
-              value={settings?.notifications ?? true}
-              onValueChange={() => toggleSetting('notifications')}
-              trackColor={{ false: COLORS.border, true: COLORS.secondary }}
-            />
-          </View>
-
-          <View style={styles.settingItem}>
-            <View style={styles.settingInfo}>
-              <Text style={styles.settingLabel}>Email Reports</Text>
-              <Text style={styles.settingDescription}>Daily/weekly reports via email</Text>
-            </View>
-            <Switch
-              value={settings?.emailReports ?? true}
-              onValueChange={() => toggleSetting('emailReports')}
-              trackColor={{ false: COLORS.border, true: COLORS.secondary }}
-            />
-          </View>
-
-          <View style={styles.settingItem}>
-            <View style={styles.settingInfo}>
-              <Text style={styles.settingLabel}>Low Bus Alert</Text>
-              <Text style={styles.settingDescription}>Alert when bus count is low</Text>
-            </View>
-            <Switch
-              value={settings?.lowBusAlert ?? true}
-              onValueChange={() => toggleSetting('lowBusAlert')}
-              trackColor={{ false: COLORS.border, true: COLORS.secondary }}
-            />
-          </View>
-
-          <View style={styles.settingItem}>
-            <View style={styles.settingInfo}>
-              <Text style={styles.settingLabel}>Maintenance Reminders</Text>
-              <Text style={styles.settingDescription}>Remind for bus maintenance</Text>
-            </View>
-            <Switch
-              value={settings?.maintenanceReminders ?? true}
-              onValueChange={() => toggleSetting('maintenanceReminders')}
-              trackColor={{ false: COLORS.border, true: COLORS.secondary }}
-            />
-          </View>
-        </View>
-
-        {/* App Settings */}
-        <View style={[styles.sectionCard, SHADOWS.medium]}>
-          <Text style={styles.sectionTitle}>📱 App Settings</Text>
-
-          <View style={styles.settingItem}>
-            <Text style={styles.settingLabel}>App Version</Text>
-            <Text style={styles.settingValue}>1.0.0</Text>
-          </View>
-        </View>
-
-        {/* Help & Support */}
-        <View style={[styles.sectionCard, SHADOWS.medium]}>
-          <Text style={styles.sectionTitle}>🆘 Help & Support</Text>
-
-          <TouchableOpacity style={styles.helpItem}>
-            <Text style={styles.helpItemText}>📚 FAQ & Guides</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.helpItem}>
-            <Text style={styles.helpItemText}>📞 Contact Support</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.helpItem}>
-            <Text style={styles.helpItemText}>📖 Terms & Conditions</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.helpItem}>
-            <Text style={styles.helpItemText}>🔒 Privacy Policy</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Logout Button */}
-        <TouchableOpacity
-          style={[styles.logoutButton, logoutLoading && styles.buttonDisabled]}
-          onPress={handleLogout}
-          disabled={logoutLoading}
-        >
-          {logoutLoading ? (
-            <Text style={styles.logoutButtonText}>Logging out...</Text>
-          ) : (
-            <Text style={styles.logoutButtonText}>🚪 Logout</Text>
-          )}
-        </TouchableOpacity>
-      </ScrollView>
-    );
-  };
 
   if (loading) {
     return (
@@ -806,7 +694,7 @@ const ReportsProfileScreen = () => {
         </View>
       </View>
 
-      {/* Tabs */}
+      {/* Tabs - Only Reports and Profile (Settings Removed) */}
       <View style={styles.tabContainer}>
         <TouchableOpacity
           style={[styles.tab, activeTab === 'reports' && styles.tabActive]}
@@ -824,21 +712,12 @@ const ReportsProfileScreen = () => {
             🏢 Profile
           </Text>
         </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tab, activeTab === 'settings' && styles.tabActive]}
-          onPress={() => setActiveTab('settings')}
-        >
-          <Text style={[styles.tabText, activeTab === 'settings' && styles.tabTextActive]}>
-            ⚙️ Settings
-          </Text>
-        </TouchableOpacity>
       </View>
 
       {/* Content */}
       <View style={styles.contentContainer}>
         {activeTab === 'reports' && renderReportSection()}
         {activeTab === 'profile' && renderProfileSection()}
-        {activeTab === 'settings' && renderSettingsSection()}
       </View>
 
       {/* Edit Profile Modal */}
@@ -922,6 +801,35 @@ const ReportsProfileScreen = () => {
           </ScrollView>
         </View>
       </Modal>
+
+      {/* Help & Support Modals */}
+      {renderHelpModal(
+        '📚 FAQ & Guides',
+        'Welcome to ZUGO Transport Help Center.\n\nHere you can learn how to manage buses, drivers, routes, bookings, revenue reports, and transporter settings. Our step-by-step guides help transport companies operate efficiently using the ZUGO platform.\n\n📌 Quick Guides:\n• Adding and managing buses\n• Driver onboarding and management\n• Creating and scheduling routes\n• Managing bookings and passengers\n• Tracking revenue and generating reports\n• Handling maintenance and alerts',
+        faqModalVisible,
+        () => setFaqModalVisible(false)
+      )}
+
+      {renderHelpModal(
+        '📞 Contact Support',
+        'Need assistance?\n\nThe ZUGO Support Team is available to help you with technical issues, account problems, trip management, payment concerns, and app-related guidance. Contact us anytime for quick and reliable support.\n\n📧 Email: support@zugo.com\n📞 Phone: +92 21 1234567\n💬 Live Chat: Available 24/7 in app\n🕐 Support Hours: 8 AM - 10 PM (Monday to Saturday)\n\nFor urgent issues, please call our helpline directly.',
+        contactModalVisible,
+        () => setContactModalVisible(false)
+      )}
+
+      {renderHelpModal(
+        '📖 Terms & Conditions',
+        'By using ZUGO Transport Services, you agree to follow our operational policies, booking regulations, transporter responsibilities, and platform usage rules. ZUGO ensures a secure and transparent transport management experience for all users.\n\n🔹 Key Terms:\n• Transporters are responsible for accurate bus and trip information\n• All bookings must be confirmed and managed through the platform\n• Cancellation policies apply as per the booking terms\n• Revenue sharing is processed according to agreed terms\n• ZUGO reserves the right to suspend accounts violating terms\n• Data privacy and security are our top priorities\n\nFor complete terms, please visit our website or contact support.',
+        termsModalVisible,
+        () => setTermsModalVisible(false)
+      )}
+
+      {renderHelpModal(
+        '🔒 Privacy Policy',
+        'ZUGO values your privacy and protects your personal and business information. All transporter data, passenger details, trip records, and payment information are securely stored and managed according to our privacy standards.\n\n🔐 Our Privacy Commitments:\n• We collect only necessary information for service delivery\n• Your data is encrypted and stored securely\n• We never share your information without consent\n• You can request data deletion at any time\n• Regular security audits ensure data protection\n• Compliance with local data protection laws\n\nFor privacy-related queries, contact our Data Protection Officer at privacy@zugo.com',
+        privacyModalVisible,
+        () => setPrivacyModalVisible(false)
+      )}
     </SafeAreaView>
   );
 };
@@ -1227,29 +1135,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: COLORS.textLight,
   },
-  settingItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: SIZES.lg,
-  },
-  settingInfo: {
-    flex: 1,
-  },
-  settingLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: COLORS.text,
-    marginBottom: 2,
-  },
-  settingDescription: {
-    fontSize: 12,
-    color: COLORS.textLight,
-  },
-  settingValue: {
-    fontSize: 14,
-    color: COLORS.textLight,
-  },
   helpItem: {
     paddingVertical: SIZES.sm,
     borderBottomWidth: 1,
@@ -1330,6 +1215,54 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   saveButtonText: {
+    color: COLORS.white,
+    fontWeight: '600',
+    fontSize: 16,
+  },
+  // Help Modal Styles
+  helpModalContainer: {
+    backgroundColor: COLORS.white,
+    borderRadius: SIZES.md,
+    width: '85%',
+    maxHeight: '70%',
+    overflow: 'hidden',
+  },
+  helpModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: SIZES.md,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+    backgroundColor: COLORS.primary,
+  },
+  helpModalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: COLORS.white,
+  },
+  helpModalClose: {
+    fontSize: 20,
+    color: COLORS.white,
+    fontWeight: '600',
+  },
+  helpModalBody: {
+    padding: SIZES.lg,
+    maxHeight: '70%',
+  },
+  helpModalContent: {
+    fontSize: 15,
+    color: COLORS.text,
+    lineHeight: 24,
+  },
+  helpModalButton: {
+    backgroundColor: COLORS.secondary,
+    padding: SIZES.md,
+    margin: SIZES.md,
+    borderRadius: SIZES.xs,
+    alignItems: 'center',
+  },
+  helpModalButtonText: {
     color: COLORS.white,
     fontWeight: '600',
     fontSize: 16,

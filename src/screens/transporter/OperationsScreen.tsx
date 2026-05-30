@@ -236,7 +236,7 @@ const OperationsScreen = () => {
       .doc(user.uid)
       .onSnapshot(
         (doc) => {
-          if (doc.exists) {
+          if ((doc as any).exists) {
             setTransporterName(doc.data()?.fullName || 'Transporter');
           }
         },

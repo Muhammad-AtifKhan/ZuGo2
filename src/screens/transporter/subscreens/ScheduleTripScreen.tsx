@@ -531,28 +531,53 @@ const ScheduleTripScreen = () => {
       const db = firestore();
       const batch = db.batch();
       const seatsRef = db.collection('trips').doc(tripId).collection('seats');
+
       const rows = Math.ceil(totalSeats / 5);
+
+      // ✅ FIXED: Seat counter track karo
+      let seatCount = 0;
+
       for (let row = 1; row <= rows; row++) {
         for (let col = 1; col <= 5; col++) {
+
+          // ✅ FIXED: Exactly totalSeats tak hi seats banao
+          if (seatCount >= totalSeats) break;
+
           const seatNumber = `${row}${String.fromCharCode(64 + col)}`;
           const isWindow = col === 1 || col === 5;
           const isAisle = col === 3;
+
           batch.set(seatsRef.doc(seatNumber), {
-            seatNumber, row, column: col, isBooked: false, status: 'available',
+            seatNumber,
+            row,
+            column: col,
+            isBooked: false,
+            status: 'available',
             price: row <= 2 ? Math.round(fare * 1.25) : fare,
             type: isWindow ? 'window' : isAisle ? 'aisle' : 'middle',
-            isWindow, isAisle, isMiddle: !isWindow && !isAisle,
+            isWindow,
+            isAisle,
+            isMiddle: !isWindow && !isAisle,
             hasExtraLegroom: row === 1,
             isWheelchairAccessible: row === rows && (col === 1 || col === 2),
-            reservedBy: null, reservedUntil: null, bookingId: null,
+            reservedBy: null,
+            reservedUntil: null,
+            bookingId: null,
             createdAt: firestore.FieldValue.serverTimestamp(),
             updatedAt: firestore.FieldValue.serverTimestamp(),
           });
+
+          seatCount++; // ✅ Counter badhao
         }
       }
+
       await batch.commit();
+      console.log(`✅ Generated exactly ${seatCount} seats for trip ${tripId}`);
       return true;
-    } catch (e) { console.error('generateTripSeats error:', e); return false; }
+    } catch (e) {
+      console.error('generateTripSeats error:', e);
+      return false;
+    }
   };
 
   // ✅ TIMEZONE FIX: Use parseLocalDate, toLocalDateString throughout

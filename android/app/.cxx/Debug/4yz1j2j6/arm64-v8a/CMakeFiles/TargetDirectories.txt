@@ -34,6 +34,9 @@ D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/arm64-v8a/rnscreens_autolink
 D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/arm64-v8a/RNSoundSpec_autolinked_build/CMakeFiles/react_codegen_RNSoundSpec.dir
 D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/arm64-v8a/RNSoundSpec_autolinked_build/CMakeFiles/edit_cache.dir
 D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/arm64-v8a/RNSoundSpec_autolinked_build/CMakeFiles/rebuild_cache.dir
+D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/arm64-v8a/rnsvg_autolinked_build/CMakeFiles/react_codegen_rnsvg.dir
+D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/arm64-v8a/rnsvg_autolinked_build/CMakeFiles/edit_cache.dir
+D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/arm64-v8a/rnsvg_autolinked_build/CMakeFiles/rebuild_cache.dir
 D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/arm64-v8a/RNVectorIconsSpec_autolinked_build/CMakeFiles/react_codegen_RNVectorIconsSpec.dir
 D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/arm64-v8a/RNVectorIconsSpec_autolinked_build/CMakeFiles/edit_cache.dir
 D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/arm64-v8a/RNVectorIconsSpec_autolinked_build/CMakeFiles/rebuild_cache.dir

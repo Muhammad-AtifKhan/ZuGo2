@@ -1,3 +1,4 @@
+// src/screens/passenger/PaymentScreen.tsx - WITH update() FIX
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -50,7 +51,6 @@ const PaymentScreen = () => {
   const [discountApplied, setDiscountApplied] = useState(false);
   const [discountAmount, setDiscountAmount] = useState(0);
   const [bookingCode, setBookingCode] = useState<string | null>(null);
-  // ✅ NEW: State for pending booking ID
   const [pendingBookingId, setPendingBookingId] = useState<string | null>(null);
 
   // Card payment states
@@ -168,7 +168,7 @@ const PaymentScreen = () => {
   const handlePaymentMethodSelect = (method: PaymentMethod) => {
     setSelectedPaymentMethod(method);
     setBookingCode(null);
-    setPendingBookingId(null); // Reset pending booking
+    setPendingBookingId(null);
   };
 
   const validateCardDetails = () => {
@@ -214,7 +214,7 @@ const PaymentScreen = () => {
     return true;
   };
 
-  // ✅ NEW: Manual payment confirmation function
+  // ✅ Manual payment confirmation function
   const handleManualPaymentConfirm = async () => {
     if (!pendingBookingId) {
       Alert.alert('Error', 'No pending booking found');
@@ -232,14 +232,12 @@ const PaymentScreen = () => {
         throw new Error('Booking not found');
       }
 
-      // Check if booking is already confirmed
       if (bookingData.status === 'confirmed') {
         Alert.alert('Already Confirmed', 'This booking is already confirmed.');
         setPendingBookingId(null);
         return;
       }
 
-      // Check if payment deadline has passed
       if (bookingData.paymentDeadline && bookingData.paymentDeadline.toDate() < new Date()) {
         Alert.alert(
           'Payment Deadline Passed',
@@ -257,7 +255,6 @@ const PaymentScreen = () => {
         return;
       }
 
-      // Update booking to confirmed
       await bookingRef.update({
         status: 'confirmed',
         paymentStatus: 'paid',
@@ -265,7 +262,7 @@ const PaymentScreen = () => {
         updatedAt: firestore.FieldValue.serverTimestamp(),
       });
 
-      // Update seats from reserved to booked
+      // ✅ FIX: Use update() instead of set()
       const seatNumbers = bookingData.seatNumbers;
       const tripDocRef = firestore().collection('trips').doc(bookingData.tripId);
 
@@ -275,11 +272,12 @@ const PaymentScreen = () => {
           status: 'booked',
           isBooked: true,
           bookedBy: bookingData.userId,
+          reservedBy: null,
+          reservedUntil: null,
           updatedAt: firestore.FieldValue.serverTimestamp(),
         });
       }
 
-      // Update trip's available seats count
       await tripDocRef.update({
         availableSeats: firestore.FieldValue.increment(-seatNumbers.length),
         updatedAt: firestore.FieldValue.serverTimestamp(),
@@ -329,6 +327,7 @@ const PaymentScreen = () => {
     }
   };
 
+  // ✅ FIXED: processBooking with update() instead of set()
   const processBooking = async () => {
     if (!tripId || !busId || seatIds.length === 0) {
       Alert.alert('Error', 'Invalid booking data. Please go back and try again.');
@@ -343,11 +342,7 @@ const PaymentScreen = () => {
 
     setIsProcessing(true);
 
-    // ✅ FIX #4: Add fake processing delay for realistic demo
-    await new Promise(resolve => setTimeout(resolve, 2500));
-
     try {
-      // ✅ FIX #1: JazzCash/Easypaisa are NOT instant anymore
       const isInstantPayment = selectedPaymentMethod === 'online_card';
 
       const userDoc = await firestore().collection('users').doc(user.uid).get();
@@ -370,7 +365,6 @@ const PaymentScreen = () => {
 
       const seatNumbers = seatIds.map(id => id.replace('seat-', ''));
       const newBookingCode = !isInstantPayment ? generateBookingCode() : null;
-
       const paymentDeadline = !isInstantPayment
         ? firestore.Timestamp.fromDate(new Date(Date.now() + 24 * 60 * 60 * 1000))
         : null;
@@ -399,9 +393,7 @@ const PaymentScreen = () => {
         passengerPhone,
         busNumber: busNumber || tripData.busNumber || '',
         paymentMethod: selectedPaymentMethod,
-        // ✅ FIX #2: Payment status based on method
         paymentStatus: isInstantPayment ? 'paid' : 'pending',
-        // ✅ FIX #2: Booking status based on method
         status: isInstantPayment ? 'confirmed' : 'pending_payment',
         bookingCode: newBookingCode,
         paymentDeadline,
@@ -420,30 +412,30 @@ const PaymentScreen = () => {
 
       await bookingRef.set(bookingData);
 
-      // ✅ FIX #3: For non-instant payments, only reserve seats (not book)
+      // ✅ FIX: Use update() instead of set() - seats already exist from schedule
       for (const seatNum of seatNumbers) {
         const seatRef = firestore().collection('trips').doc(tripId)
           .collection('seats').doc(seatNum);
 
         if (isInstantPayment) {
-          await seatRef.set({
-            seatNumber: seatNum,
+          await seatRef.update({
             isBooked: true,
             status: 'booked',
             bookedBy: user.uid,
             bookingId: bookingRef.id,
+            reservedBy: null,
+            reservedUntil: null,
             updatedAt: firestore.FieldValue.serverTimestamp(),
-          }, { merge: true });
+          });
         } else {
-          await seatRef.set({
-            seatNumber: seatNum,
+          await seatRef.update({
             isBooked: false,
             status: 'reserved',
             reservedBy: user.uid,
             bookingId: bookingRef.id,
             reservedUntil: paymentDeadline,
             updatedAt: firestore.FieldValue.serverTimestamp(),
-          }, { merge: true });
+          });
         }
       }
 
@@ -468,7 +460,6 @@ const PaymentScreen = () => {
           ]
         );
       } else {
-        // ✅ FIX #5: Store pending booking ID and show manual payment button
         setPendingBookingId(bookingRef.id);
 
         Alert.alert(
@@ -838,7 +829,6 @@ const PaymentScreen = () => {
           <Text style={styles.securityText}>Your payment information is secure and encrypted</Text>
         </View>
 
-        {/* ✅ NEW: I HAVE PAID Button for non-instant payments */}
         {pendingBookingId && (
           <TouchableOpacity
             style={styles.manualConfirmButton}
@@ -956,7 +946,6 @@ const styles = StyleSheet.create({
   pendingText: { color: '#FF9800', fontWeight: '600' },
   securityNote: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 20 },
   securityText: { fontSize: 14, color: '#4CAF50', fontWeight: '500', marginLeft: 8 },
-  // ✅ NEW STYLES
   manualConfirmButton: {
     backgroundColor: '#4CAF50',
     borderRadius: 12,

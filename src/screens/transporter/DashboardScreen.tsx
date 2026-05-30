@@ -121,6 +121,7 @@ const DashboardScreen = () => {
   const [showNotifications, setShowNotifications] = useState(false);
   const [announceModalVisible, setAnnounceModalVisible] = useState(false);
   const [announcementText, setAnnouncementText] = useState('');
+  const [sendingAnnouncement, setSendingAnnouncement] = useState(false);
   const [transporterName, setTransporterName] = useState('');
 
   // Data states
@@ -471,7 +472,7 @@ const DashboardScreen = () => {
     setTimeout(() => setRefreshing(false), 1000);
   }, []);
 
-  // Quick Actions
+  // Quick Actions - FIXED: Added Generate Report navigation
   const handleQuickAction = (action: string) => {
     switch(action) {
       case 'Add Bus':
@@ -485,6 +486,9 @@ const DashboardScreen = () => {
         break;
       case 'Send Announcement':
         setAnnounceModalVisible(true);
+        break;
+      case 'Generate Report':
+        navigation.navigate('ReportsProfile' as never);
         break;
       default:
         Alert.alert('Coming Soon', 'This feature will be available soon');
@@ -598,6 +602,7 @@ const DashboardScreen = () => {
                 transporterId: transporterId,
                 message: announcementText,
                 sentTo: driversSnapshot.size,
+                status: false,
                 createdAt: firestore.FieldValue.serverTimestamp(),
               });
 
@@ -948,7 +953,7 @@ const DashboardScreen = () => {
                 style={[styles.modalButton, styles.sendButton]}
                 onPress={handleSendAnnouncement}
               >
-                <Text style={styles.sendButtonText}>Send Announcement</Text>
+                <Text style={styles.sendButtonText}>Send</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1366,26 +1371,28 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#333333',
     textAlignVertical: 'top',
+    textAlign: 'left',
     minHeight: 100,
     marginBottom: 20,
   },
   modalButtons: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    gap: 12,
   },
   modalButton: {
     flex: 1,
-    paddingVertical: 14,
-    borderRadius: 8,
+    minHeight: 44,
+    paddingHorizontal: 14,
+    borderRadius: 10,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   cancelButton: {
-    backgroundColor: '#F5F5F5',
-    marginRight: 8,
+    backgroundColor: '#F1F3F4',
   },
   sendButton: {
-    backgroundColor: '#4CAF50',
-    marginLeft: 8,
+    backgroundColor: COLORS.primary,
   },
   cancelButtonText: {
     fontSize: 16,

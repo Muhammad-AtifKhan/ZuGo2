@@ -46,7 +46,7 @@ interface Duty {
   from: string;
   to: string;
   distance: string;
-  status: 'UPCOMING' | 'VEHICLE_CHECK' | 'BOARDING' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
+  status: 'UPCOMING' | 'VEHICLE_CHECK' | 'BOARDING' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED' | 'EXPIRED';
   fare: number;
   totalSeats: number;
   bookedSeats: number;
@@ -169,11 +169,14 @@ const ScheduleScreen: React.FC<ScheduleScreenProps> = ({ navigation }) => {
         return 'BOARDING';
       case 'active':
       case 'in-progress':
+      case 'in_progress':
         return 'IN_PROGRESS';
       case 'completed':
         return 'COMPLETED';
       case 'cancelled':
         return 'CANCELLED';
+      case 'expired':
+        return 'EXPIRED';
       default:
         return 'UPCOMING';
     }
@@ -188,6 +191,7 @@ const ScheduleScreen: React.FC<ScheduleScreenProps> = ({ navigation }) => {
       case 'IN_PROGRESS': return '#4CAF50';
       case 'COMPLETED': return '#9E9E9E';
       case 'CANCELLED': return '#F44336';
+      case 'EXPIRED': return '#FF6B6B';
       default: return '#666666';
     }
   };
@@ -201,6 +205,7 @@ const ScheduleScreen: React.FC<ScheduleScreenProps> = ({ navigation }) => {
       case 'IN_PROGRESS': return '🚌';
       case 'COMPLETED': return '✅';
       case 'CANCELLED': return '❌';
+      case 'EXPIRED': return '⏰';
       default: return '📋';
     }
   };
@@ -276,7 +281,7 @@ const ScheduleScreen: React.FC<ScheduleScreenProps> = ({ navigation }) => {
         const duty = formatTripToDuty(doc);
 
         // Check if trip is completed
-        if (duty.status === 'COMPLETED' || duty.status === 'CANCELLED') {
+        if (duty.status === 'COMPLETED' || duty.status === 'CANCELLED' || duty.status === 'EXPIRED') {
           completedList.push(duty);
           return;
         }

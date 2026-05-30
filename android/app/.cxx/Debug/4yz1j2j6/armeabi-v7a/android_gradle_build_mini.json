@@ -11,6 +11,7 @@
     "D:\\MyProjects\\ZuGo2\\node_modules\\react-native-safe-area-context\\android\\src\\main\\jni\\CMakeLists.txt",
     "D:\\MyProjects\\ZuGo2\\node_modules\\react-native-screens\\android\\src\\main\\jni\\CMakeLists.txt",
     "D:\\MyProjects\\ZuGo2\\node_modules\\react-native-sound\\android\\build\\generated\\source\\codegen\\jni\\CMakeLists.txt",
+    "D:\\MyProjects\\ZuGo2\\node_modules\\react-native-svg\\android\\src\\main\\jni\\CMakeLists.txt",
     "D:\\MyProjects\\ZuGo2\\node_modules\\react-native-vector-icons\\android\\build\\generated\\source\\codegen\\jni\\CMakeLists.txt",
     "D:\\MyProjects\\ZuGo2\\node_modules\\react-native-webview\\android\\build\\generated\\source\\codegen\\jni\\CMakeLists.txt",
     "D:\\MyProjects\\ZuGo2\\node_modules\\react-native-worklets\\android\\build\\generated\\source\\codegen\\jni\\CMakeLists.txt",
@@ -68,9 +69,20 @@
       "runtimeFiles": [
         "D:\\MyProjects\\ZuGo2\\android\\app\\build\\intermediates\\cxx\\Debug\\4yz1j2j6\\obj\\armeabi-v7a\\libreact_codegen_safeareacontext.so",
         "D:\\MyProjects\\ZuGo2\\android\\app\\build\\intermediates\\cxx\\Debug\\4yz1j2j6\\obj\\armeabi-v7a\\libreact_codegen_rnscreens.so",
+        "D:\\MyProjects\\ZuGo2\\android\\app\\build\\intermediates\\cxx\\Debug\\4yz1j2j6\\obj\\armeabi-v7a\\libreact_codegen_rnsvg.so",
         "C:\\Users\\Muhammad_Atif_Khan\\.gradle\\caches\\8.13\\transforms\\b7dce72bff7fdb5c13643e891a8a1b5d\\transformed\\fbjni-0.7.0\\prefab\\modules\\fbjni\\libs\\android.armeabi-v7a\\libfbjni.so",
         "C:\\Users\\Muhammad_Atif_Khan\\.gradle\\caches\\8.13\\transforms\\a23ed67b2edeb9ce0dd199ade731b727\\transformed\\react-android-0.83.0-debug\\prefab\\modules\\jsi\\libs\\android.armeabi-v7a\\libjsi.so",
         "C:\\Users\\Muhammad_Atif_Khan\\.gradle\\caches\\8.13\\transforms\\a23ed67b2edeb9ce0dd199ade731b727\\transformed\\react-android-0.83.0-debug\\prefab\\modules\\reactnative\\libs\\android.armeabi-v7a\\libreactnative.so"
+      ]
+    },
+    "react_codegen_rnsvg::@4f40eb209d0c0b4a3b65": {
+      "artifactName": "react_codegen_rnsvg",
+      "abi": "armeabi-v7a",
+      "output": "D:\\MyProjects\\ZuGo2\\android\\app\\build\\intermediates\\cxx\\Debug\\4yz1j2j6\\obj\\armeabi-v7a\\libreact_codegen_rnsvg.so",
+      "runtimeFiles": [
+        "C:\\Users\\Muhammad_Atif_Khan\\.gradle\\caches\\8.13\\transforms\\a23ed67b2edeb9ce0dd199ade731b727\\transformed\\react-android-0.83.0-debug\\prefab\\modules\\reactnative\\libs\\android.armeabi-v7a\\libreactnative.so",
+        "C:\\Users\\Muhammad_Atif_Khan\\.gradle\\caches\\8.13\\transforms\\a23ed67b2edeb9ce0dd199ade731b727\\transformed\\react-android-0.83.0-debug\\prefab\\modules\\jsi\\libs\\android.armeabi-v7a\\libjsi.so",
+        "C:\\Users\\Muhammad_Atif_Khan\\.gradle\\caches\\8.13\\transforms\\b7dce72bff7fdb5c13643e891a8a1b5d\\transformed\\fbjni-0.7.0\\prefab\\modules\\fbjni\\libs\\android.armeabi-v7a\\libfbjni.so"
       ]
     },
     "react_codegen_RNCNetInfoSpec::@c36c96bfd5b5770618a5": {

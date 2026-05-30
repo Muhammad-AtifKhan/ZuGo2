@@ -45,7 +45,7 @@ interface Trip {
   tripId: string;
   seat: string;
   seatIds: string[];
-  status: 'pending' | 'confirmed' | 'boarding' | 'completed' | 'cancelled';
+  status: 'pending' | 'confirmed' | 'boarding' | 'active' | 'completed' | 'cancelled' | 'expired';
   statusText: string;
   color: string;
   boardingTime: string;
@@ -128,16 +128,20 @@ const MyTripsScreen = () => {
   // ✅ Updated: Map trip status to standardized status
   const mapTripStatus = (tripStatus: string): string => {
     if (tripStatus === TRIP_STATUS.SCHEDULED) return TRIP_STATUS.SCHEDULED;
+    if (tripStatus === TRIP_STATUS.BOARDING) return TRIP_STATUS.BOARDING;
     if (tripStatus === TRIP_STATUS.IN_PROGRESS) return TRIP_STATUS.IN_PROGRESS;
     if (tripStatus === TRIP_STATUS.COMPLETED) return TRIP_STATUS.COMPLETED;
     if (tripStatus === TRIP_STATUS.CANCELLED) return TRIP_STATUS.CANCELLED;
     if (tripStatus === TRIP_STATUS.DELAYED) return TRIP_STATUS.DELAYED;
+    if (tripStatus === TRIP_STATUS.EXPIRED) return TRIP_STATUS.EXPIRED;
 
     // Map legacy statuses
     if (tripStatus === 'scheduled' || tripStatus === 'upcoming') return TRIP_STATUS.SCHEDULED;
-    if (tripStatus === 'active' || tripStatus === 'in-progress') return TRIP_STATUS.IN_PROGRESS;
+    if (tripStatus === 'boarding') return TRIP_STATUS.BOARDING;
+    if (tripStatus === 'active' || tripStatus === 'in-progress' || tripStatus === 'in_progress') return TRIP_STATUS.IN_PROGRESS;
     if (tripStatus === 'completed') return TRIP_STATUS.COMPLETED;
     if (tripStatus === 'cancelled') return TRIP_STATUS.CANCELLED;
+    if (tripStatus === 'expired') return TRIP_STATUS.EXPIRED;
 
     return TRIP_STATUS.SCHEDULED;
   };
@@ -182,28 +186,18 @@ const MyTripsScreen = () => {
       };
     }
 
-    // CONFIRMED (from booking)
-    if (bookingStatus === 'confirmed') {
-      if (isPastTrip) {
-        return {
-          status: 'completed' as const,
-          text: '✅ COMPLETED',
-          color: '#9E9E9E',
-        };
-      }
-      return {
-        status: 'confirmed' as const,
-        text: '✅ CONFIRMED',
-        color: '#4CAF50',
-      };
-    }
-
     // Based on standardized trip status
     switch (mappedTripStatus) {
-      case TRIP_STATUS.IN_PROGRESS:
+      case TRIP_STATUS.BOARDING:
         return {
           status: 'boarding' as const,
-          text: '🚌 BOARDING NOW',
+          text: '👥 BOARDING',
+          color: '#FF9800',
+        };
+      case TRIP_STATUS.IN_PROGRESS: // 'active'
+        return {
+          status: 'active' as const,
+          text: '🚌 ACTIVE',
           color: '#2196F3',
         };
       case TRIP_STATUS.COMPLETED:
@@ -218,8 +212,28 @@ const MyTripsScreen = () => {
           text: '❌ CANCELLED',
           color: '#F44336',
         };
+      case TRIP_STATUS.EXPIRED:
+        return {
+          status: 'expired' as const,
+          text: '⏰ EXPIRED',
+          color: '#FF6B6B',
+        };
       case TRIP_STATUS.SCHEDULED:
       default:
+        if (bookingStatus === 'confirmed') {
+          if (isPastTrip) {
+            return {
+              status: 'completed' as const,
+              text: '✅ COMPLETED',
+              color: '#9E9E9E',
+            };
+          }
+          return {
+            status: 'confirmed' as const,
+            text: '✅ CONFIRMED',
+            color: '#4CAF50',
+          };
+        }
         return {
           status: 'confirmed' as const,
           text: '✅ CONFIRMED',
@@ -356,7 +370,7 @@ const MyTripsScreen = () => {
       const tripDate = new Date(trip.rawDate);
       tripDate.setHours(0, 0, 0, 0);
 
-      if (trip.status === 'boarding') {
+      if (trip.status === 'boarding' || trip.status === 'active') {
         active.push(trip);
       }
       else if (trip.status === 'pending') {
@@ -369,7 +383,7 @@ const MyTripsScreen = () => {
           past.push(trip);
         }
       }
-      else if (trip.status === 'completed' || trip.status === 'cancelled') {
+      else if (trip.status === 'completed' || trip.status === 'cancelled' || trip.status === 'expired') {
         past.push(trip);
       }
       else {
@@ -1188,7 +1202,7 @@ const MyTripsScreen = () => {
             </>
           )}
 
-          {trip.status === 'boarding' && (
+          {(trip.status === 'boarding' || trip.status === 'active') && (
             <>
               <TouchableOpacity
                 style={[styles.actionButton, styles.primaryAction]}
