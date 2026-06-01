@@ -21,6 +21,7 @@ import { PassengerStackParamList } from '../../navigation/PassengerNavigator';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import firestore from '@react-native-firebase/firestore';
 import auth from '@react-native-firebase/auth';
+import QRCode from 'react-native-qrcode-svg';
 
 // ✅ Import standardized status constants
 import { TRIP_STATUS } from '../../constants/status';
@@ -67,6 +68,8 @@ interface Trip {
   busType: string;
   paymentMethod?: string;
   paymentDeadline?: Date;
+  passengerName?: string;
+  seatNumbers?: string[];
 }
 
 interface Stop {
@@ -115,14 +118,125 @@ const MyTripsScreen = () => {
   const [rating, setRating] = useState(0);
   const [feedback, setFeedback] = useState('');
 
-  // Fetch user's trips from Firebase
+  // Fetch user's trips from Firebase in real-time
   useEffect(() => {
     if (!user) {
       setLoading(false);
       return;
     }
 
-    fetchUserTrips();
+    setLoading(true);
+
+    const unsubscribe = firestore()
+      .collection('bookings')
+      .where('userId', '==', user.uid)
+      .orderBy('createdAt', 'desc')
+      .onSnapshot(async (snapshot) => {
+        if (!snapshot) {
+          setLoading(false);
+          setRefreshing(false);
+          return;
+        }
+
+        try {
+          const tripsList: Trip[] = [];
+
+          for (const doc of snapshot.docs) {
+            const data = doc.data();
+
+            const tripSnapshot = await firestore()
+              .collection('trips')
+              .doc(data.tripId)
+              .get();
+
+            if (tripSnapshot.exists) {
+              const tripData = tripSnapshot.data();
+              const travelDate = data.travelDate?.toDate?.() || new Date();
+
+              let driverName = 'Not assigned';
+              let driverContact = '';
+
+              if (tripData?.driverId) {
+                const driverSnapshot = await firestore()
+                  .collection('drivers')
+                  .doc(tripData.driverId)
+                  .get();
+
+                if (driverSnapshot.exists) {
+                  const driverData = driverSnapshot.data();
+                  driverName = driverData?.fullName || 'Driver';
+                  driverContact = driverData?.contactNumber || '';
+                }
+              }
+
+              const tripStatus = determineTripStatus(
+                tripData?.status || TRIP_STATUS.SCHEDULED,
+                data.status,
+                data.paymentStatus,
+                travelDate
+              );
+
+              tripsList.push({
+                id: doc.id,
+                ticketNumber: data.ticketNumber || `TKT-${doc.id.slice(0, 8)}`,
+                bookingCode: data.bookingCode,
+                from: data.from || tripData?.from || '',
+                to: data.to || tripData?.to || '',
+                fromCode: data.fromCode || tripData?.fromCode || '',
+                toCode: data.toCode || tripData?.toCode || '',
+                date: formatDate(travelDate),
+                rawDate: travelDate,
+                time: `${tripData?.departureTime || '00:00'} - ${tripData?.arrivalTime || '00:00'}`,
+                departureTime: tripData?.departureTime || '00:00',
+                arrivalTime: tripData?.arrivalTime || '00:00',
+                busNumber: tripData?.busNumber || 'N/A',
+                busId: tripData?.busId || '',
+                tripId: data.tripId,
+                seat: data.seatNumber || data.seatIds?.[0] || 'N/A',
+                seatIds: data.seatIds || [],
+                status: tripStatus.status,
+                statusText: tripStatus.text,
+                color: tripStatus.color,
+                boardingTime: tripData?.departureTime || '00:00',
+                driver: driverName,
+                driverId: tripData?.driverId || '',
+                driverContact: driverContact,
+                fare: data.baseFare || data.fare || 0,
+                serviceFee: data.serviceFee || 1,
+                total: data.totalAmount || data.total || (data.baseFare || 0) + 1,
+                qrCode: data.qrCode || doc.id,
+                stops: tripData?.stops || [],
+                amenities: tripData?.amenities || ['AC', 'WiFi'],
+                rating: data.rating,
+                canRate: !data.rating && tripStatus.status === 'completed',
+                bookingDate: data.createdAt,
+                routeId: data.routeId || '',
+                routeName: tripData?.name || '',
+                busType: tripData?.busType || 'Standard',
+                paymentMethod: data.paymentMethod,
+                paymentDeadline: data.paymentDeadline?.toDate?.(),
+                passengerName: data.passengerName || user?.displayName || 'Passenger',
+                seatNumbers: data.seatNumbers || [],
+              });
+            }
+          }
+
+          setAllTrips(tripsList);
+          filterTripsByStatus(tripsList);
+        } catch (error) {
+          console.error('Error processing trips in real-time:', error);
+        } finally {
+          setLoading(false);
+          setRefreshing(false);
+        }
+      }, (error) => {
+        console.error('Error fetching trips in real-time:', error);
+        Alert.alert('Error', 'Failed to load your trips in real-time');
+        setLoading(false);
+        setRefreshing(false);
+      });
+
+    return () => unsubscribe();
   }, [user]);
 
   // ✅ Updated: Map trip status to standardized status
@@ -256,106 +370,8 @@ const MyTripsScreen = () => {
     }
   };
 
-  const fetchUserTrips = async () => {
-    try {
-      setLoading(true);
-
-      const snapshot = await firestore()
-        .collection('bookings')
-        .where('userId', '==', user?.uid)
-        .orderBy('createdAt', 'desc')
-        .get();
-
-      const tripsList: Trip[] = [];
-
-      for (const doc of snapshot.docs) {
-        const data = doc.data();
-
-        const tripSnapshot = await firestore()
-          .collection('trips')
-          .doc(data.tripId)
-          .get();
-
-        if (tripSnapshot.exists) {
-          const tripData = tripSnapshot.data();
-          const travelDate = data.travelDate?.toDate?.() || new Date();
-
-          let driverName = 'Not assigned';
-          let driverContact = '';
-
-          if (tripData?.driverId) {
-            const driverSnapshot = await firestore()
-              .collection('drivers')
-              .doc(tripData.driverId)
-              .get();
-
-            if (driverSnapshot.exists) {
-              const driverData = driverSnapshot.data();
-              driverName = driverData?.fullName || 'Driver';
-              driverContact = driverData?.contactNumber || '';
-            }
-          }
-
-          const tripStatus = determineTripStatus(
-            tripData?.status || TRIP_STATUS.SCHEDULED,
-            data.status,
-            data.paymentStatus,
-            travelDate
-          );
-
-          tripsList.push({
-            id: doc.id,
-            ticketNumber: data.ticketNumber || `TKT-${doc.id.slice(0, 8)}`,
-            bookingCode: data.bookingCode,
-            from: data.from || tripData?.from || '',
-            to: data.to || tripData?.to || '',
-            fromCode: data.fromCode || tripData?.fromCode || '',
-            toCode: data.toCode || tripData?.toCode || '',
-            date: formatDate(travelDate),
-            rawDate: travelDate,
-            time: `${tripData?.departureTime || '00:00'} - ${tripData?.arrivalTime || '00:00'}`,
-            departureTime: tripData?.departureTime || '00:00',
-            arrivalTime: tripData?.arrivalTime || '00:00',
-            busNumber: tripData?.busNumber || 'N/A',
-            busId: tripData?.busId || '',
-            tripId: data.tripId,
-            seat: data.seatNumber || data.seatIds?.[0] || 'N/A',
-            seatIds: data.seatIds || [],
-            status: tripStatus.status,
-            statusText: tripStatus.text,
-            color: tripStatus.color,
-            boardingTime: tripData?.departureTime || '00:00',
-            driver: driverName,
-            driverId: tripData?.driverId || '',
-            driverContact: driverContact,
-            fare: data.baseFare || data.fare || 0,
-            serviceFee: data.serviceFee || 1,
-            total: data.totalAmount || data.total || (data.baseFare || 0) + 1,
-            qrCode: data.qrCode || doc.id,
-            stops: tripData?.stops || [],
-            amenities: tripData?.amenities || ['AC', 'WiFi'],
-            rating: data.rating,
-            canRate: !data.rating && tripStatus.status === 'completed',
-            bookingDate: data.createdAt,
-            routeId: data.routeId || '',
-            routeName: tripData?.name || '',
-            busType: tripData?.busType || 'Standard',
-            paymentMethod: data.paymentMethod,
-            paymentDeadline: data.paymentDeadline?.toDate?.(),
-          });
-        }
-      }
-
-      setAllTrips(tripsList);
-      filterTripsByStatus(tripsList);
-
-    } catch (error) {
-      console.error('Error fetching trips:', error);
-      Alert.alert('Error', 'Failed to load your trips');
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
+  const fetchUserTrips = () => {
+    // Data updates automatically in real-time via the onSnapshot listener in useEffect.
   };
 
   const filterTripsByStatus = (trips: Trip[]) => {
@@ -405,7 +421,9 @@ const MyTripsScreen = () => {
 
   const onRefresh = () => {
     setRefreshing(true);
-    fetchUserTrips();
+    setTimeout(() => {
+      setRefreshing(false);
+    }, 1000);
   };
 
   const handleViewTicket = (trip: Trip) => {
@@ -784,6 +802,36 @@ const MyTripsScreen = () => {
             <Text style={styles.totalValue}>{formatCurrency(selectedTrip?.total || (selectedTrip?.fare || 0) + 1)}</Text>
           </View>
         </View>
+
+        {selectedTrip && selectedTrip.status !== 'pending' && selectedTrip.status !== 'cancelled' && selectedTrip.status !== 'expired' && (
+          <View style={styles.qrContainer}>
+            <View style={styles.qrWrapper}>
+              <QRCode
+                value={JSON.stringify({
+                  bookingId: selectedTrip.id,
+                  ticketNumber: selectedTrip.ticketNumber,
+                  bookingCode: selectedTrip.bookingCode || '',
+                  passengerName: selectedTrip.passengerName || user?.displayName || 'Passenger',
+                  busNumber: selectedTrip.busNumber,
+                  from: selectedTrip.from,
+                  fromCode: selectedTrip.fromCode,
+                  to: selectedTrip.to,
+                  toCode: selectedTrip.toCode,
+                  date: selectedTrip.date,
+                  time: selectedTrip.departureTime,
+                  seatNumbers: selectedTrip.seatNumbers || [],
+                  total: selectedTrip.total,
+                  timestamp: new Date().toISOString(),
+                })}
+                size={140}
+                color="#1A237E"
+                backgroundColor="#FFFFFF"
+              />
+              <Text style={styles.qrText}>📱 Scan at Boarding</Text>
+              <Text style={styles.qrSubText}>Show this QR code to the driver</Text>
+            </View>
+          </View>
+        )}
       </ScrollView>
 
       <View style={styles.modalFooter}>
@@ -1477,6 +1525,10 @@ const styles = StyleSheet.create({
   feedbackInput: { borderWidth: 1, borderColor: '#E3E8EF', borderRadius: 8, padding: 12, fontSize: 14, color: '#1A1A1A', minHeight: 100 },
   submitRateButton: { backgroundColor: '#FF9800', borderColor: '#FF9800' },
   submitRateButtonText: { color: '#FFF', marginLeft: 8 },
+  qrContainer: { alignItems: 'center', padding: 20, borderWidth: 1, borderColor: '#E3E8EF', borderRadius: 12, marginTop: 20, marginBottom: 10, backgroundColor: '#FFF' },
+  qrWrapper: { alignItems: 'center', padding: 16, backgroundColor: '#FFF', borderRadius: 12 },
+  qrText: { fontSize: 16, color: '#4CAF50', marginTop: 16, fontWeight: 'bold' },
+  qrSubText: { fontSize: 12, color: '#666', marginTop: 4, textAlign: 'center' },
 });
 
 export default MyTripsScreen;

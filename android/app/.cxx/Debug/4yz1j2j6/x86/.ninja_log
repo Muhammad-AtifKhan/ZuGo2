@@ -1,7 +1,7 @@
 # ninja log v5
 131	17940	8014281417943370	rnclipboard_autolinked_build/CMakeFiles/react_codegen_rnclipboard.dir/react/renderer/components/rnclipboard/ShadowNodes.cpp.o	ebe2dd441ab9ab73
 29674	45265	8014281677236595	RNCNetInfoSpec_autolinked_build/CMakeFiles/react_codegen_RNCNetInfoSpec.dir/react/renderer/components/RNCNetInfoSpec/ComponentDescriptors.cpp.o	ebba57156c0ed71a
-1	24	0	D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86/CMakeFiles/cmake.verify_globs	e5e3a8a8711b4dfe
+3	79	0	D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86/CMakeFiles/cmake.verify_globs	e5e3a8a8711b4dfe
 18308	32540	8014281564876006	RNCGeolocationSpec_autolinked_build/CMakeFiles/react_codegen_RNCGeolocationSpec.dir/react/renderer/components/RNCGeolocationSpec/ShadowNodes.cpp.o	55e10151226f28f9
 31662	41656	8014281655846951	rngesturehandler_codegen_autolinked_build/CMakeFiles/react_codegen_rngesturehandler_codegen.dir/react/renderer/components/rngesturehandler_codegen/EventEmitters.cpp.o	a19b6dfaf3f96a1f
 145	14989	8014281385891098	rnclipboard_autolinked_build/CMakeFiles/react_codegen_rnclipboard.dir/react/renderer/components/rnclipboard/EventEmitters.cpp.o	bdeae54812adea9f
@@ -22,7 +22,7 @@
 30956	39734	8014281636773548	RNCNetInfoSpec_autolinked_build/CMakeFiles/react_codegen_RNCNetInfoSpec.dir/react/renderer/components/RNCNetInfoSpec/States.cpp.o	b52b650f532e596b
 79	19104	8014281430317698	rnasyncstorage_autolinked_build/CMakeFiles/react_codegen_rnasyncstorage.dir/react/renderer/components/rnasyncstorage/Props.cpp.o	68d9abe04ab5ccef
 118	19025	8014281429807465	rnclipboard_autolinked_build/CMakeFiles/react_codegen_rnclipboard.dir/react/renderer/components/rnclipboard/Props.cpp.o	c774c80af4f3311d
-7	20497	8014281444045893	CMakeFiles/appmodules.dir/OnLoad.cpp.o	a2ad76999ce38f24
+42	10780	8017797652586476	CMakeFiles/appmodules.dir/OnLoad.cpp.o	9c5975654d1f4d15
 61548	80977	8014282047946468	safeareacontext_autolinked_build/CMakeFiles/react_codegen_safeareacontext.dir/be0954b109027e3aafd0eaee6891f5e0/source/codegen/jni/react/renderer/components/safeareacontext/States.cpp.o	d2b7455fab966284
 17153	27358	8014281512739009	RNDateTimePickerCGen_autolinked_build/CMakeFiles/react_codegen_RNDateTimePickerCGen.dir/react/renderer/components/RNDateTimePickerCGen/States.cpp.o	a50c685faed857ef
 14531	29672	8014281535420216	RNDateTimePickerCGen_autolinked_build/CMakeFiles/react_codegen_RNDateTimePickerCGen.dir/RNDateTimePickerCGen-generated.cpp.o	225a5c00d0ad8e89
@@ -45,7 +45,7 @@
 34543	49667	8014281735588834	RNImagePickerSpec_autolinked_build/CMakeFiles/react_codegen_RNImagePickerSpec.dir/react/renderer/components/RNImagePickerSpec/ComponentDescriptors.cpp.o	a396239df27872e6
 32123	41442	8014281653372246	rngesturehandler_codegen_autolinked_build/CMakeFiles/react_codegen_rngesturehandler_codegen.dir/react/renderer/components/rngesturehandler_codegen/States.cpp.o	5c3b082ccf0584f8
 29729	43817	8014281675633228	RNCNetInfoSpec_autolinked_build/CMakeFiles/react_codegen_RNCNetInfoSpec.dir/react/renderer/components/RNCNetInfoSpec/Props.cpp.o	f1b06d192513e3a4
-16	45324	8014281676177260	CMakeFiles/appmodules.dir/D_/MyProjects/ZuGo2/android/app/build/generated/autolinking/src/main/jni/autolinking.cpp.o	e96a2bc8717f99f8
+34	35158	8017797894367753	CMakeFiles/appmodules.dir/D_/MyProjects/ZuGo2/android/app/build/generated/autolinking/src/main/jni/autolinking.cpp.o	21fffd6a69e13cbb
 31013	45355	8014281688359622	RNCNetInfoSpec_autolinked_build/CMakeFiles/react_codegen_RNCNetInfoSpec.dir/react/renderer/components/RNCNetInfoSpec/ShadowNodes.cpp.o	7c682a170d111143
 31725	45387	8014281690822690	rngesturehandler_codegen_autolinked_build/CMakeFiles/react_codegen_rngesturehandler_codegen.dir/react/renderer/components/rngesturehandler_codegen/ShadowNodes.cpp.o	36026800adc6b02
 41443	61341	8014281849284654	RNImagePickerSpec_autolinked_build/CMakeFiles/react_codegen_RNImagePickerSpec.dir/react/renderer/components/RNImagePickerSpec/Props.cpp.o	156cc0fb74282932
@@ -67,6 +67,7 @@
 49669	81011	8014282048162609	safeareacontext_autolinked_build/CMakeFiles/react_codegen_safeareacontext.dir/d2a6e1806d3f09422dc47c3345f4caf0/codegen/jni/react/renderer/components/safeareacontext/ComponentDescriptors.cpp.o	53d0ca5d1378e55a
 46027	83018	8014282066335494	safeareacontext_autolinked_build/CMakeFiles/react_codegen_safeareacontext.dir/f9cea53b419b2b271d44c0420daa9858/cpp/react/renderer/components/safeareacontext/RNCSafeAreaViewShadowNode.cpp.o	fb3cad9276cc6a52
 93306	96314	8014282198715678	D:/MyProjects/ZuGo2/android/app/build/intermediates/cxx/Debug/4yz1j2j6/obj/x86/libreact_codegen_safeareacontext.so	42b7620550f1ea36
+88	12264	8017797667451888	rnsvg_autolinked_build/CMakeFiles/react_codegen_rnsvg.dir/cd206ee8cb77f801d4c30b7b20c49f2e/android/build/generated/source/codegen/jni/react/renderer/components/rnsvg/ShadowNodes.cpp.o	884b26a54d274c7b
 74374	103039	8014282269117063	rnscreens_autolinked_build/CMakeFiles/react_codegen_rnscreens.dir/D_/MyProjects/ZuGo2/node_modules/react-native-screens/common/cpp/react/renderer/components/rnscreens/RNSBottomTabsState.cpp.o	ffd0cb966c7d6968
 68952	103767	8014282276943521	rnscreens_autolinked_build/CMakeFiles/react_codegen_rnscreens.dir/d1b21aba2120e093dec9a7fcc15fb5d7/common/cpp/react/renderer/components/rnscreens/RNSScreenStackHeaderConfigShadowNode.cpp.o	ef3c87d3b561a76b
 124315	140070	8014282640286632	rnworklets_autolinked_build/CMakeFiles/react_codegen_rnworklets.dir/react/renderer/components/rnworklets/Props.cpp.o	946a318a29a8e1b5
@@ -80,6 +81,7 @@
 101572	120435	8014282443500827	RNSoundSpec_autolinked_build/CMakeFiles/react_codegen_RNSoundSpec.dir/RNSoundSpec-generated.cpp.o	2276bd3df240c5c8
 107301	122633	8014282465236300	RNVectorIconsSpec_autolinked_build/CMakeFiles/react_codegen_RNVectorIconsSpec.dir/react/renderer/components/RNVectorIconsSpec/States.cpp.o	ac9a74026d94c28a
 83075	122819	8014282466772433	rnscreens_autolinked_build/CMakeFiles/react_codegen_rnscreens.dir/3adfc1edca016eb44b7e4f8d5ec71fd6/build/generated/source/codegen/jni/react/renderer/components/rnscreens/EventEmitters.cpp.o	f8dfb46af451db3f
+60	20062	8017797744771138	rnsvg_autolinked_build/CMakeFiles/react_codegen_rnsvg.dir/cd206ee8cb77f801d4c30b7b20c49f2e/android/build/generated/source/codegen/jni/react/renderer/components/rnsvg/Props.cpp.o	916f1612c85455b6
 96315	124260	8014282480936574	rnscreens_autolinked_build/CMakeFiles/react_codegen_rnscreens.dir/rnscreens.cpp.o	b6687b0f0806e3b0
 81012	124314	8014282480428501	rnscreens_autolinked_build/CMakeFiles/react_codegen_rnscreens.dir/d1b21aba2120e093dec9a7fcc15fb5d7/android/build/generated/source/codegen/jni/react/renderer/components/rnscreens/Props.cpp.o	8d0d7328b11b552
 103769	125572	8014282494268989	rnscreens_autolinked_build/CMakeFiles/react_codegen_rnscreens.dir/D_/MyProjects/ZuGo2/node_modules/react-native-screens/common/cpp/react/renderer/components/rnscreens/RNSScreenState.cpp.o	2fc5a139e672b6e6
@@ -103,19 +105,14 @@
 128405	145101	8014282690592599	RNSoundSpec_autolinked_build/CMakeFiles/react_codegen_RNSoundSpec.dir/react/renderer/components/RNSoundSpec/ComponentDescriptors.cpp.o	5e80725c20d1ef71
 132873	147697	8014282716642384	RNVectorIconsSpec_autolinked_build/CMakeFiles/react_codegen_RNVectorIconsSpec.dir/RNVectorIconsSpec-generated.cpp.o	aaa761df275f3ba9
 135706	148597	8014282725761086	rnworklets_autolinked_build/CMakeFiles/react_codegen_rnworklets.dir/rnworklets-generated.cpp.o	1cea2b8e73aaed74
-149482	150170	8014282740757733	D:/MyProjects/ZuGo2/android/app/build/intermediates/cxx/Debug/4yz1j2j6/obj/x86/libappmodules.so	18772516b9bfe013
-1	52	0	D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86/CMakeFiles/cmake.verify_globs	e5e3a8a8711b4dfe
+35159	36502	8017797909562442	D:/MyProjects/ZuGo2/android/app/build/intermediates/cxx/Debug/4yz1j2j6/obj/x86/libappmodules.so	d6f491552eadfce2
 68	6225	8017797607168489	rnsvg_autolinked_build/CMakeFiles/react_codegen_rnsvg.dir/cd206ee8cb77f801d4c30b7b20c49f2e/android/build/generated/source/codegen/jni/react/renderer/components/rnsvg/States.cpp.o	312b8021324c7c75
 50	7536	8017797619986438	rnsvg_autolinked_build/CMakeFiles/react_codegen_rnsvg.dir/cd206ee8cb77f801d4c30b7b20c49f2e/android/build/generated/source/codegen/jni/react/renderer/components/rnsvg/EventEmitters.cpp.o	d2a8de3d8d06f41a
 135	9919	8017797643965416	rnsvg_autolinked_build/CMakeFiles/react_codegen_rnsvg.dir/D_/MyProjects/ZuGo2/node_modules/react-native-svg/common/cpp/react/renderer/components/rnsvg/RNSVGLayoutableShadowNode.cpp.o	d5bae1e3d05b7ba1
 123	10611	8017797650959531	rnsvg_autolinked_build/CMakeFiles/react_codegen_rnsvg.dir/D_/MyProjects/ZuGo2/node_modules/react-native-svg/common/cpp/react/renderer/components/rnsvg/RNSVGImageState.cpp.o	9ddf3a26d637826
-42	10780	8017797652586476	CMakeFiles/appmodules.dir/OnLoad.cpp.o	9c5975654d1f4d15
 148	11993	8017797664796141	rnsvg_autolinked_build/CMakeFiles/react_codegen_rnsvg.dir/D_/MyProjects/ZuGo2/node_modules/react-native-svg/common/cpp/react/renderer/components/rnsvg/RNSVGShadowNodes.cpp.o	cac061b74260e16d
-88	12264	8017797667451888	rnsvg_autolinked_build/CMakeFiles/react_codegen_rnsvg.dir/cd206ee8cb77f801d4c30b7b20c49f2e/android/build/generated/source/codegen/jni/react/renderer/components/rnsvg/ShadowNodes.cpp.o	884b26a54d274c7b
 109	13633	8017797681040467	rnsvg_autolinked_build/CMakeFiles/react_codegen_rnsvg.dir/D_/MyProjects/ZuGo2/node_modules/react-native-svg/common/cpp/react/renderer/components/rnsvg/RNSVGImageShadowNode.cpp.o	35bba1ceacae21df
 99	14750	8017797692139988	rnsvg_autolinked_build/CMakeFiles/react_codegen_rnsvg.dir/cd206ee8cb77f801d4c30b7b20c49f2e/android/build/generated/source/codegen/jni/react/renderer/components/rnsvg/ComponentDescriptors.cpp.o	fd5ec61a7731f9c2
 78	15349	8017797698340145	rnsvg_autolinked_build/CMakeFiles/react_codegen_rnsvg.dir/rnsvg.cpp.o	278a70c553b0460
-60	20062	8017797744771138	rnsvg_autolinked_build/CMakeFiles/react_codegen_rnsvg.dir/cd206ee8cb77f801d4c30b7b20c49f2e/android/build/generated/source/codegen/jni/react/renderer/components/rnsvg/Props.cpp.o	916f1612c85455b6
 20063	20416	8017797749183704	D:/MyProjects/ZuGo2/android/app/build/intermediates/cxx/Debug/4yz1j2j6/obj/x86/libreact_codegen_rnsvg.so	534a1ac2d5ea20e5
-34	35158	8017797894367753	CMakeFiles/appmodules.dir/D_/MyProjects/ZuGo2/android/app/build/generated/autolinking/src/main/jni/autolinking.cpp.o	21fffd6a69e13cbb
-35159	36502	8017797909562442	D:/MyProjects/ZuGo2/android/app/build/intermediates/cxx/Debug/4yz1j2j6/obj/x86/libappmodules.so	d6f491552eadfce2
+1	44	0	D:/MyProjects/ZuGo2/android/app/.cxx/Debug/4yz1j2j6/x86/CMakeFiles/cmake.verify_globs	e5e3a8a8711b4dfe

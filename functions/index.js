@@ -314,3 +314,256 @@ exports.cleanupExpiredTrips = functions.pubsub
       throw error;
     }
   });
+
+// =========================================================================
+// PUSH NOTIFICATIONS HELPERS & TRIGGERS
+// =========================================================================
+
+const sendPushNotification = async (token, title, body, data = {}) => {
+  if (!token) {
+    console.log('⚠️ Skipping notification: No FCM token provided');
+    return null;
+  }
+  
+  const message = {
+    notification: {
+      title,
+      body,
+    },
+    data: {
+      ...data,
+      click_action: 'FLUTTER_NOTIFICATION_CLICK',
+    },
+    token,
+  };
+
+  try {
+    const response = await admin.messaging().send(message);
+    console.log('✅ Push notification sent successfully. Response:', response);
+    return response;
+  } catch (error) {
+    console.error('❌ Error sending push notification:', error);
+    return null;
+  }
+};
+
+/**
+ * SCHEDULED FUNCTION: Runs every 15 minutes
+ * Sends push notifications to driver (45 min before duty) and passengers (45 min before trip).
+ */
+exports.sendDutyReminders = functions.pubsub
+  .schedule('every 15 minutes')
+  .onRun(async (context) => {
+    const now = admin.firestore.Timestamp.now();
+    const nowJS = now.toDate();
+    console.log('🔔 Starting duty reminders check at:', nowJS.toISOString());
+
+    try {
+      const scheduledTripsQuery = await db
+        .collection('trips')
+        .where('status', '==', 'scheduled')
+        .get();
+
+      console.log(`📊 Found ${scheduledTripsQuery.size} scheduled trips to check for reminders`);
+
+      for (const tripDoc of scheduledTripsQuery.docs) {
+        const trip = tripDoc.data();
+        const tripId = tripDoc.id;
+
+        if (trip.dutyReminderSent === true) {
+          continue;
+        }
+
+        if (!trip.date || !trip.departureTime) {
+          continue;
+        }
+
+        const [year, month, day] = trip.date.split('-').map(Number);
+        const [hours, minutes] = trip.departureTime.split(':').map(Number);
+
+        if (isNaN(year) || isNaN(month) || isNaN(day) || isNaN(hours) || isNaN(minutes)) {
+          continue;
+        }
+
+        // Pakistan is UTC+5. Scheduled time in UTC = PKT - 5 hours
+        const scheduledTimeUTC = new Date(Date.UTC(year, month - 1, day, hours - 5, minutes, 0));
+        const timeDiffMs = scheduledTimeUTC.getTime() - nowJS.getTime();
+        const minutesDiff = timeDiffMs / (1000 * 60);
+
+        // Reminder if trip starts in 45 min or less, but is in the future
+        if (minutesDiff <= 45 && minutesDiff > 0) {
+          console.log(`📣 Sending reminders for Trip: ${tripId} (${trip.routeName}), starts in ${Math.round(minutesDiff)} minutes`);
+
+          // 1. Notify Driver
+          if (trip.driverId) {
+            const driverDoc = await db.collection('drivers').doc(trip.driverId).get();
+            if (driverDoc.exists) {
+              const driverData = driverDoc.data();
+              if (driverData.fcmToken) {
+                await sendPushNotification(
+                  driverData.fcmToken,
+                  '🚀 Duty Reminder',
+                  'haan ab aap duty start kar sakty hen',
+                  { tripId, type: 'duty_start_reminder' }
+                );
+              }
+            }
+          }
+
+          // 2. Notify Passengers
+          const bookingsQuery = await db
+            .collection('bookings')
+            .where('tripId', '==', tripId)
+            .where('status', '==', 'confirmed')
+            .get();
+
+          console.log(`👥 Notifying ${bookingsQuery.size} booked passengers for trip ${tripId}`);
+
+          for (const bookingDoc of bookingsQuery.docs) {
+            const booking = bookingDoc.data();
+            if (booking.userId) {
+              const userDoc = await db.collection('users').doc(booking.userId).get();
+              if (userDoc.exists) {
+                const userData = userDoc.data();
+                if (userData.fcmToken) {
+                  await sendPushNotification(
+                    userData.fcmToken,
+                    '🚌 Trip Reminder',
+                    'ready ho jain time qareeb hy',
+                    { tripId, bookingId: bookingDoc.id, type: 'passenger_trip_reminder' }
+                  );
+                }
+              }
+            }
+          }
+
+          // 3. Mark reminder as sent
+          await tripDoc.ref.update({
+            dutyReminderSent: true,
+            updatedAt: now
+          });
+        }
+      }
+
+      console.log('✅ Duty reminders process completed successfully');
+      return null;
+    } catch (error) {
+      console.error('❌ Error in sendDutyReminders:', error);
+      throw error;
+    }
+  });
+
+/**
+ * TRIGGER FUNCTION: Runs when a trip is updated
+ * Sends push notification to the transporter when a trip is delayed or expired.
+ */
+exports.onTripUpdate = functions.firestore
+  .document('trips/{tripId}')
+  .onUpdate(async (change, context) => {
+    const tripId = context.params.tripId;
+    const oldTrip = change.before.data();
+    const newTrip = change.after.data();
+
+    if (oldTrip.status === newTrip.status) {
+      return null;
+    }
+
+    const targetStatuses = ['delayed', 'expired'];
+    if (!targetStatuses.includes(newTrip.status)) {
+      return null;
+    }
+
+    console.log(`🔔 Trip status changed from ${oldTrip.status} to ${newTrip.status} for trip ${tripId}`);
+
+    const transporterId = newTrip.transporterId;
+    if (!transporterId) {
+      console.log('⚠️ No transporterId associated with this trip');
+      return null;
+    }
+
+    try {
+      const transporterDoc = await db.collection('users').doc(transporterId).get();
+      if (transporterDoc.exists) {
+        const transporterData = transporterDoc.data();
+        if (transporterData.fcmToken) {
+          const statusText = newTrip.status === 'delayed' ? 'delayed' : 'expired';
+          const notificationTitle = newTrip.status === 'delayed' ? '⚠️ Trip Delayed' : '⏰ Trip Expired';
+          const notificationBody = `Trip ${newTrip.routeName || tripId} has been ${statusText}.`;
+
+          await sendPushNotification(
+            transporterData.fcmToken,
+            notificationTitle,
+            notificationBody,
+            { tripId, status: newTrip.status, type: 'transporter_trip_alert' }
+          );
+        }
+      }
+    } catch (error) {
+      console.error('❌ Error in onTripUpdate notification:', error);
+    }
+
+    return null;
+  });
+
+/**
+ * TRIGGER FUNCTION: Runs when a driver reports a delay/issue
+ * Sends push notification to the transporter.
+ */
+exports.onDriverIssueCreated = functions.firestore
+  .document('delays/{delayId}')
+  .onCreate(async (snapshot, context) => {
+    const delay = snapshot.data();
+    const delayId = context.params.delayId;
+
+    console.log(`🔔 New delay/issue reported: ${delayId} for trip ${delay.tripId}`);
+
+    const tripId = delay.tripId;
+    if (!tripId) {
+      console.log('⚠️ No tripId in delay report');
+      return null;
+    }
+
+    try {
+      const tripDoc = await db.collection('trips').doc(tripId).get();
+      if (!tripDoc.exists) {
+        console.log('⚠️ Associated trip not found');
+        return null;
+      }
+      const tripData = tripDoc.data();
+      const transporterId = tripData.transporterId;
+
+      if (!transporterId) {
+        console.log('⚠️ No transporterId associated with this trip');
+        return null;
+      }
+
+      const transporterDoc = await db.collection('users').doc(transporterId).get();
+      if (transporterDoc.exists) {
+        const transporterData = transporterDoc.data();
+        if (transporterData.fcmToken) {
+          let driverName = delay.driverName || tripData.driverName;
+          if (!driverName && delay.driverId) {
+            const driverDoc = await db.collection('drivers').doc(delay.driverId).get();
+            if (driverDoc.exists) {
+              driverName = driverDoc.data().fullName;
+            }
+          }
+          if (!driverName) {
+            driverName = 'Driver';
+          }
+          const reason = delay.reason || 'Issue';
+          
+          await sendPushNotification(
+            transporterData.fcmToken,
+            '🚨 Driver Issue Reported',
+            `Driver ${driverName} reported an issue: "${reason}" on trip ${tripData.routeName || tripId}.`,
+            { tripId, delayId, type: 'transporter_driver_issue' }
+          );
+        }
+      }
+    } catch (error) {
+      console.error('❌ Error in onDriverIssueCreated notification:', error);
+    }
+
+    return null;
+  });

@@ -16,10 +16,17 @@ service cloud.firestore {
         resource.data.transporterId == request.auth.uid;
     }
 
-    function isPassenger() {
+    function isTransporter() {
       return isSignedIn() &&
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.userType == 'passenger';
+        exists(/databases/$(database)/documents/transporters/$(request.auth.uid));
+    }
+
+    function isPassenger() {
+      return isSignedIn() && (
+        exists(/databases/$(database)/documents/passengers/$(request.auth.uid)) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.userType == 'passenger')
+      );
     }
 
     // ============================================
@@ -46,11 +53,26 @@ service cloud.firestore {
     // USERS COLLECTION
     // ============================================
     match /users/{userId} {
-      allow read: if request.auth != null &&
-        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+      allow read: if request.auth != null && (
+        request.auth.uid == userId ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        (isTransporter() && resource.data.transporterId == request.auth.uid)
+      );
       allow read, write: if request.auth != null && request.auth.uid == userId;
-      allow update: if request.auth != null &&
-        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+      allow create: if isSignedIn() && (
+        request.auth.uid == userId ||
+        isAdmin() ||
+        (isTransporter() && 
+         request.resource.data.userType == 'driver' && 
+         request.resource.data.transporterId == request.auth.uid)
+      );
+      allow update: if isSignedIn() && (
+        request.auth.uid == userId ||
+        isAdmin() ||
+        (isTransporter() && 
+         resource.data.transporterId == request.auth.uid &&
+         request.resource.data.userType == 'driver')
+      );
     }
 
     // ============================================
@@ -90,35 +112,38 @@ service cloud.firestore {
     }
 
     // ============================================
-    // BUSES COLLECTION
+    // BUSES COLLECTION (CHANGED: Added driver access)
     // ============================================
     match /buses/{busId} {
-      allow read: if isSignedIn() && (isTransporterOwner() || isAdmin());
-      allow update, delete: if isSignedIn() &&
-        (isAdmin() || request.auth.uid == resource.data.transporterId);
-      allow create: if isSignedIn() &&
-        (isAdmin() || request.auth.uid == request.resource.data.transporterId);
+      allow read: if isSignedIn();
+      allow update: if isSignedIn() && (
+        isAdmin() || 
+        request.auth.uid == resource.data.transporterId ||
+        exists(/databases/$(database)/documents/drivers/$(request.auth.uid))
+      );
+      allow delete: if isSignedIn() && (
+        isAdmin() || 
+        request.auth.uid == resource.data.transporterId
+      );
+      allow create: if isSignedIn() && (
+        isAdmin() || 
+        request.auth.uid == request.resource.data.transporterId
+      );
     }
 
     // ============================================
     // TRIPS COLLECTION
     // ============================================
     match /trips/{tripId} {
-      allow read: if isSignedIn() && (
-        isAdmin() ||
-        resource.data.transporterId == request.auth.uid ||
-        resource.data.driverId == request.auth.uid ||
-        isPassenger()
-      );
+      allow read: if isSignedIn();
       allow create: if isSignedIn() &&
         (isAdmin() || request.auth.uid == request.resource.data.transporterId);
       allow update: if isSignedIn() && (
         isAdmin() ||
         resource.data.driverId == request.auth.uid ||
         resource.data.transporterId == request.auth.uid ||
-        (isPassenger() &&
-         request.resource.data.diff(resource.data).affectedKeys()
-           .hasOnly(['availableSeats', 'updatedAt']))
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['availableSeats', 'heldSeats', 'updatedAt'])
       );
       allow delete: if isSignedIn() &&
         (isAdmin() || resource.data.transporterId == request.auth.uid);
@@ -127,28 +152,33 @@ service cloud.firestore {
         allow read: if isSignedIn();
         allow create: if isSignedIn() && (isAdmin() || isTransporter());
 
+        // CHANGED: Added booking-based seat release condition for cleanupExpiredBookings
         allow update: if isSignedIn() && (
           isAdmin() ||
           isTransporter() ||
-          (isPassenger() && resource.data.status == 'available' && 
+          (resource.data.status == 'available' && 
            request.resource.data.status == 'reserved' &&
            request.resource.data.reservedBy == request.auth.uid) ||
-          (isPassenger() && resource.data.status == 'reserved' && 
+          (resource.data.status == 'reserved' && 
            resource.data.reservedBy == request.auth.uid && 
            request.resource.data.status == 'available') ||
-          (isPassenger() && resource.data.status == 'reserved' && 
+          (resource.data.status == 'reserved' && 
            resource.data.reservedBy == request.auth.uid && 
            request.resource.data.status == 'booked') ||
-          (isPassenger() && resource.data.status == 'available' && 
+          (resource.data.status == 'available' && 
            request.resource.data.status == 'booked' &&
            request.resource.data.bookedBy == request.auth.uid) ||
-          (isPassenger() && resource.data.status == 'reserved' && 
+          (resource.data.status == 'reserved' && 
            resource.data.reservedBy == request.auth.uid && 
            request.resource.data.status == 'reserved' &&
            request.resource.data.reservedBy == request.auth.uid) ||
-          (isSignedIn() && resource.data.status == 'reserved' &&
+          (resource.data.status == 'reserved' &&
            resource.data.reservedUntil != null &&
            resource.data.reservedUntil < request.time &&
+           request.resource.data.status == 'available') ||
+          (resource.data.bookingId != null &&
+           exists(/databases/$(database)/documents/bookings/$(resource.data.bookingId)) &&
+           get(/databases/$(database)/documents/bookings/$(resource.data.bookingId)).data.userId == request.auth.uid &&
            request.resource.data.status == 'available')
         );
 
@@ -168,12 +198,12 @@ service cloud.firestore {
     // DRIVER LOCATIONS
     // ============================================
     match /driver_locations/{locationId} {
-      allow read: if request.auth != null;
+      allow read: if true;
       allow write: if request.auth != null;
     }
 
     match /driver_location/{locationId} {
-      allow read: if request.auth != null;
+      allow read: if true;
       allow write: if request.auth != null;
     }
 
@@ -207,6 +237,14 @@ service cloud.firestore {
       allow update, delete: if request.auth != null &&
         request.auth.uid == resource.data.userId;
       allow create: if request.auth != null;
+    }
+
+    // ============================================
+    // SEARCH HISTORY COLLECTION
+    // ============================================
+    match /search_history/{historyId} {
+      allow read, delete: if request.auth != null && request.auth.uid == resource.data.userId;
+      allow create: if request.auth != null && request.auth.uid == request.resource.data.userId;
     }
 
     // ============================================
@@ -251,8 +289,7 @@ service cloud.firestore {
     }
 
     // ============================================
-    // TRANSPORTER ALERTS — DashboardScreen listener
-    // (was missing → default deny caused permission-denied)
+    // TRANSPORTER ALERTS
     // ============================================
     match /alerts/{alertId} {
       allow read: if isSignedIn() && (
@@ -268,8 +305,7 @@ service cloud.firestore {
     }
 
     // ============================================
-    // TRANSPORTER SETTINGS — ReportsProfileScreen
-    // (was missing → default deny caused permission-denied)
+    // TRANSPORTER SETTINGS
     // ============================================
     match /settings/{transporterId} {
       allow read, write: if request.auth != null && request.auth.uid == transporterId;

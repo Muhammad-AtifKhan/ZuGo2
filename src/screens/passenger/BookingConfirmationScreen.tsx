@@ -20,6 +20,7 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import { PassengerStackParamList } from '../../navigation/PassengerNavigator';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import firestore from '@react-native-firebase/firestore';
+import auth from '@react-native-firebase/auth';
 import QRCode from 'react-native-qrcode-svg';
 
 type BookingConfirmationScreenNavigationProp = StackNavigationProp<PassengerStackParamList, 'BookingConfirmation'>;
@@ -27,6 +28,7 @@ type BookingConfirmationScreenRouteProp = RouteProp<PassengerStackParamList, 'Bo
 
 interface BookingDetails {
   id: string;
+  userId: string;
   ticketNumber: string;
   bookingCode?: string;
   passengerName: string;
@@ -105,6 +107,7 @@ const BookingConfirmationScreen = () => {
 
         const details: BookingDetails = {
           id: doc.id,
+          userId: data.userId ?? '',
           ticketNumber: data.ticketNumber ?? doc.id,
           bookingCode: data.bookingCode,
           passengerName: data.passengerName ?? 'Passenger',
@@ -237,7 +240,9 @@ const BookingConfirmationScreen = () => {
           await seatRef.update({
             status: 'booked',
             isBooked: true,
-            bookedBy: bookingDetails.id,
+            bookedBy: bookingDetails.userId || auth().currentUser?.uid || bookingDetails.id,
+            reservedBy: null,
+            reservedUntil: null,
             updatedAt: firestore.FieldValue.serverTimestamp(),
           });
         }
@@ -506,7 +511,9 @@ ${statusText}
   const isPending = !isPaid && bookingDetails.status === 'pending_payment';
   const isExpired = bookingDetails.status === 'expired';
   const showManualConfirmButton = isPending &&
-    (bookingDetails.paymentMethod === 'jazzcash' || bookingDetails.paymentMethod === 'easypaisa');
+    (bookingDetails.paymentMethod === 'jazzcash' || 
+     bookingDetails.paymentMethod === 'easypaisa' || 
+     bookingDetails.paymentMethod === 'bank_transfer');
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -990,7 +997,8 @@ const styles = StyleSheet.create({
   totalRow: { marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#E0E0E0' },
   totalLabel: { fontSize: 16, fontWeight: 'bold', color: '#1A237E' },
   totalValue: { fontSize: 18, fontWeight: 'bold', color: '#4CAF50' },
-  paymentMethodRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#E0E0E0' },
+  paymentMethodRow:
+   { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#E0E0E0' },
   paymentMethodLabel: { fontSize: 14, color: '#666' },
   paymentMethodValue: { fontSize: 14, fontWeight: '600', color: '#1A1A1A' },
   paymentStatusRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 },

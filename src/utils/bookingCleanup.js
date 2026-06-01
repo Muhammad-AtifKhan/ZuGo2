@@ -31,7 +31,9 @@ export const cleanupExpiredBookings = async (userId) => {
     console.log(`📊 Found ${expiredBookings.size} expired bookings to clean up`);
 
     const batch = db.batch();
+    const seatRefsToRelease = [];
 
+    // For each booking, we will query its seats to check their state
     for (const bookingDoc of expiredBookings.docs) {
       const booking = bookingDoc.data();
       const tripId = booking.tripId;
@@ -47,25 +49,54 @@ export const cleanupExpiredBookings = async (userId) => {
         updatedAt: firestore.FieldValue.serverTimestamp()
       });
 
-      // 2. Release all seats for this booking
+      // 2. Release all seats for this booking (only if they are still reserved by this user/booking)
       if (tripId && seatNumbers.length > 0) {
-        for (const seatNum of seatNumbers) {
+        const checkPromises = seatNumbers.map(async (seatNum) => {
           const seatRef = db
             .collection('trips')
             .doc(tripId)
             .collection('seats')
             .doc(seatNum);
 
-          batch.update(seatRef, {
-            isBooked: false,
-            status: 'available',
-            reservedBy: null,
-            bookingId: null,
-            reservedUntil: null,
-            updatedAt: firestore.FieldValue.serverTimestamp()
-          });
-        }
+          try {
+            const seatDoc = await seatRef.get();
+            if (seatDoc.exists) {
+              const seatData = seatDoc.data();
+              // Check if we are authorized to release this seat according to security rules:
+              // - It is reserved by the current user, OR
+              // - Its bookingId matches the current expired booking
+              const isCurrentlyReservedByUser = 
+                seatData.status === 'reserved' && 
+                seatData.reservedBy === userId;
+              
+              const isLinkedToThisBooking = 
+                seatData.bookingId === bookingDoc.id;
+
+              if (isCurrentlyReservedByUser || isLinkedToThisBooking) {
+                seatRefsToRelease.push(seatRef);
+              } else {
+                console.log(`⚠️ Seat ${seatNum} is in state (status: ${seatData.status}, reservedBy: ${seatData.reservedBy}, bookingId: ${seatData.bookingId}) and does not need/allow client cleanup`);
+              }
+            }
+          } catch (seatError) {
+            console.error(`Error checking seat ${seatNum} for trip ${tripId}:`, seatError);
+          }
+        });
+
+        await Promise.all(checkPromises);
       }
+    }
+
+    // Add qualified seat updates to the batch
+    for (const seatRef of seatRefsToRelease) {
+      batch.update(seatRef, {
+        isBooked: false,
+        status: 'available',
+        reservedBy: null,
+        bookingId: null,
+        reservedUntil: null,
+        updatedAt: firestore.FieldValue.serverTimestamp()
+      });
     }
 
     await batch.commit();

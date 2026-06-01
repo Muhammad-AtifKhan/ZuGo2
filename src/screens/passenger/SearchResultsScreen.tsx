@@ -16,7 +16,6 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import { PassengerStackParamList } from '../../navigation/PassengerNavigator';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import firestore from '@react-native-firebase/firestore';
-import auth from '@react-native-firebase/auth';
 
 // ✅ Import status constants
 import { TRIP_STATUS } from '../../constants/status';
@@ -56,7 +55,6 @@ interface Bus {
 const SearchResultsScreen = () => {
   const navigation = useNavigation<SearchResultsScreenNavigationProp>();
   const route = useRoute<SearchResultsScreenRouteProp>();
-  const user = auth().currentUser;
 
   const params = route.params ?? {};
   const from = params.fromCityName ?? '';
@@ -93,7 +91,7 @@ const SearchResultsScreen = () => {
     return `${hours}h ${minutes}m`;
   };
 
-  const fetchBuses = async () => {
+  const fetchBuses = useCallback(async () => {
     try {
       setLoading(true);
 
@@ -159,6 +157,22 @@ const SearchResultsScreen = () => {
         };
       });
 
+      // Filter out past trips (past dates and past departure times today)
+      const now = new Date();
+      tripsList = tripsList.filter(trip => {
+        if (!trip.date || !trip.departureTime) return false;
+
+        const [year, month, day] = trip.date.split('-').map(Number);
+        const [hours, minutes] = trip.departureTime.split(':').map(Number);
+
+        if (isNaN(year) || isNaN(month) || isNaN(day) || isNaN(hours) || isNaN(minutes)) {
+          return false;
+        }
+
+        const tripDepartureDate = new Date(year, month - 1, day, hours, minutes, 0);
+        return tripDepartureDate > now;
+      });
+
       tripsList = tripsList.filter(trip => trip.availableSeats > 0);
 
       const sorted = [...tripsList].sort((a, b) =>
@@ -176,7 +190,7 @@ const SearchResultsScreen = () => {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [fromCode, toCode, from, to, searchDate, routeId]);
 
   const validateAndNavigate = async (bus: Bus) => {
     if (!bus) return;
@@ -272,7 +286,7 @@ const SearchResultsScreen = () => {
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     fetchBuses();
-  }, [fromCode, toCode, from, to, searchDate, routeId]);
+  }, [fetchBuses]);
 
   const formatCurrency = (amount: number) => {
     return `PKR ${amount.toLocaleString()}`;
@@ -282,7 +296,7 @@ const SearchResultsScreen = () => {
 
   useEffect(() => {
     fetchBuses();
-  }, [fromCode, toCode, from, to, searchDate, routeId]);
+  }, [fetchBuses]);
 
   if (loading) {
     return (

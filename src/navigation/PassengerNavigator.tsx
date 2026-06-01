@@ -1,3 +1,4 @@
+// src/navigation/PassengerNavigator.tsx
 import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -12,7 +13,8 @@ import BookingConfirmationScreen from '../screens/passenger/BookingConfirmationS
 import MyTripsScreen from '../screens/passenger/MyTripsScreen';
 import TrackScreen from '../screens/passenger/TrackScreen';
 import ProfileScreen from '../screens/passenger/ProfileScreen';
-import AlertsScreen from '../screens/passenger/AlertsScreen'; // Add this import
+import AlertsScreen from '../screens/passenger/AlertsScreen';
+import TripPlannerScreen from '../screens/passenger/TripPlannerScreen'; // ✅ ADD THIS
 
 export type PassengerStackParamList = {
   Home: undefined;
@@ -57,10 +59,11 @@ export type PassengerStackParamList = {
   MyTrips: undefined;
   Track: undefined;
   Profile: undefined;
-  Alerts: { // Add this type
+  Alerts: {
     tripId: string;
     busNumber: string;
   };
+  TripPlanner: undefined; // ✅ ADD THIS
 };
 
 const Stack = createNativeStackNavigator<PassengerStackParamList>();
@@ -94,7 +97,7 @@ const HomeStack = () => {
   );
 };
 
-// Track Stack Navigator - Since Track has alerts navigation
+// Track Stack Navigator
 const TrackStack = () => {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
@@ -142,6 +145,15 @@ const MyTripsStack = () => {
   );
 };
 
+// ✅ NEW: Trip Planner Stack Navigator
+const TripPlannerStack = () => {
+  return (
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="TripPlannerMain" component={TripPlannerScreen} />
+    </Stack.Navigator>
+  );
+};
+
 // Main Tab Navigator
 const PassengerNavigator = () => {
   return (
@@ -167,6 +179,19 @@ const PassengerNavigator = () => {
           ),
         }}
       />
+
+      {/* ✅ ADD TRIP PLANNER TAB */}
+      <Tab.Screen
+        name="TripPlanner"
+        component={TripPlannerStack}
+        options={{
+          tabBarLabel: 'Plan Trip',
+          tabBarIcon: ({ color, size }) => (
+            <Icon name="map" size={size} color={color} />
+          ),
+        }}
+      />
+
       <Tab.Screen
         name="MyTrips"
         component={MyTripsStack}

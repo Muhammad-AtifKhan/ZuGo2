@@ -114,6 +114,9 @@ const BoardingScreen: React.FC<BoardingScreenProps> = ({ navigation, route }) =>
   const [ticketInput, setTicketInput] = useState('');
   const [manualSearchLoading, setManualSearchLoading] = useState(false);
 
+  const [showScannerModal, setShowScannerModal] = useState(false);
+  const scanLineAnim = useRef(new Animated.Value(0)).current;
+
   const [successSound, setSuccessSound] = useState<any>(null);
   const [errorSound, setErrorSound] = useState<any>(null);
 
@@ -166,6 +169,27 @@ const BoardingScreen: React.FC<BoardingScreenProps> = ({ navigation, route }) =>
       nextPassengerAnim.setValue(1);
     }
   }, [nextPassenger]);
+
+  useEffect(() => {
+    if (showScannerModal) {
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(scanLineAnim, {
+            toValue: 220,
+            duration: 2000,
+            useNativeDriver: true,
+          }),
+          Animated.timing(scanLineAnim, {
+            toValue: 0,
+            duration: 2000,
+            useNativeDriver: true,
+          }),
+        ])
+      ).start();
+    } else {
+      scanLineAnim.setValue(0);
+    }
+  }, [showScannerModal]);
 
   useEffect(() => {
     if (ticketInput.length >= 6 && showManualEntry) {
@@ -419,6 +443,48 @@ const BoardingScreen: React.FC<BoardingScreenProps> = ({ navigation, route }) =>
         }
       ]
     );
+  };
+
+  const handleScanQrPayload = async (payloadStr: string) => {
+    try {
+      const payload = JSON.parse(payloadStr);
+      if (!payload.bookingId || !payload.ticketNumber) {
+        throw new Error('Invalid QR payload format');
+      }
+
+      const passenger = passengers.find(p => p.id === payload.bookingId);
+      if (!passenger) {
+        const passengerByTicket = passengers.find(p => p.ticketNumber === payload.ticketNumber);
+        if (passengerByTicket) {
+          await processBoarding(passengerByTicket);
+        } else {
+          Alert.alert('Not Found', 'No passenger found in this trip manifest matching this ticket.');
+          playErrorFeedback();
+        }
+      } else {
+        await processBoarding(passenger);
+      }
+    } catch (err) {
+      const ticketStr = payloadStr.trim().toUpperCase();
+      const passenger = passengers.find(p => p.ticketNumber === ticketStr || p.id === ticketStr);
+      if (passenger) {
+        await processBoarding(passenger);
+      } else {
+        Alert.alert('Invalid QR Code', 'The scanned QR code is invalid or not in passenger list.');
+        playErrorFeedback();
+      }
+    }
+  };
+
+  const processBoarding = async (passenger: Passenger) => {
+    if (passenger.status === 'BOARDED') {
+      Alert.alert('Already Boarded', `${passenger.passengerName} is already boarded.`);
+      playErrorFeedback();
+      return;
+    }
+    
+    setShowScannerModal(false);
+    await handleBoardPassenger(passenger);
   };
 
   const handleBoardPassenger = async (passenger: Passenger) => {
@@ -773,21 +839,32 @@ const BoardingScreen: React.FC<BoardingScreenProps> = ({ navigation, route }) =>
       </View>
 
       {/* Action Buttons */}
-      <View style={styles.actionRow}>
-        <TouchableOpacity
-          style={[styles.actionButton, styles.manualButton]}
-          onPress={handleManualEntry}
-          disabled={!boardingOpen || saving}
-        >
-          <Text style={styles.manualButtonText}>📝 MANUAL ENTRY</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.actionButton, styles.closeButton]}
-          onPress={handleCloseBoarding}
-          disabled={saving || boardedCount === 0}
-        >
-          <Text style={styles.closeButtonText}>🚌 START TRIP</Text>
-        </TouchableOpacity>
+      <View style={styles.actionsContainer}>
+        {boardingOpen && (
+          <TouchableOpacity
+            style={styles.scanQrButton}
+            onPress={() => setShowScannerModal(true)}
+            disabled={saving}
+          >
+            <Text style={styles.scanQrButtonText}>📷 SCAN PASSENGER QR CODE</Text>
+          </TouchableOpacity>
+        )}
+        <View style={styles.actionRow}>
+          <TouchableOpacity
+            style={[styles.actionButton, styles.manualButton]}
+            onPress={handleManualEntry}
+            disabled={!boardingOpen || saving}
+          >
+            <Text style={styles.manualButtonText}>📝 MANUAL ENTRY</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.actionButton, styles.closeButton]}
+            onPress={handleCloseBoarding}
+            disabled={saving || boardedCount === 0}
+          >
+            <Text style={styles.closeButtonText}>🚌 START TRIP</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Passenger List */}
@@ -825,6 +902,108 @@ const BoardingScreen: React.FC<BoardingScreenProps> = ({ navigation, route }) =>
           getItemLayout={getItemLayout}
         />
       </View>
+
+      {/* QR Code Scanner Modal */}
+      <Modal
+        visible={showScannerModal}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setShowScannerModal(false)}
+      >
+        <View style={styles.scannerModalOverlay}>
+          <View style={styles.scannerModalContent}>
+            <View style={styles.scannerModalHeader}>
+              <Text style={styles.scannerModalTitle}>📷 PASSENGER QR SCANNER</Text>
+              <TouchableOpacity onPress={() => setShowScannerModal(false)}>
+                <Text style={styles.scannerModalClose}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView contentContainerStyle={styles.scannerModalBody}>
+              {/* Simulated Camera Viewfinder */}
+              <View style={styles.viewfinderContainer}>
+                <View style={styles.viewfinder}>
+                  <View style={styles.scanLineContainer}>
+                    <Animated.View
+                      style={[
+                        styles.scanLine,
+                        { transform: [{ translateY: scanLineAnim }] },
+                      ]}
+                    />
+                  </View>
+                  {/* Viewfinder Corners */}
+                  <View style={[styles.corner, styles.topLeftCorner]} />
+                  <View style={[styles.corner, styles.topRightCorner]} />
+                  <View style={[styles.corner, styles.bottomLeftCorner]} />
+                  <View style={[styles.corner, styles.bottomRightCorner]} />
+                </View>
+                <Text style={styles.scanInstruction}>
+                  Align passenger's ticket QR code within the frame
+                </Text>
+              </View>
+
+              {/* Simulation Tools */}
+              <View style={styles.simulationCard}>
+                <Text style={styles.simulationTitle}>📱 SIMULATOR TOOLS</Text>
+                <Text style={styles.simulationLabel}>
+                  Select a pending passenger to simulate scanning their QR code:
+                </Text>
+                
+                {passengers.filter(p => p.status === 'PENDING').length === 0 ? (
+                  <Text style={styles.noPendingText}>No pending passengers on this trip.</Text>
+                ) : (
+                  <View style={styles.simulateButtonsGrid}>
+                    {passengers
+                      .filter(p => p.status === 'PENDING')
+                      .map(p => (
+                        <TouchableOpacity
+                          key={p.id}
+                          style={styles.simulatePassengerButton}
+                          onPress={() => {
+                            const mockPayload = JSON.stringify({
+                              bookingId: p.id,
+                              ticketNumber: p.ticketNumber,
+                              bookingCode: p.bookingCode || '',
+                              passengerName: p.passengerName,
+                              busNumber: tripInfo?.busNumber || '',
+                              from: tripInfo?.from || '',
+                              to: tripInfo?.to || '',
+                              date: tripInfo?.departureTime || '',
+                              seatNumbers: [p.seatNumber],
+                              total: 0,
+                            });
+                            handleScanQrPayload(mockPayload);
+                          }}
+                        >
+                          <Text style={styles.simulatePassengerSeat}>Seat {p.seatNumber}</Text>
+                          <Text style={styles.simulatePassengerName} numberOfLines={1}>
+                            {p.passengerName}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                  </View>
+                )}
+
+                <Text style={[styles.simulationLabel, { marginTop: 16 }]}>
+                  Or enter ticket number manually to scan:
+                </Text>
+                <View style={styles.scanInputRow}>
+                  <TextInput
+                    style={styles.scanManualInput}
+                    placeholder="e.g. TKT-001"
+                    placeholderTextColor="#999"
+                    onSubmitEditing={(e) => {
+                      if (e.nativeEvent.text.trim()) {
+                        handleScanQrPayload(e.nativeEvent.text.trim());
+                      }
+                    }}
+                  />
+                </View>
+              </View>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
 
       {/* Manual Entry Modal */}
       <Modal
@@ -956,6 +1135,35 @@ const styles = StyleSheet.create({
   searchModalButtonText: { fontSize: 14, fontWeight: '600', color: '#FFFFFF' },
   loadingOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center', zIndex: 2000 },
   loadingOverlayText: { marginTop: 12, fontSize: 16, color: '#FFFFFF', fontWeight: '600' },
+  actionsContainer: { paddingHorizontal: 16, paddingTop: 12 },
+  scanQrButton: { backgroundColor: '#1A237E', borderRadius: 12, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 12, shadowColor: '#1A237E', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
+  scanQrButtonText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
+  scannerModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center' },
+  scannerModalContent: { backgroundColor: '#F8F9FA', borderRadius: 20, width: '95%', height: '85%', overflow: 'hidden' },
+  scannerModalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: '#E0E0E0', backgroundColor: '#FFF' },
+  scannerModalTitle: { fontSize: 18, fontWeight: 'bold', color: '#1A237E' },
+  scannerModalClose: { fontSize: 24, color: '#666666', padding: 4 },
+  scannerModalBody: { paddingHorizontal: 20, paddingBottom: 20, paddingTop: 10, alignItems: 'center', width: '100%' },
+  viewfinderContainer: { alignItems: 'center', marginBottom: 24, width: '100%' },
+  viewfinder: { width: 220, height: 220, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', position: 'relative', overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' },
+  scanLineContainer: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+  scanLine: { height: 3, backgroundColor: '#00FF00', width: '100%', shadowColor: '#00FF00', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.8, shadowRadius: 6 },
+  corner: { position: 'absolute', width: 24, height: 24, borderColor: '#00FF00' },
+  topLeftCorner: { top: 0, left: 0, borderTopWidth: 4, borderLeftWidth: 4 },
+  topRightCorner: { top: 0, right: 0, borderTopWidth: 4, borderRightWidth: 4 },
+  bottomLeftCorner: { bottom: 0, left: 0, borderBottomWidth: 4, borderLeftWidth: 4 },
+  bottomRightCorner: { bottom: 0, right: 0, borderBottomWidth: 4, borderRightWidth: 4 },
+  scanInstruction: { color: '#666', fontSize: 14, marginTop: 12, textAlign: 'center', fontWeight: '500' },
+  simulationCard: { backgroundColor: '#FFF', borderRadius: 16, padding: 16, width: '100%', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 2, borderWidth: 1, borderColor: '#E0E0E0' },
+  simulationTitle: { fontSize: 16, fontWeight: 'bold', color: '#FF9800', marginBottom: 8 },
+  simulationLabel: { fontSize: 13, color: '#666', marginBottom: 12, lineHeight: 18 },
+  noPendingText: { fontSize: 14, color: '#999', fontStyle: 'italic', textAlign: 'center', marginVertical: 12 },
+  simulateButtonsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8, justifyContent: 'space-between' },
+  simulatePassengerButton: { backgroundColor: '#F0F4F8', borderLeftWidth: 4, borderLeftColor: '#4A90E2', borderRadius: 8, paddingVertical: 10, paddingHorizontal: 12, width: '48%', marginBottom: 4 },
+  simulatePassengerSeat: { fontSize: 12, fontWeight: 'bold', color: '#4A90E2' },
+  simulatePassengerName: { fontSize: 14, color: '#333', fontWeight: '500', marginTop: 2 },
+  scanInputRow: { marginTop: 8 },
+  scanManualInput: { backgroundColor: '#F8F9FA', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, fontSize: 14, color: '#1A237E', borderWidth: 1, borderColor: '#E0E0E0' },
 });
 
 export default BoardingScreen;

@@ -336,7 +336,7 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
       const activeTrips = await firestore()
         .collection('trips')
         .where('busId', '==', busId)
-        .where('status', 'in', [TRIP_STATUS.IN_PROGRESS, TRIP_STATUS.SCHEDULED, TRIP_STATUS.BOARDING])
+        .where('status', 'in', [TRIP_STATUS.IN_PROGRESS, TRIP_STATUS.BOARDING, TRIP_STATUS.DELAYED])
         .get();
 
       const conflictingTrip = activeTrips.docs.find(doc => doc.id !== tripId);
